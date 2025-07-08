@@ -1,12 +1,11 @@
-use crate::mpris::{MprisBase, MprisPlayer};
+use crate::mpris::{MprisBase, MprisPlayer, PlayerCommand};
 use crate::opensonic::client::OpensonicClient;
-use crate::player::{Player, PlayerCommand};
-use futures_util::TryStreamExt;
-use rodio::Source;
+use crate::player::TrackList;
+use rodio::OutputStream;
 use std::error::Error;
 use std::sync::Arc;
 use tokio::signal;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, RwLock};
 use zbus::connection;
 
 mod mpris;
@@ -26,15 +25,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let search = client
         .search3("Genius", Some(0), None, Some(0), None, Some(2), None, None)
         .await?;
-    // println!("Results: {:?}", search.song.unwrap()[0]);
 
     let mut songs = search.song.unwrap();
 
     let (command_send, mut command_recv) = mpsc::unbounded_channel::<PlayerCommand>();
     let command_send = Arc::new(command_send);
 
-    let mut player = Player::new(client);
-    player.tracks().add_songs(&mut songs);
+    let (_stream, stream_handle) = OutputStream::try_default().expect("Failed to create a stream handle");
+    let mut track_list = TrackList::new();
+    track_list.add_songs(&mut songs);
+    let track_list = Arc::new(RwLock::new(track_list));
     let _connection = connection::Builder::session()?
         .name("org.mpris.MediaPlayer2.sanicrs")?
         .serve_at(
@@ -45,7 +45,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         )?
         .serve_at(
             "/org/mpris/MediaPlayer2",
-            MprisPlayer::new(command_send.clone()),
+            MprisPlayer::new(client, stream_handle, track_list),
         )?
         .build()
         .await?;
@@ -56,12 +56,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             cmd = command_recv.recv() => {
                 if let Some(cmd) = cmd {
                     match cmd {
-                        PlayerCommand::Play => player.play().await,
-                        PlayerCommand::Pause => player.pause(),
-                        PlayerCommand::PlayPause => player.toggle().await,
                         PlayerCommand::Quit => break,
-                        PlayerCommand::Next => {player.next().await.expect("Error when trying to play next track");},
-                        PlayerCommand::Previous => {player.previous().await.expect("Error when trying to play previous track");},
                     }
                 }
             }

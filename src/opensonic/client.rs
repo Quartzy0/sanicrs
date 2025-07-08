@@ -1,4 +1,6 @@
-use crate::opensonic::types::{Extensions, InvalidResponseError, License, Search3Results, SubsonicError};
+use crate::opensonic::types::{
+    Extensions, InvalidResponseError, License, Search3Results, SubsonicError,
+};
 use format_url::FormatUrl;
 use rand::distr::{Alphanumeric, SampleString};
 use reqwest;
@@ -72,6 +74,7 @@ impl OpensonicClient {
         let url = FormatUrl::new(&self.host)
             .with_path_template("/rest/:action")
             .with_substitutes(vec![("action", action)]);
+        println!("Making request to '{}' with params: {:?}", action, params);
         if self.post_form {
             self.client.post(url.format_url()).form(&params).send()
         } else {
@@ -123,7 +126,7 @@ impl OpensonicClient {
         album_offset: Option<u32>,
         song_count: Option<u32>,
         song_offset: Option<u32>,
-        music_folder_id: Option<&str>
+        music_folder_id: Option<&str>,
     ) -> Result<Search3Results, Box<dyn Error>> {
         let artist_count = artist_count.unwrap_or(20).to_string();
         let artist_offset = artist_offset.unwrap_or(0).to_string();
@@ -139,7 +142,7 @@ impl OpensonicClient {
             ("albumCount", album_count.as_str()),
             ("albumOffset", album_offset.as_str()),
             ("songCount", song_count.as_str()),
-            ("songOffset", song_offset.as_str())
+            ("songOffset", song_offset.as_str()),
         ];
 
         if music_folder_id.is_some() {
@@ -161,7 +164,7 @@ impl OpensonicClient {
         Ok(resp)
     }
 
-    pub async fn steam(
+    pub async fn stream(
         &self,
         id: &str,
         max_bit_rate: Option<u32>,
@@ -169,7 +172,7 @@ impl OpensonicClient {
         time_offset: Option<u32>,
         size: Option<String>,
         estimate_content_length: Option<bool>,
-        converted: Option<bool>
+        converted: Option<bool>,
     ) -> Result<Response, Box<dyn Error>> {
         let max_bit_rate = max_bit_rate.and_then(|t| Some(t.to_string()));
         let time_offset = time_offset.and_then(|t| Some(t.to_string()));
@@ -179,7 +182,7 @@ impl OpensonicClient {
         let mut params = vec![
             ("id", id),
             ("estimateContentLength", estimate_content_length.as_str()),
-            ("converted", converted.as_str())
+            ("converted", converted.as_str()),
         ];
         let mbr: String;
         if max_bit_rate.is_some() {
@@ -202,11 +205,11 @@ impl OpensonicClient {
             params.push(("size", &*s))
         }
 
-        let response = self
-            .get_action_request("stream.view", params)
-            .await?;
+        let response = self.get_action_request("stream.view", params).await?;
         if response.headers()["Content-Type"] == "text/xml" {
-            return Err(InvalidResponseError::new_boxed(response.text().await?.as_str()));
+            return Err(InvalidResponseError::new_boxed(
+                response.text().await?.as_str(),
+            ));
         } else if response.headers()["Content-Type"] == "application/json" {
             let s1 = response.text().await?;
             let response: serde_json::Value = serde_json::from_str(&*s1)?;

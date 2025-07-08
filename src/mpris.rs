@@ -1,41 +1,120 @@
-use crate::player::PlayerCommand::{Next, Pause, Play, PlayPause, Previous, Quit};
-use crate::player::PlayerCommand;
+use crate::opensonic::client::OpensonicClient;
+use crate::player::TrackList;
+use rodio::{OutputStreamHandle, Sink};
+use std::error::Error;
+use std::io::Cursor;
 use std::sync::Arc;
 use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::RwLock;
 use zbus::interface;
 
+pub enum PlayerCommand {
+    Quit,
+}
+
 pub struct MprisPlayer {
-    cmd_channel: Arc<UnboundedSender<PlayerCommand>>,
+    client: OpensonicClient,
+    sink: Sink,
+    stream_handle: OutputStreamHandle,
+    track_list: Arc<RwLock<TrackList>>,
 }
 
 impl MprisPlayer {
-    pub fn new(cmd_channel: Arc<UnboundedSender<PlayerCommand>>) -> Self{
+    pub fn new(
+        client: OpensonicClient,
+        stream_handle: OutputStreamHandle,
+        track_list: Arc<RwLock<TrackList>>,
+    ) -> Self {
+        let (sink, queue_rx) = Sink::new_idle();
+        stream_handle.play_raw(queue_rx).expect("Error playing queue");
         MprisPlayer {
-            cmd_channel
+            client,
+            sink,
+            stream_handle,
+            track_list,
         }
+    }
+}
+
+impl MprisPlayer {
+    pub async fn start_current(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let track_list = self.track_list.read().await;
+        let song = track_list.current();
+        println!("Playing: {}", song.title);
+        let stream = self.client.stream(&*song.id, None, None, None, None, None, None);
+
+        let x1 = stream.await.expect("Error when reading bytes").bytes().await?; // TODO: Figure this out without downloading entire file first
+        let reader = Cursor::new(x1);
+        /*let x = stream.await.expect("Error reading stream").bytes_stream();
+        let reader =
+            StreamReader::new(x.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)));
+
+
+        let reader = StreamDownload::new_async_read(
+            AsyncReadStreamParams::new(reader),
+            MemoryStorageProvider::default(),
+            Settings::default(),
+        ).await?;*/
+
+
+        let decoder = match &song.suffix {
+            None => rodio::Decoder::new(reader)?,
+            Some(suffix) => match suffix.as_str() {
+                "wav" => rodio::Decoder::new_wav(reader)?,
+                "ogg" => rodio::Decoder::new_vorbis(reader)?,
+                "flac" => rodio::Decoder::new_flac(reader)?,
+                _ => rodio::Decoder::new(reader)?
+            }
+        };
+        
+        self.sink.clear();
+        self.sink.append(decoder);
+        self.sink.play();
+
+        Ok(())
     }
 }
 
 #[interface(name = "org.mpris.MediaPlayer2.Player")]
 impl MprisPlayer {
-    fn play(&self) {
-        self.cmd_channel.send(Play).expect("Error when sending play signal");
+    async fn play(&self) {
+        if !self.sink.empty() {
+            self.sink.play();
+        } else {
+            self.start_current().await.expect("Error playing");
+        }
     }
 
-    fn pause(&self) {
-        self.cmd_channel.send(Pause).expect("Error when sending pause signal");
+    async fn pause(&self) {
+        if !self.sink.empty() {
+            self.sink.pause();
+        }
     }
 
-    fn play_pause(&self) {
-        self.cmd_channel.send(PlayPause).expect("Error when sending playpause signal");
+    async fn play_pause(&self) {
+        if !self.sink.empty() {
+            if self.sink.is_paused() {
+                self.play().await;
+            } else {
+                self.pause().await;
+            }
+        }
     }
 
-    fn next(&self) {
-        self.cmd_channel.send(Next).expect("Error when sending next signal");
+    async fn next(&mut self) {
+        {
+            let mut track_list = self.track_list.write().await;
+            track_list.next();
+        }
+        self.start_current().await.expect("Error starting next track");
     }
 
-    fn previous(&self) {
-        self.cmd_channel.send(Previous).expect("Error when sending next signal");
+    async fn previous(&mut self) {
+        {
+            let mut track_list = self.track_list.write().await;
+            track_list.previous();
+        }
+        self.start_current().await.expect("Error starting next track");
     }
 
     #[zbus(property)]
@@ -70,13 +149,15 @@ impl MprisPlayer {
 }
 
 pub struct MprisBase {
-    pub quit_channel: Arc<UnboundedSender<PlayerCommand>>
+    pub quit_channel: Arc<UnboundedSender<PlayerCommand>>,
 }
 
 #[interface(name = "org.mpris.MediaPlayer2")]
 impl MprisBase {
     fn quit(&mut self) {
-        self.quit_channel.send(Quit).expect("Error when sending quit signal");
+        self.quit_channel
+            .send(PlayerCommand::Quit)
+            .expect("Error when sending quit signal");
     }
 
     #[zbus(property)]

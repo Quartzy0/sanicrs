@@ -15,4 +15,5 @@ rodio = "0.20.1"
 futures-util = {version = "0.3.31"}
 tokio-util = "0.7.15"
 stream-download = { version = "0.22.1", features = ["async-read"] }
-zbus = "5.7.1"
+zbus = {version = "5.8.0", default-features = false, features = ["tokio"]}
+#zbus = "5.8.0"
