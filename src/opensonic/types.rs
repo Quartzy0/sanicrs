@@ -1,8 +1,11 @@
+use serde_with::DurationSeconds;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::error::Error;
 use std::fmt;
 use std::fmt::Debug;
+use std::time::Duration;
+use serde_with::serde_as;
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -110,6 +113,7 @@ pub struct Album {
     pub disc_titles: Option<Vec<DiscTitle>>
 }
 
+#[serde_as]
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Song {
@@ -128,7 +132,8 @@ pub struct Song {
     pub suffix: Option<String>,
     pub transcoded_content_type: Option<String>,
     pub transcoded_suffix: Option<String>,
-    pub duration: Option<u32>,
+    #[serde_as(as = "Option<DurationSeconds<u64>>")]
+    pub duration: Option<Duration>,
     pub bit_rate: Option<u32>,
     pub bit_depth: Option<u32>,
     pub sampling_rate: Option<u32>,
@@ -183,6 +188,12 @@ pub struct SubsonicError {
 #[derive(Debug)]
 pub struct InvalidResponseError{
     msg: String
+}
+
+impl Song {
+    pub fn dbus_path(&self) -> String {
+        format!("/me/quartzy/sanicrs/track/{}", self.id.replace("-", "/"))
+    }
 }
 
 impl SubsonicError {

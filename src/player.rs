@@ -3,8 +3,9 @@ use crate::opensonic::types::Song;
 pub struct TrackList {
     songs: Vec<Song>,
     current: usize,
-    shuffled: bool,
-    looping: bool,
+
+    pub shuffled: bool,
+    pub looping: bool,
 }
 
 impl TrackList {
@@ -15,6 +16,13 @@ impl TrackList {
             shuffled: false,
             looping: false
         }
+    }
+
+    pub fn clear(&mut self) {
+        self.songs.clear();
+        self.current = 0;
+        self.shuffled = false;
+        self.looping = false;
     }
 
     pub fn empty(&self) -> bool {

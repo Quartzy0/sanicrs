@@ -8,6 +8,7 @@ tokio = {version = "1.46.1", features = ["macros", "rt-multi-thread", "signal"]}
 reqwest = { version = "0.12.22", features = ["stream"]}
 format-url = "0.6.2"
 serde_json = "1.0.140"
+serde_with = {version = "3.14.0"}
 serde = {version = "1.0.219", features = ["derive"]}
 md5 = "0.8.0"
 rand = "0.9.1"
@@ -16,4 +17,11 @@ futures-util = {version = "0.3.31"}
 tokio-util = "0.7.15"
 stream-download = { version = "0.22.1", features = ["async-read"] }
 zbus = {version = "5.8.0", default-features = false, features = ["tokio"]}
+zvariant = {version = "5.6.0"}
 #zbus = "5.8.0"
+relm4 = { version = "0.9.1", features = ["libadwaita", "gnome_47"] }
+relm4-components = {version = "0.9.1", features = ["libadwaita"]}
+relm4-icons = "0.10.0-beta.2"
+
+[build-dependencies]
+relm4-icons-build = "0.10.0-beta.2"

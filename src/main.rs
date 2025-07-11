@@ -7,10 +7,17 @@ use std::sync::Arc;
 use tokio::signal;
 use tokio::sync::{mpsc, RwLock};
 use zbus::connection;
+use zbus::object_server::InterfaceRef;
+use crate::app::start_app;
 
 mod mpris;
 mod opensonic;
 mod player;
+mod app;
+
+mod icon_names {
+    include!(concat!(env!("OUT_DIR"), "/icon_names.rs"));
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -35,7 +42,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut track_list = TrackList::new();
     track_list.add_songs(&mut songs);
     let track_list = Arc::new(RwLock::new(track_list));
-    let _connection = connection::Builder::session()?
+    let connection = connection::Builder::session()?
         .name("org.mpris.MediaPlayer2.sanicrs")?
         .serve_at(
             "/org/mpris/MediaPlayer2",
@@ -45,10 +52,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
         )?
         .serve_at(
             "/org/mpris/MediaPlayer2",
-            MprisPlayer::new(client, stream_handle, track_list),
+            MprisPlayer::new(client, stream_handle, track_list.clone()),
         )?
         .build()
         .await?;
+
+    let interface_ref: InterfaceRef<MprisPlayer> = connection.object_server().interface("/org/mpris/MediaPlayer2").await?;
+
+    let handle = start_app((interface_ref, track_list.clone()));
 
     loop {
         tokio::select! {
@@ -62,6 +73,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             }
         }
     }
+    handle.join().expect("Error when joining UI thread");
 
     Ok(())
 }
