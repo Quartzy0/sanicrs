@@ -1,14 +1,15 @@
 use crate::app::{AppMsg, Model, SongInfo};
-use crate::opensonic::client::OpensonicClient;
+use crate::opensonic::client::OpenSubsonicClient;
 use crate::player::TrackList;
 use relm4::AsyncComponentSender;
-use rodio::{OutputStreamHandle, Sink};
+use rodio::{OutputStream, OutputStreamBuilder, Sink};
 use std::collections::HashMap;
 use std::error::Error;
 use std::io::Cursor;
 use std::ops::Add;
 use std::sync::Arc;
 use std::time::Duration;
+use rodio::mixer::Mixer;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::RwLock;
 use zbus::interface;
@@ -22,9 +23,9 @@ pub enum PlayerCommand {
 }
 
 pub struct MprisPlayer {
-    client: OpensonicClient,
+    client: Arc<OpenSubsonicClient>,
     sink: Sink,
-    stream_handle: OutputStreamHandle,
+    // stream_handle: Mixer,
     track_list: Arc<RwLock<TrackList>>,
 
     model_sender: Option<AsyncComponentSender<Model>>,
@@ -32,18 +33,15 @@ pub struct MprisPlayer {
 
 impl MprisPlayer {
     pub fn new(
-        client: OpensonicClient,
-        stream_handle: OutputStreamHandle,
+        client: Arc<OpenSubsonicClient>,
+        stream_handle: &OutputStream,
         track_list: Arc<RwLock<TrackList>>,
     ) -> Self {
-        let (sink, queue_rx) = Sink::new_idle();
-        stream_handle
-            .play_raw(queue_rx)
-            .expect("Error playing queue");
+        // let sink = ;
         MprisPlayer {
             client,
-            sink,
-            stream_handle,
+            sink: Sink::connect_new(stream_handle.mixer()),
+            // stream_handle,
             track_list,
             model_sender: None
         }
@@ -58,6 +56,10 @@ impl MprisPlayer {
     pub async fn start_current(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
         let track_list = self.track_list.read().await;
         let song = track_list.current();
+        if song.is_none() {
+            return Ok(());
+        }
+        let song = song.unwrap();
         println!("Playing: {}", song.title);
         let stream = self
             .client
@@ -94,11 +96,24 @@ impl MprisPlayer {
         self.sink.append(decoder);
         self.sink.play();
 
-        if let Some(model_sender) = &self.model_sender{
-            model_sender.input(AppMsg::SongUpdate(SongInfo::from(song)));
-        }
+        self.send_signal(AppMsg::SongUpdate(SongInfo::from(song)));
+        self.update_playback_state();
 
         Ok(())
+    }
+
+    fn update_playback_state(&self) {
+        self.send_signal(AppMsg::PlaybackStateChange(String::from(self.playback_status())));
+    }
+    
+    pub fn set_volume_no_notify(&self, volume: f64){
+        self.sink.set_volume(volume as f32);
+    }
+
+    pub fn send_signal(&self, signal: AppMsg) {
+        if let Some(model_sender) = &self.model_sender{
+            model_sender.input(signal);
+        }
     }
 }
 
@@ -110,12 +125,14 @@ impl MprisPlayer {
         } else {
             self.start_current().await.expect("Error playing");
         }
+        self.update_playback_state();
     }
 
     pub async fn pause(&self) {
         if !self.sink.empty() {
             self.sink.pause();
         }
+        self.update_playback_state();
     }
 
     pub async fn play_pause(&self) {
@@ -152,16 +169,20 @@ impl MprisPlayer {
         self.sink.clear();
         let mut track_list = self.track_list.write().await;
         track_list.clear();
+        self.update_playback_state();
     }
 
     pub async fn set_position(&mut self, track_id: &str, position: i64) -> Result<(), zbus::fdo::Error> {
         if position < 0{
             return Ok(());
         }
-        let position = Duration::from_millis(position as u64);
+        let position = Duration::from_micros(position as u64);
         {
             let track_list = self.track_list.read().await;
-            let song = track_list.current();
+            let song = match track_list.current() {
+                Some(t) => t,
+                None => return Ok(())
+            };
             if song.dbus_path() != track_id { 
                 return Ok(());
             }
@@ -169,7 +190,8 @@ impl MprisPlayer {
                 return Ok(());
             }
         }
-        self.sink.try_seek(position).map_err(|_e| zbus::fdo::Error::IOError("Seek error".into()))?;
+        self.sink.try_seek(position).map_err(|e| zbus::fdo::Error::IOError(format!("Error when seeking: {}", e)))?;
+        self.send_signal(AppMsg::ProgressUpdateSync(Some(position.as_secs_f64())));
         Ok(())
     }
 
@@ -183,7 +205,11 @@ impl MprisPlayer {
         let mut seek_next = false;
         {
             let track_list = self.track_list.read().await;
-            let song_duration = track_list.current().duration;
+            let song = match track_list.current() {
+                Some(t) => t,
+                None => return Ok(())
+            };
+            let song_duration = song.duration;
             if let Some(song_duration) = song_duration {
                 seek_next = song_duration <= new_positon;
             }
@@ -191,15 +217,19 @@ impl MprisPlayer {
         if seek_next {
             self.next().await;
         } else {
-            self.sink.try_seek(new_positon).map_err(|_e| zbus::fdo::Error::IOError("Seek error".into()))?;
+            self.sink.try_seek(new_positon).map_err(|e| zbus::fdo::Error::IOError(format!("Error when seeking: {}", e)))?;
+            self.send_signal(AppMsg::ProgressUpdateSync(Some(new_positon.as_secs_f64())));
         }
         Ok(())
     }
 
     #[zbus(property)]
-    pub async fn metadata(&self) -> HashMap<&str, Value> {
+    pub async fn metadata(&self) -> Result<HashMap<&str, Value>, zbus::fdo::Error> {
         let track_list = self.track_list.read().await;
-        let song = track_list.current();
+        let song = match track_list.current() {
+            Some(t) => t,
+            None => return Err(zbus::fdo::Error::Failed("No song currently playing".to_string()))
+        };
 
         let mut map: HashMap<&str, Value> = HashMap::new();
         map.insert("mpris:trackid", Value::ObjectPath(ObjectPath::try_from(song.dbus_path()).expect("Invalid object path")));
@@ -247,7 +277,7 @@ impl MprisPlayer {
             map.insert("xesam:audioBPM", Value::I64(bpm as i64));
         }
 
-        map
+        Ok(map)
     }
 
     #[zbus(property)]
@@ -257,7 +287,8 @@ impl MprisPlayer {
 
     #[zbus(property)]
     pub fn set_volume(&self, volume: f64) {
-        self.sink.set_volume(volume as f32)
+        self.sink.set_volume(volume as f32);
+        self.send_signal(AppMsg::VolumeChangedExternal(volume));
     }
 
     #[zbus(property)]
@@ -290,7 +321,8 @@ impl MprisPlayer {
         if rate == 0.0 {
             self.pause().await;
         } else {
-            self.sink.set_speed(rate as f32)
+            self.sink.set_speed(rate as f32);
+            self.send_signal(AppMsg::RateChange(rate));
         }
     }
 

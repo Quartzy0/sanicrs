@@ -7,7 +7,7 @@ use reqwest;
 use reqwest::{Client, ClientBuilder, Response};
 use std::error::Error;
 
-pub struct OpensonicClient {
+pub struct OpenSubsonicClient {
     host: String,
     username: String,
     password: String,
@@ -19,9 +19,9 @@ pub struct OpensonicClient {
     lyrics: bool,
 }
 
-impl OpensonicClient {
+impl OpenSubsonicClient {
     pub fn new_non_inited(host: &str, username: &str, password: &str, client_name: &str) -> Self {
-        OpensonicClient {
+        OpenSubsonicClient {
             host: String::from(host),
             username: String::from(username),
             password: String::from(password),
@@ -206,6 +206,36 @@ impl OpensonicClient {
         }
 
         let response = self.get_action_request("stream.view", params).await?;
+        if response.headers()["Content-Type"] == "text/xml" {
+            return Err(InvalidResponseError::new_boxed(
+                response.text().await?.as_str(),
+            ));
+        } else if response.headers()["Content-Type"] == "application/json" {
+            let s1 = response.text().await?;
+            let response: serde_json::Value = serde_json::from_str(&*s1)?;
+            if response["subsonic-response"]["status"] != "ok" {
+                return Err(SubsonicError::from_response(response));
+            }
+            return Err(InvalidResponseError::new_boxed(&*s1));
+        }
+
+        Ok(response)
+    }
+
+    pub async fn get_cover_image(
+        &self,
+        id: &str,
+        size: Option<&str>
+    ) -> Result<Response, Box<dyn Error>> {
+        let mut params = vec![
+            ("id", id),
+        ];
+
+        if let Some(size) = size {
+            params.push(("size", size));
+        }
+
+        let response = self.get_action_request("getCoverArt.view", params).await?;
         if response.headers()["Content-Type"] == "text/xml" {
             return Err(InvalidResponseError::new_boxed(
                 response.text().await?.as_str(),

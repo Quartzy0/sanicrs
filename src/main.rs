@@ -1,19 +1,19 @@
+use crate::app::start_app;
 use crate::mpris::{MprisBase, MprisPlayer, PlayerCommand};
-use crate::opensonic::client::OpensonicClient;
+use crate::opensonic::client::OpenSubsonicClient;
 use crate::player::TrackList;
-use rodio::OutputStream;
+use rodio::{OutputStream, OutputStreamBuilder};
 use std::error::Error;
 use std::sync::Arc;
 use tokio::signal;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 use zbus::connection;
 use zbus::object_server::InterfaceRef;
-use crate::app::start_app;
 
+mod app;
 mod mpris;
 mod opensonic;
 mod player;
-mod app;
 
 mod icon_names {
     include!(concat!(env!("OUT_DIR"), "/icon_names.rs"));
@@ -21,13 +21,15 @@ mod icon_names {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let client = OpensonicClient::new(
-        "https://music.quartzy.me",
-        "quartzy",
-        "xqFs@4GX0x}W-Sdx!~C\"\\T^)z",
-        "Sanic-rs",
-    )
-    .await;
+    let client = Arc::new(
+        OpenSubsonicClient::new(
+            "https://music.quartzy.me",
+            "quartzy",
+            "xqFs@4GX0x}W-Sdx!~C\"\\T^)z",
+            "Sanic-rs",
+        )
+        .await,
+    );
 
     let search = client
         .search3("Genius", Some(0), None, Some(0), None, Some(2), None, None)
@@ -38,7 +40,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let (command_send, mut command_recv) = mpsc::unbounded_channel::<PlayerCommand>();
     let command_send = Arc::new(command_send);
 
-    let (_stream, stream_handle) = OutputStream::try_default().expect("Failed to create a stream handle");
+    let stream = OutputStreamBuilder::from_default_device()
+        .expect("Error building output stream")
+        .open_stream()
+        .expect("Error opening output stream");
     let mut track_list = TrackList::new();
     track_list.add_songs(&mut songs);
     let track_list = Arc::new(RwLock::new(track_list));
@@ -52,14 +57,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
         )?
         .serve_at(
             "/org/mpris/MediaPlayer2",
-            MprisPlayer::new(client, stream_handle, track_list.clone()),
+            MprisPlayer::new(client.clone(), &stream, track_list.clone()),
         )?
         .build()
         .await?;
 
-    let interface_ref: InterfaceRef<MprisPlayer> = connection.object_server().interface("/org/mpris/MediaPlayer2").await?;
+    let interface_ref: InterfaceRef<MprisPlayer> = connection
+        .object_server()
+        .interface("/org/mpris/MediaPlayer2")
+        .await?;
 
-    let handle = start_app((interface_ref, track_list.clone()));
+    let handle = start_app((interface_ref, track_list.clone(), client.clone()));
 
     loop {
         tokio::select! {

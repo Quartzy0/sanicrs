@@ -43,8 +43,8 @@ impl TrackList {
         }
     }
 
-    pub fn current(&self) -> &Song {
-        &self.songs[self.current]
+    pub fn current(&self) -> Option<&Song> {
+        self.songs.get(self.current)
     }
 
     pub fn add_song(&mut self, song: Song) {

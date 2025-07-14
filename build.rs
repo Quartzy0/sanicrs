@@ -19,7 +19,12 @@ fn main() {
             "play",
             "pause",
             "next-regular",
-            "previous-regular"
+            "previous-regular",
+            "stop",
+            "speaker-0",
+            "speaker-1",
+            "speaker-2",
+            "speaker-3"
         ],
     );
 }
