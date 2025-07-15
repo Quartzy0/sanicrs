@@ -1,3 +1,7 @@
-.cover-img-frame {
-    border-radius: 10%;
+.cover {
+    border-radius: 50px;
+}
+
+.cover_image_frame {
+    border-radius: 50px;
 }

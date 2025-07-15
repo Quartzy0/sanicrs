@@ -1,15 +1,14 @@
-use crate::app::{AppMsg, Model, SongInfo};
+use crate::ui::current_song::{CurrentSongMsg, CurrentSongModel, SongInfo};
 use crate::opensonic::client::OpenSubsonicClient;
 use crate::player::TrackList;
 use relm4::AsyncComponentSender;
-use rodio::{OutputStream, OutputStreamBuilder, Sink};
+use rodio::{OutputStream, Sink};
 use std::collections::HashMap;
 use std::error::Error;
 use std::io::Cursor;
 use std::ops::Add;
 use std::sync::Arc;
 use std::time::Duration;
-use rodio::mixer::Mixer;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::RwLock;
 use zbus::interface;
@@ -28,7 +27,7 @@ pub struct MprisPlayer {
     // stream_handle: Mixer,
     track_list: Arc<RwLock<TrackList>>,
 
-    model_sender: Option<AsyncComponentSender<Model>>,
+    model_sender: Option<AsyncComponentSender<CurrentSongModel>>,
 }
 
 impl MprisPlayer {
@@ -49,7 +48,7 @@ impl MprisPlayer {
 }
 
 impl MprisPlayer {
-    pub fn set_model(&mut self, model_sender: AsyncComponentSender<Model>) {
+    pub fn set_model(&mut self, model_sender: AsyncComponentSender<CurrentSongModel>) {
         self.model_sender = Some(model_sender);
     }
 
@@ -96,21 +95,21 @@ impl MprisPlayer {
         self.sink.append(decoder);
         self.sink.play();
 
-        self.send_signal(AppMsg::SongUpdate(SongInfo::from(song)));
+        self.send_signal(CurrentSongMsg::SongUpdate(SongInfo::from(song)));
         self.update_playback_state();
 
         Ok(())
     }
 
     fn update_playback_state(&self) {
-        self.send_signal(AppMsg::PlaybackStateChange(String::from(self.playback_status())));
+        self.send_signal(CurrentSongMsg::PlaybackStateChange(String::from(self.playback_status())));
     }
     
     pub fn set_volume_no_notify(&self, volume: f64){
         self.sink.set_volume(volume as f32);
     }
 
-    pub fn send_signal(&self, signal: AppMsg) {
+    pub fn send_signal(&self, signal: CurrentSongMsg) {
         if let Some(model_sender) = &self.model_sender{
             model_sender.input(signal);
         }
@@ -191,7 +190,7 @@ impl MprisPlayer {
             }
         }
         self.sink.try_seek(position).map_err(|e| zbus::fdo::Error::IOError(format!("Error when seeking: {}", e)))?;
-        self.send_signal(AppMsg::ProgressUpdateSync(Some(position.as_secs_f64())));
+        self.send_signal(CurrentSongMsg::ProgressUpdateSync(Some(position.as_secs_f64())));
         Ok(())
     }
 
@@ -218,7 +217,7 @@ impl MprisPlayer {
             self.next().await;
         } else {
             self.sink.try_seek(new_positon).map_err(|e| zbus::fdo::Error::IOError(format!("Error when seeking: {}", e)))?;
-            self.send_signal(AppMsg::ProgressUpdateSync(Some(new_positon.as_secs_f64())));
+            self.send_signal(CurrentSongMsg::ProgressUpdateSync(Some(new_positon.as_secs_f64())));
         }
         Ok(())
     }
@@ -288,7 +287,7 @@ impl MprisPlayer {
     #[zbus(property)]
     pub fn set_volume(&self, volume: f64) {
         self.sink.set_volume(volume as f32);
-        self.send_signal(AppMsg::VolumeChangedExternal(volume));
+        self.send_signal(CurrentSongMsg::VolumeChangedExternal(volume));
     }
 
     #[zbus(property)]
@@ -322,7 +321,7 @@ impl MprisPlayer {
             self.pause().await;
         } else {
             self.sink.set_speed(rate as f32);
-            self.send_signal(AppMsg::RateChange(rate));
+            self.send_signal(CurrentSongMsg::RateChange(rate));
         }
     }
 

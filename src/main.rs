@@ -1,8 +1,8 @@
-use crate::app::start_app;
+use crate::ui::app::start_app;
 use crate::mpris::{MprisBase, MprisPlayer, PlayerCommand};
 use crate::opensonic::client::OpenSubsonicClient;
 use crate::player::TrackList;
-use rodio::{OutputStream, OutputStreamBuilder};
+use rodio::{OutputStreamBuilder};
 use std::error::Error;
 use std::sync::Arc;
 use tokio::signal;
@@ -10,10 +10,10 @@ use tokio::sync::{RwLock, mpsc};
 use zbus::connection;
 use zbus::object_server::InterfaceRef;
 
-mod app;
 mod mpris;
 mod opensonic;
 mod player;
+mod ui;
 
 mod icon_names {
     include!(concat!(env!("OUT_DIR"), "/icon_names.rs"));
