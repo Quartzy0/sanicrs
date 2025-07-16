@@ -5,10 +5,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::cell::{Cell, RefCell};
-
+use std::sync::Arc;
+use relm4::adw::gdk::Texture;
 use relm4::adw::glib::clone;
 use relm4::adw::gtk::{gdk, gio, glib, graphene, gsk, prelude::*, subclass::prelude::*};
 use relm4::adw::gtk;
+use crate::opensonic::client::OpenSubsonicClient;
 
 #[derive(Clone, Copy, Debug, glib::Enum, PartialEq, Default)]
 #[enum_type(name = "AmberolCoverSize")]
@@ -146,16 +148,22 @@ mod imp {
                 let y = (height - h).floor() / 2.0;
                 let bounds = graphene::Rect::new(0.0, 0.0, w as f32, h as f32);
 
+                let border_radius: f32 = match self.cover_size.get() {
+                    CoverSize::Huge => 10.0,
+                    CoverSize::Large => 5.0,
+                    CoverSize::Small => 3.0,
+                };
+
 
                 snapshot.save();
                 snapshot.scale(1.0 / scale_factor as f32, 1.0 / scale_factor as f32);
                 snapshot.translate(&graphene::Point::new(x as f32, y as f32));
                 snapshot.push_rounded_clip(&gsk::RoundedRect::new(
                     bounds,
-                    Size::new(10.0, 10.0),
-                    Size::new(10.0, 10.0),
-                    Size::new(10.0, 10.0),
-                    Size::new(10.0, 10.0),
+                    Size::new(border_radius, border_radius),
+                    Size::new(border_radius, border_radius),
+                    Size::new(border_radius, border_radius),
+                    Size::new(border_radius, border_radius),
                 ));
                 snapshot.append_scaled_texture(
                     cover,
@@ -199,6 +207,21 @@ impl CoverPicture {
 
         self.queue_draw();
         self.notify("cover");
+    }
+    
+    pub async fn set_cover_from_id(&self, cover_id: Option<&String>, client: Arc<OpenSubsonicClient>) {
+        let texture = match cover_id {
+            None => None,
+            Some(cover_id) => {
+                let img_resp = client
+                    .get_cover_image(cover_id.as_str(), Some("512"))
+                    .await
+                    .expect("Error getting cover image");
+                let bytes = glib::Bytes::from(&img_resp);
+                Some(Texture::from_bytes(&bytes).expect("Error loading textre"))
+            }
+        };
+        self.set_cover(texture.as_ref());
     }
 
     pub fn set_cover_size(&self, cover_size: CoverSize) {

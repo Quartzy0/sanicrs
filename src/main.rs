@@ -27,6 +27,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             "quartzy",
             "xqFs@4GX0x}W-Sdx!~C\"\\T^)z",
             "Sanic-rs",
+            Some("cache")
         )
         .await,
     );

@@ -1,4 +1,4 @@
-use crate::ui::current_song::{CurrentSongMsg, CurrentSongModel, SongInfo};
+use crate::ui::current_song::{CurrentSongMsg, CurrentSong, SongInfo};
 use crate::opensonic::client::OpenSubsonicClient;
 use crate::player::TrackList;
 use relm4::AsyncComponentSender;
@@ -27,7 +27,7 @@ pub struct MprisPlayer {
     // stream_handle: Mixer,
     track_list: Arc<RwLock<TrackList>>,
 
-    model_sender: Option<AsyncComponentSender<CurrentSongModel>>,
+    model_sender: Option<AsyncComponentSender<CurrentSong>>,
 }
 
 impl MprisPlayer {
@@ -48,7 +48,7 @@ impl MprisPlayer {
 }
 
 impl MprisPlayer {
-    pub fn set_model(&mut self, model_sender: AsyncComponentSender<CurrentSongModel>) {
+    pub fn set_model(&mut self, model_sender: AsyncComponentSender<CurrentSong>) {
         self.model_sender = Some(model_sender);
     }
 
@@ -233,6 +233,12 @@ impl MprisPlayer {
         let mut map: HashMap<&str, Value> = HashMap::new();
         map.insert("mpris:trackid", Value::ObjectPath(ObjectPath::try_from(song.dbus_path()).expect("Invalid object path")));
         map.insert("xesam:title", Value::Str(Str::from(song.title.clone())));
+        if let Some(cover_art) = &song.cover_art{
+            let url = self.client.get_cover_image_url(cover_art.as_str()).await;
+            if let Some(url) = url {
+                map.insert("mpris:artUrl", Value::Str(Str::from(url)));
+            }
+        }
         if let Some(duration) = song.duration{
             map.insert("mpris:length", Value::I64(duration.as_micros() as i64));
         }

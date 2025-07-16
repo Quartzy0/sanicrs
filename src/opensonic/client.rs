@@ -5,7 +5,12 @@ use format_url::FormatUrl;
 use rand::distr::{Alphanumeric, SampleString};
 use reqwest;
 use reqwest::{Client, ClientBuilder, Response};
+use std::env;
 use std::error::Error;
+use std::io::Bytes;
+use std::path::Path;
+use tokio::fs::File;
+use tokio::io::AsyncReadExt;
 
 pub struct OpenSubsonicClient {
     host: String,
@@ -14,13 +19,20 @@ pub struct OpenSubsonicClient {
     client_name: String,
     client: Client,
     version: String,
+    cover_cache: Option<String>,
 
     post_form: bool,
     lyrics: bool,
 }
 
 impl OpenSubsonicClient {
-    pub fn new_non_inited(host: &str, username: &str, password: &str, client_name: &str) -> Self {
+    pub fn new_non_inited(
+        host: &str,
+        username: &str,
+        password: &str,
+        client_name: &str,
+        cover_cache: Option<&str>,
+    ) -> Self {
         OpenSubsonicClient {
             host: String::from(host),
             username: String::from(username),
@@ -28,19 +40,28 @@ impl OpenSubsonicClient {
             client_name: String::from(client_name),
             client: ClientBuilder::new().build().unwrap(),
             version: String::from("1.15"),
+            cover_cache: cover_cache.and_then(|t| Some(String::from(t))),
 
             post_form: false,
             lyrics: false,
         }
     }
 
-    pub async fn new(host: &str, username: &str, password: &str, client_name: &str) -> Self {
-        let mut client: Self = Self::new_non_inited(host, username, password, client_name);
+    pub async fn new(
+        host: &str,
+        username: &str,
+        password: &str,
+        client_name: &str,
+        cover_cache: Option<&str>,
+    ) -> Self {
+        let mut client: Self =
+            Self::new_non_inited(host, username, password, client_name, cover_cache);
         client.init().await.expect("Error when initializing");
         client
     }
 
     pub async fn init(&mut self) -> Result<(), Box<dyn Error>> {
+        // Get supported extension and save status
         let extensions = self.get_extensions().await?;
 
         for ext in extensions.0 {
@@ -51,7 +72,68 @@ impl OpenSubsonicClient {
             }
         }
 
+        // Validate cache dir
+        if let Some(cover_cache) = &self.cover_cache {
+            let path = Path::new(cover_cache);
+            let result = std::fs::exists(path);
+            if result.is_err() {
+                println!(
+                    "Can't read cache dir/ ({}): {}",
+                    cover_cache,
+                    result.err().unwrap()
+                );
+                self.cover_cache = None;
+            } else if !result.ok().unwrap() {
+                println!("Cache dir not found: {}", cover_cache);
+                self.cover_cache = None;
+            }
+        }
+
         Ok(())
+    }
+
+    async fn get_cache_resource(&self, id: &str) -> Option<Vec<u8>> {
+        if let Some(cover_cache) = &self.cover_cache {
+            let buf = Path::new(cover_cache).join(Path::new(id));
+            return match tokio::fs::read(buf).await {
+                Ok(b) => Some(b),
+                Err(_) => None,
+            };
+        }
+        None
+    }
+
+    async fn write_cached_resource(&self, id: &str, data: &Vec<u8>) {
+        if let Some(cover_cache) = &self.cover_cache {
+            let buf = Path::new(cover_cache).join(Path::new(id));
+            let r = tokio::fs::write(buf, data).await;
+            if let Err(err) = r {
+                println!("Error when trying to write cache: {:?}", err);
+            }
+        }
+    }
+
+    fn get_action_request_get_url(
+        &self,
+        action: &str,
+        extra_params: Vec<(&str, &str)>,
+    ) -> String {
+        let salt = Alphanumeric.sample_string(&mut rand::rng(), 16);
+        let token_str = String::from(&self.password) + salt.as_str();
+        let hash: String = format!("{:x}", md5::compute(token_str));
+        let mut params = vec![
+            ("c", self.client_name.as_str()),
+            ("v", self.version.as_str()),
+            ("f", "json"),
+            ("u", self.username.as_str()),
+            ("s", salt.as_str()),
+            ("t", hash.as_str()),
+        ];
+        params.extend(extra_params);
+        let url = FormatUrl::new(&self.host)
+            .with_path_template("/rest/:action")
+            .with_substitutes(vec![("action", action)]);
+        url.with_query_params(params).format_url()
     }
 
     fn get_action_request(
@@ -205,7 +287,9 @@ impl OpenSubsonicClient {
             params.push(("size", &*s))
         }
 
-        let response = self.get_action_request("stream.view", params).await?;
+        let response = self
+            .get_action_request("stream.view", params)
+            .await?;
         if response.headers()["Content-Type"] == "text/xml" {
             return Err(InvalidResponseError::new_boxed(
                 response.text().await?.as_str(),
@@ -225,17 +309,21 @@ impl OpenSubsonicClient {
     pub async fn get_cover_image(
         &self,
         id: &str,
-        size: Option<&str>
-    ) -> Result<Response, Box<dyn Error>> {
-        let mut params = vec![
-            ("id", id),
-        ];
+        size: Option<&str>,
+    ) -> Result<Vec<u8>, Box<dyn Error>> {
+        if let Some(cached) = self.get_cache_resource(id).await {
+            return Ok(cached);
+        }
+
+        let mut params = vec![("id", id)];
 
         if let Some(size) = size {
             params.push(("size", size));
         }
 
-        let response = self.get_action_request("getCoverArt.view", params).await?;
+        let response = self
+            .get_action_request("getCoverArt.view", params)
+            .await?;
         if response.headers()["Content-Type"] == "text/xml" {
             return Err(InvalidResponseError::new_boxed(
                 response.text().await?.as_str(),
@@ -249,6 +337,39 @@ impl OpenSubsonicClient {
             return Err(InvalidResponseError::new_boxed(&*s1));
         }
 
-        Ok(response)
+        let bytes = response.bytes().await.unwrap().to_vec();
+        self.write_cached_resource(id, &bytes).await;
+        Ok(bytes)
+    }
+
+    pub async fn get_cover_image_url(&self, id: &str) -> Option<String> {
+        if let Some(cover_cache) = &self.cover_cache {
+            let buf = Path::new(cover_cache).join(Path::new(id));
+            let path = std::path::absolute(buf.as_path());
+            if let Ok(buf1) = path {
+                let path = buf1.as_path();
+                let path_str = path.to_str();
+                if let Some(path_str) = path_str {
+                    match std::fs::exists(path) {
+                        Ok(exist) => {
+                            if exist {
+                                return Some(format!("file://{}", path_str));
+                            }
+                        },
+                        Err(_) => {}
+                    };
+                    let _ = self.get_cover_image(id, None).await;
+                    match std::fs::exists(path) { // Check if file exists now
+                        Ok(exist) => {
+                            if exist {
+                                return Some(format!("file://{}", path_str));
+                            }
+                        },
+                        Err(_) => {}
+                    };
+                }
+            }
+        } // Caching either didn't work or is not enabled
+        Some(self.get_action_request_get_url("getCoverArt.view", vec![("id", id)]))
     }
 }

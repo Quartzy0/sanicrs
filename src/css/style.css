@@ -1,7 +1,14 @@
-.cover {
-    border-radius: 50px;
+.bold {
+    font-weight: bold;
 }
 
-.cover_image_frame {
-    border-radius: 50px;
+.italic {
+    font-style: italic;
+}
+
+.track-list-item {
+    padding: 10px;
+    margin: 5px 5px 0;
+    border-radius: 10px;
+    background-color: rgba(255, 255, 255, 0.05);
 }

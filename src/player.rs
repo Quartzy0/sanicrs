@@ -54,4 +54,8 @@ impl TrackList {
     pub fn add_songs(&mut self, songs: &mut Vec<Song>) {
         self.songs.append(songs);
     }
+
+    pub fn get_songs(&self) -> &Vec<Song> {
+        &self.songs
+    }
 }

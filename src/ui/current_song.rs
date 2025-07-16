@@ -3,33 +3,31 @@ use crate::mpris::MprisPlayer;
 use crate::opensonic::client::OpenSubsonicClient;
 use crate::opensonic::types::Song;
 use crate::player::TrackList;
+use crate::ui::cover_picture;
+use crate::ui::cover_picture::CoverSize;
 use relm4::adw::gdk::Texture;
 use relm4::adw::glib;
 use relm4::adw::glib::ControlFlow;
-use relm4::adw::prelude::*;
 use relm4::adw::gtk::glib::Propagation;
 use relm4::adw::gtk::prelude::OrientableExt;
-use relm4::adw::gtk::{Align, ConstraintAttribute, ConstraintRelation, Orientation};
+use relm4::adw::gtk::{Align, Orientation};
+use relm4::adw::prelude::*;
+use relm4::component::{AsyncComponent, AsyncComponentParts, AsyncComponentSender};
 use relm4::prelude::*;
-use relm4::{
-    component::{AsyncComponent, AsyncComponentParts, AsyncComponentSender}
-};
 use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 use zbus::object_server::InterfaceRef;
-use crate::ui::cover_picture;
-use crate::ui::cover_picture::CoverSize;
 
 #[derive(Debug)]
 pub struct SongInfo {
-    id: String,
-    title: String,
-    artist: String,
-    album: String,
-    cover_art_id: Option<String>,
-    duration: Duration,
+    pub id: String,
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    pub cover_art_id: Option<String>,
+    pub duration: Duration,
 }
 
 impl SongInfo {
@@ -49,7 +47,7 @@ impl From<&Song> for SongInfo {
                 .unwrap_or(value.artist.clone().unwrap_or("Unknown Artist".to_string())),
             album: value.album.clone().unwrap_or("Unknown Album".to_string()),
             cover_art_id: value.cover_art.clone(),
-            duration: value.duration.unwrap()
+            duration: value.duration.unwrap(),
         }
     }
 }
@@ -67,7 +65,7 @@ impl Default for SongInfo {
     }
 }
 
-pub struct CurrentSongModel {
+pub struct CurrentSong {
     player_reference: InterfaceRef<MprisPlayer>,
     track_list: Arc<RwLock<TrackList>>,
     sender: AsyncComponentSender<Self>,
@@ -104,7 +102,7 @@ type Init = (
 );
 
 #[relm4::component(pub async)]
-impl AsyncComponent for CurrentSongModel {
+impl AsyncComponent for CurrentSong {
     type CommandOutput = ();
     type Input = CurrentSongMsg;
     type Output = ();
@@ -124,20 +122,16 @@ impl AsyncComponent for CurrentSongModel {
             gtk::Label {
                 #[watch]
                 set_label: &model.song_info.title,
-                add_css_class: "track-title",
-                add_css_class: "track-info",
+                add_css_class: "bold",
             },
             gtk::Label {
                 #[watch]
                 set_label: &model.song_info.artist,
-                add_css_class: "track-artist",
-                add_css_class: "track-info",
             },
             gtk::Label {
                 #[watch]
                 set_label: &model.song_info.album,
-                add_css_class: "track-album",
-                add_css_class: "track-info",
+                add_css_class: "italic",
             },
 
             gtk::Box {
@@ -251,7 +245,7 @@ impl AsyncComponent for CurrentSongModel {
                 Some(song) => sender.input(CurrentSongMsg::SongUpdate(SongInfo::from(song))),
             };
         }
-        let model = CurrentSongModel {
+        let model = CurrentSong {
             player_reference: init.0,
             track_list: init.1,
             client: init.2,
@@ -281,7 +275,7 @@ impl AsyncComponent for CurrentSongModel {
         widgets: &mut Self::Widgets,
         message: Self::Input,
         sender: AsyncComponentSender<Self>,
-        root: &Self::Root,
+        _root: &Self::Root,
     ) {
         match message {
             CurrentSongMsg::Start => {
@@ -307,47 +301,52 @@ impl AsyncComponent for CurrentSongModel {
             CurrentSongMsg::SongUpdate(info) => {
                 self.song_info = info;
                 self.playback_position = 0.0;
-                if let Some(cover_art_id) = &self.song_info.cover_art_id {
-                    let img_resp = self
-                        .client
-                        .get_cover_image(cover_art_id.as_str(), Some("512"))
-                        .await
-                        .expect("Error getting cover image");
-                    let bytes = img_resp.bytes().await.unwrap().to_vec();
-                    let bytes = glib::Bytes::from(&bytes.to_vec());
-                    let texture = Texture::from_bytes(&bytes).expect("Error loading textre");
-                    widgets.cover_image.set_cover(Some(&texture));
-                }
-            },
+                widgets
+                    .cover_image
+                    .set_cover_from_id(self.song_info.cover_art_id.as_ref(), self.client.clone())
+                    .await;
+            }
             CurrentSongMsg::VolumeChanged(volume) => {
-                self.player_reference.get().await.set_volume_no_notify(volume);
-            },
+                self.player_reference
+                    .get()
+                    .await
+                    .set_volume_no_notify(volume);
+            }
             CurrentSongMsg::VolumeChangedExternal(volume) => {
                 widgets.volume_btn.set_value(volume);
-            },
+            }
             CurrentSongMsg::ProgressUpdate => {
-                if self.playback_state_icon == icon_names::PAUSE { // If icon is PAUSE, then its currently playing
+                if self.playback_state_icon == icon_names::PAUSE {
+                    // If icon is PAUSE, then its currently playing
                     self.playback_position += (0.5 * self.playback_rate);
                 }
-            },
+            }
             CurrentSongMsg::RateChange(rate) => {
                 self.playback_rate = rate;
                 sender.input(CurrentSongMsg::ProgressUpdateSync(None));
-            },
+            }
             CurrentSongMsg::RateChangeUI(rate) => {
                 self.player_reference.get().await.set_rate(rate).await;
-            },
+            }
             CurrentSongMsg::ProgressUpdateSync(pos) => {
                 if let Some(pos) = pos {
                     self.playback_position = pos;
                 } else {
                     let mpris_ref = self.player_reference.get().await;
-                    self.playback_position = Duration::from_micros(MprisPlayer::position(mpris_ref.deref()) as u64).as_secs_f64();
+                    self.playback_position =
+                        Duration::from_micros(MprisPlayer::position(mpris_ref.deref()) as u64)
+                            .as_secs_f64();
                 }
-            },
+            }
             CurrentSongMsg::Seek(pos) => {
                 let mut mpris_player = self.player_reference.get_mut().await;
-                mpris_player.set_position(&*self.song_info.dbus_path(), Duration::from_secs_f64(pos).as_micros() as i64).await.expect("Error seeking");
+                mpris_player
+                    .set_position(
+                        &*self.song_info.dbus_path(),
+                        Duration::from_secs_f64(pos).as_micros() as i64,
+                    )
+                    .await
+                    .expect("Error seeking");
             }
         }
         self.update_view(widgets, sender);

@@ -2,7 +2,7 @@ use crate::icon_names;
 use crate::mpris::MprisPlayer;
 use crate::opensonic::client::OpenSubsonicClient;
 use crate::player::TrackList;
-use crate::ui::current_song::CurrentSongModel;
+use crate::ui::current_song::CurrentSong;
 use gtk::prelude::GtkWindowExt;
 use relm4::adw::prelude::*;
 use relm4::component::AsyncConnector;
@@ -15,11 +15,13 @@ use std::sync::Arc;
 use std::thread;
 use tokio::sync::RwLock;
 use zbus::object_server::InterfaceRef;
+use crate::ui::track_list::TrackListWidget;
 
 pub struct Model {
     track_list: Arc<RwLock<TrackList>>,
     sender: AsyncComponentSender<Self>,
-    current_song: AsyncConnector<CurrentSongModel>
+    current_song: AsyncConnector<CurrentSong>,
+    track_list_connector: AsyncConnector<TrackListWidget>,
 }
 
 #[derive(Debug)]
@@ -61,6 +63,9 @@ impl AsyncComponent for Model {
                     add = &adw::OverlaySplitView{
                         #[wrap(Some)]
                         set_content = model.current_song.widget(),
+
+                        #[wrap(Some)]
+                        set_sidebar = model.track_list_connector.widget(),
                     }
                 }
             }
@@ -72,12 +77,15 @@ impl AsyncComponent for Model {
         root: Self::Root,
         sender: AsyncComponentSender<Self>,
     ) -> AsyncComponentParts<Self> {
-        let current_song = CurrentSongModel::builder()
+        let current_song = CurrentSong::builder()
+            .launch(init.clone());
+        let track_list_connector = TrackListWidget::builder()
             .launch(init.clone());
         let model = Model {
             track_list: init.1,
             sender: sender.clone(),
-            current_song
+            current_song,
+            track_list_connector
         };
         let widgets = view_output!();
 
@@ -89,11 +97,11 @@ impl AsyncComponent for Model {
         widgets: &mut Self::Widgets,
         message: Self::Input,
         sender: AsyncComponentSender<Self>,
-        root: &Self::Root,
+        _root: &Self::Root,
     ) {
         match message {
             
-        }
+        };
         self.update_view(widgets, sender);
     }
 }
