@@ -9,7 +9,7 @@ use tokio::signal;
 use tokio::sync::{RwLock, mpsc};
 use zbus::connection;
 use zbus::object_server::InterfaceRef;
-use crate::dbus::base::{MprisBase, PlayerCommand};
+use crate::dbus::base::MprisBase;
 use crate::dbus::track_list::MprisTrackList;
 
 mod opensonic;
@@ -19,6 +19,11 @@ mod dbus;
 
 mod icon_names {
     include!(concat!(env!("OUT_DIR"), "/icon_names.rs"));
+}
+
+pub enum PlayerCommand {
+    Quit,
+    Next
 }
 
 #[tokio::main]
@@ -50,20 +55,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut track_list = TrackList::new();
     track_list.add_songs(&mut songs);
     let track_list = Arc::new(RwLock::new(track_list));
-    let connection = connection::Builder::session()?
+    let connection = Arc::new(connection::Builder::session()?
         .name("org.mpris.MediaPlayer2.sanicrs")?
         .serve_at(
             "/org/mpris/MediaPlayer2",
             MprisBase {
-                quit_channel: command_send.clone(),
+                cmd_channel: command_send.clone(),
             },
         )?
         .serve_at(
             "/org/mpris/MediaPlayer2",
-            MprisPlayer::new(client.clone(), &stream, track_list.clone()),
+            MprisPlayer::new(client.clone(), &stream, track_list.clone(), command_send.clone()),
         )?
         .build()
-        .await?;
+        .await?);
 
     let player_ref: InterfaceRef<MprisPlayer> = connection
         .object_server()
@@ -86,7 +91,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .interface("/org/mpris/MediaPlayer2")
         .await?;
 
-    let handle = start_app((player_ref, track_list.clone(), client.clone(), track_list_ref));
+    let handle = start_app((player_ref.clone(), track_list.clone(), client.clone(), track_list_ref));
 
     loop {
         tokio::select! {
@@ -95,6 +100,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 if let Some(cmd) = cmd {
                     match cmd {
                         PlayerCommand::Quit => break,
+                        PlayerCommand::Next => player_ref.get_mut().await.next().await,
                     }
                 }
             }

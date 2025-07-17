@@ -1,4 +1,3 @@
-use std::cell::{Cell, RefCell};
 use crate::opensonic::client::OpenSubsonicClient;
 use crate::player::TrackList;
 use crate::ui::current_song::{CurrentSong, CurrentSongMsg, SongInfo};
@@ -7,13 +6,17 @@ use rodio::{OutputStream, Sink};
 use std::collections::HashMap;
 use std::error::Error;
 use std::io::Cursor;
-use std::ops::{Add, Deref};
+use std::ops::Add;
 use std::sync::Arc;
 use std::time::Duration;
+use rodio::source::EmptyCallback;
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::RwLock;
-use zbus::interface;
+use zbus::{interface, Connection};
+use zbus::object_server::InterfaceRef;
 use zvariant::{Array, ObjectPath, Str, Value};
 use crate::opensonic::types::Song;
+use crate::PlayerCommand;
 
 const MAX_PLAYBACK_RATE: f64 = 10.0;
 const MIN_PLAYBACK_RATE: f64 = 0.0;
@@ -22,8 +25,8 @@ pub struct MprisPlayer {
     client: Arc<OpenSubsonicClient>,
     sink: Sink,
     current_song_id: RwLock<String>,
-    // stream_handle: Mixer,
     track_list: Arc<RwLock<TrackList>>,
+    cmd_channel: Arc<UnboundedSender<PlayerCommand>>,
 
     model_sender: Option<AsyncComponentSender<CurrentSong>>,
 }
@@ -33,15 +36,15 @@ impl MprisPlayer {
         client: Arc<OpenSubsonicClient>,
         stream_handle: &OutputStream,
         track_list: Arc<RwLock<TrackList>>,
+        cmd_channel: Arc<UnboundedSender<PlayerCommand>>
     ) -> Self {
-        // let sink = ;
         MprisPlayer {
             client,
             sink: Sink::connect_new(stream_handle.mixer()),
             current_song_id: RwLock::new("".to_string()),
-            // stream_handle,
             track_list,
-            model_sender: None
+            model_sender: None,
+            cmd_channel,
         }
     }
 }
@@ -97,6 +100,11 @@ impl MprisPlayer {
 
         self.sink.clear();
         self.sink.append(decoder);
+        let cmd_channel = self.cmd_channel.clone();
+        let callback_source = EmptyCallback::new(Box::new(move || {
+            cmd_channel.send(PlayerCommand::Next).expect("Error sending message Next");
+        }));
+        self.sink.append(callback_source);
         self.sink.play();
         {
             let mut x = self.current_song_id.write().await;
