@@ -5,6 +5,7 @@ use reqwest;
 use reqwest::{Client, ClientBuilder, Response};
 use std::error::Error;
 use std::path::Path;
+use std::sync::Arc;
 
 pub struct OpenSubsonicClient {
     host: String,
@@ -367,7 +368,7 @@ impl OpenSubsonicClient {
         Some(self.get_action_request_get_url("getCoverArt.view", vec![("id", id)]))
     }
 
-    pub async fn get_song(&self, id: &str) -> Result<Song, Box<dyn Error + Send + Sync>> {
+    pub async fn get_song(&self, id: &str) -> Result<Arc<Song>, Box<dyn Error + Send + Sync>> {
         let body = self
             .get_action_request("getSong.view", vec![("id", id)])
             .await?
@@ -381,6 +382,6 @@ impl OpenSubsonicClient {
         let resp: Song = serde_json::from_value(
             response["subsonic-response"]["song"].clone(),
         )?;
-        Ok(resp)
+        Ok(Arc::new(resp))
     }
 }

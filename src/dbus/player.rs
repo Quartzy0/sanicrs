@@ -1,6 +1,6 @@
 use crate::opensonic::client::OpenSubsonicClient;
-use crate::player::TrackList;
-use crate::ui::current_song::{CurrentSong, CurrentSongMsg, SongInfo};
+use crate::player::{SongEntry, TrackList};
+use crate::ui::current_song::{CurrentSong, CurrentSongMsg};
 use relm4::AsyncComponentSender;
 use rodio::{OutputStream, Sink};
 use std::collections::HashMap;
@@ -12,6 +12,7 @@ use std::time::Duration;
 use rodio::source::EmptyCallback;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::RwLock;
+use uuid::Uuid;
 use zbus::{interface, Connection};
 use zbus::object_server::InterfaceRef;
 use zvariant::{Array, ObjectPath, Str, Value};
@@ -58,7 +59,7 @@ impl MprisPlayer {
         let track_list = self.track_list.read().await;
         let song = match track_list.current() {
             None => {return Ok(())}
-            Some(s) => s
+            Some(s) => &s.1
         };
         {
             let x = self.current_song_id.read().await;
@@ -111,7 +112,7 @@ impl MprisPlayer {
             *x = song.id.clone();
         }
 
-        self.send_signal(CurrentSongMsg::SongUpdate(SongInfo::from(song)));
+        self.send_signal(CurrentSongMsg::SongUpdate(song.clone()));
         self.update_playback_state();
 
         Ok(())
@@ -130,11 +131,19 @@ impl MprisPlayer {
             model_sender.input(signal);
         }
     }
+
+    pub async fn set_position_unchecked(&mut self, position: u64) -> Result<(), zbus::fdo::Error> {
+        let position = Duration::from_micros(position);
+        self.sink.try_seek(position).map_err(|e| zbus::fdo::Error::IOError(format!("Error when seeking: {}", e)))?;
+        self.send_signal(CurrentSongMsg::ProgressUpdateSync(Some(position.as_secs_f64())));
+        Ok(())
+    }
 }
 
-pub async fn get_song_metadata<'a>(song: &&Song, client: Arc<OpenSubsonicClient>) -> Result<HashMap<&'a str, Value<'a>>, zbus::fdo::Error> {
+pub async fn get_song_metadata<'a>(song: &SongEntry, client: Arc<OpenSubsonicClient>) -> Result<HashMap<&'a str, Value<'a>>, zbus::fdo::Error> {
     let mut map: HashMap<&str, Value> = HashMap::new();
     map.insert("mpris:trackid", Value::ObjectPath(ObjectPath::try_from(song.dbus_path()).expect("Invalid object path")));
+    let song = &song.1;
     map.insert("xesam:title", Value::Str(Str::from(song.title.clone())));
     if let Some(cover_art) = &song.cover_art{
         let url = client.get_cover_image_url(cover_art.as_str()).await;
@@ -264,7 +273,7 @@ impl MprisPlayer {
             if song.dbus_path() != track_id { 
                 return Ok(());
             }
-            if let Some(duration) = song.duration && position > duration {
+            if let Some(duration) = song.1.duration && position > duration {
                 return Ok(());
             }
         }
@@ -284,7 +293,7 @@ impl MprisPlayer {
         {
             let track_list = self.track_list.read().await;
             let song = match track_list.current() {
-                Some(t) => t,
+                Some(t) => &t.1,
                 None => return Ok(())
             };
             let song_duration = song.duration;

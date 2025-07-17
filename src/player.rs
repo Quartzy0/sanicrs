@@ -1,10 +1,32 @@
 use std::error::Error;
 use std::sync::Arc;
+use uuid::Uuid;
 use crate::opensonic::client::OpenSubsonicClient;
 use crate::opensonic::types::{InvalidResponseError, Song};
 
+#[derive(Clone)]
+pub struct SongEntry(
+    pub Uuid,
+    pub Arc<Song>
+);
+
+impl SongEntry {
+    pub fn dbus_path(&self) -> String {
+        format!("/me/quartzy/sanicrs/song/{}", self.0.as_simple().to_string())
+    }
+}
+
+impl From<(Uuid, Arc<Song>)> for SongEntry {
+    fn from(value: (Uuid, Arc<Song>)) -> Self {
+        Self {
+            0: value.0,
+            1: value.1
+        }
+    }
+}
+
 pub struct TrackList {
-    songs: Vec<Song>,
+    songs: Vec<SongEntry>,
     current: usize,
 
     pub shuffled: bool,
@@ -14,7 +36,7 @@ pub struct TrackList {
 impl TrackList {
     pub fn new() -> Self {
         TrackList{
-            songs: vec![],
+            songs: Vec::new(),
             current: 0,
             shuffled: false,
             looping: false
@@ -43,7 +65,7 @@ impl TrackList {
         self.current = index;
     }
 
-    pub fn remove_song(&mut self, index: usize) -> Song {
+    pub fn remove_song(&mut self, index: usize) -> SongEntry {
         if self.current < index && self.current != 0 {
             self.current -= 1;
         }
@@ -75,7 +97,7 @@ impl TrackList {
         }
     }
 
-    pub fn current(&self) -> Option<&Song> {
+    pub fn current(&self) -> Option<&SongEntry> {
         self.songs.get(self.current)
     }
 
@@ -87,23 +109,26 @@ impl TrackList {
         }
     }
 
-    pub fn add_song(&mut self, song: Song, index: Option<usize>) {
+    pub fn add_song(&mut self, song: Arc<Song>, index: Option<usize>) {
         match index {
-            None => self.songs.push(song),
+            None => self.songs.push((Uuid::new_v4(), song).into()),
             Some(i) => {
                 if i <= self.current {
                     self.current += 1;
                 }
-                self.songs.insert(i, song);
+                self.songs.insert(i, (Uuid::new_v4(), song).into());
             }
         }
     }
 
-    pub fn add_songs(&mut self, songs: &mut Vec<Song>) {
-        self.songs.append(songs);
+    pub fn add_songs(&mut self, songs: &Vec<Arc<Song>>) {
+        let mut x: Vec<SongEntry> = songs.iter().map(|song| {
+            (Uuid::new_v4(), song.clone()).into()
+        }).collect();
+        self.songs.append(&mut x);
     }
 
-    pub fn get_songs(&self) -> &Vec<Song> {
+    pub fn get_songs(&self) -> &Vec<SongEntry> {
         &self.songs
     }
 }

@@ -1,11 +1,11 @@
-use serde_with::DurationSeconds;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use serde_with::DurationSeconds;
+use serde_with::serde_as;
 use std::error::Error;
 use std::fmt;
 use std::fmt::Debug;
 use std::time::Duration;
-use serde_with::serde_as;
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -13,23 +13,22 @@ pub struct License {
     pub valid: bool,
     pub email: Option<String>,
     pub license_expires: Option<String>,
-    pub trial_expires: Option<String>
+    pub trial_expires: Option<String>,
 }
 
-
 #[derive(Serialize, Deserialize, Debug)]
-pub struct Extensions (pub Vec<Extension>);
+pub struct Extensions(pub Vec<Extension>);
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Extension {
     pub name: String,
-    pub versions: Vec<i32>
+    pub versions: Vec<i32>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Genre {
-    pub name: String
+    pub name: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -37,7 +36,7 @@ pub struct Genre {
 pub struct ItemDate {
     pub year: Option<u32>,
     pub month: Option<u32>,
-    pub day: Option<u32>
+    pub day: Option<u32>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -51,7 +50,7 @@ pub struct Artist {
     pub starred: Option<String>,
     pub music_brainz_id: Option<String>,
     pub sort_name: Option<String>,
-    pub roles: Option<Vec<String>>
+    pub roles: Option<Vec<String>>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -59,7 +58,7 @@ pub struct Artist {
 pub struct Contributor {
     pub role: String,
     pub sub_role: Option<String>,
-    pub artist: Artist
+    pub artist: Artist,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -70,14 +69,14 @@ pub struct ReplayGain {
     pub track_peak: Option<f32>,
     pub album_peak: Option<f32>,
     pub base_gain: Option<f32>,
-    pub fallback_gain: Option<f32>
+    pub fallback_gain: Option<f32>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct DiscTitle {
     pub disc: u32,
-    pub title: String
+    pub title: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -110,12 +109,13 @@ pub struct Album {
     pub release_date: Option<ItemDate>,
     pub is_compilation: Option<bool>,
     pub explicit_status: Option<String>,
-    pub disc_titles: Option<Vec<DiscTitle>>
+    pub disc_titles: Option<Vec<DiscTitle>>,
 }
 
 #[serde_as]
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
+#[derive(Default)]
 pub struct Song {
     pub id: String,
     pub parent: Option<String>,
@@ -168,7 +168,7 @@ pub struct Song {
     pub display_composer: Option<String>,
     pub moods: Option<Vec<String>>,
     pub replay_gain: Option<ReplayGain>,
-    pub explicit_status: Option<String>
+    pub explicit_status: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -176,30 +176,44 @@ pub struct Song {
 pub struct Search3Results {
     pub artist: Option<Vec<Artist>>,
     pub album: Option<Vec<Album>>,
-    pub song: Option<Vec<Song>>
+    pub song: Option<Vec<Song>>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SubsonicError {
     pub code: i32,
-    pub message: String
+    pub message: String,
 }
 
 #[derive(Debug)]
-pub struct InvalidResponseError{
-    msg: String
+pub struct InvalidResponseError {
+    msg: String,
 }
 
 impl Song {
-    pub fn dbus_path(&self) -> String {
-        format!("/me/quartzy/sanicrs/track/{}", self.id.replace("-", "/"))
+
+    pub fn artists(&self) -> String {
+        match &self.display_artists {
+            None => match &self.artist {
+                None => match &self.artists {
+                    None => "Unknown artist".to_string(),
+                    Some(a) => a
+                        .iter()
+                        .map(|x| x.name.clone())
+                        .collect::<Vec<String>>()
+                        .join(", "),
+                },
+                Some(a) => a.clone(),
+            },
+            Some(a) => a.clone(),
+        }
     }
 }
 
 impl SubsonicError {
     pub fn from_response(val: Value) -> Box<dyn Error + Send + Sync> {
         let err = serde_json::from_value::<Self>(val["subsonic-response"]["error"].clone());
-        if err.is_err(){
+        if err.is_err() {
             err.unwrap_err().into()
         } else {
             err.unwrap().into()
@@ -209,7 +223,11 @@ impl SubsonicError {
 
 impl fmt::Display for SubsonicError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Error from subsonic (code {}): {}", self.code, self.message)
+        write!(
+            f,
+            "Error from subsonic (code {}): {}",
+            self.code, self.message
+        )
     }
 }
 
@@ -219,17 +237,18 @@ impl Error for SubsonicError {
     }
 }
 
-impl InvalidResponseError{
-    pub fn new(message: &str) -> InvalidResponseError{
-        InvalidResponseError{
-            msg: String::from(message)
+impl InvalidResponseError {
+    pub fn new(message: &str) -> InvalidResponseError {
+        InvalidResponseError {
+            msg: String::from(message),
         }
     }
 
-    pub fn new_boxed(message: &str) -> Box<InvalidResponseError>{
-        InvalidResponseError{
-            msg: String::from(message)
-        }.into()
+    pub fn new_boxed(message: &str) -> Box<InvalidResponseError> {
+        InvalidResponseError {
+            msg: String::from(message),
+        }
+        .into()
     }
 }
 

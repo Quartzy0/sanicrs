@@ -43,7 +43,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .search3("Genius", Some(0), None, Some(0), None, Some(2), None, None)
         .await?;
 
-    let mut songs = search.song.unwrap();
+    let mut songs = search.song.unwrap().into_iter().map(Arc::new).collect();
 
     let (command_send, mut command_recv) = mpsc::unbounded_channel::<PlayerCommand>();
     let command_send = Arc::new(command_send);

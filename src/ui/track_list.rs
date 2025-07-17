@@ -11,6 +11,7 @@ use relm4::adw::gtk::{Align, ListItem, Orientation, SignalListItemFactory, Widge
 use crate::dbus::player::MprisPlayer;
 use crate::dbus::track_list::MprisTrackList;
 use crate::opensonic::client::OpenSubsonicClient;
+use crate::opensonic::types::Song;
 use crate::player::TrackList;
 use crate::ui::app::Init;
 use crate::ui::cover_picture::{CoverPicture, CoverSize};
@@ -119,7 +120,7 @@ impl AsyncComponent for TrackListWidget {
                 .bind(&artist, "label", Widget::NONE);
             list_item
                 .property_expression("item")
-                .chain_property::<SongObject>("position_state")
+                .chain_property::<SongObject>("position-state")
                 .chain_closure::<Vec<String>>(closure!(
                     move |_: Option<Object>, position_state: PositionState| {
                         match position_state {
@@ -206,17 +207,13 @@ impl AsyncComponent for TrackListWidget {
                 let guard = self.track_list.read().await;
                 let pos = guard.current_index().unwrap_or(0);
                 let list_store = ListStore::from_iter(guard.get_songs().iter().enumerate().map(|x1| {
-                    let song = SongObject::from(x1.1);
-                    song.set_position_state(
-                        if x1.0 < pos {
-                            PositionState::Passed
-                        } else if x1.0 > pos {
-                            PositionState::Upcoming
-                        } else {
-                            PositionState::Current
-                        }
-                    );
-                    song
+                    SongObject::new(x1.1.clone(), if x1.0 < pos {
+                        PositionState::Passed
+                    } else if x1.0 > pos {
+                        PositionState::Upcoming
+                    } else {
+                        PositionState::Current
+                    })
                 }));
 
                 widgets.list.set_model(Some(&gtk::NoSelection::new(Some(list_store))));

@@ -20,7 +20,7 @@ use tokio::sync::RwLock;
 use zbus::object_server::InterfaceRef;
 use crate::ui::app::Init;
 
-#[derive(Debug)]
+/*#[derive(Debug)]
 pub struct SongInfo {
     pub id: String,
     pub title: String,
@@ -63,7 +63,7 @@ impl Default for SongInfo {
             duration: Duration::from_secs(0),
         }
     }
-}
+}*/
 
 pub struct CurrentSong {
     player_reference: InterfaceRef<MprisPlayer>,
@@ -72,7 +72,7 @@ pub struct CurrentSong {
     client: Arc<OpenSubsonicClient>,
 
     // UI data
-    song_info: SongInfo,
+    song_info: Option<Arc<Song>>,
     playback_state_icon: &'static str,
     playback_position: f64,
     playback_rate: f64,
@@ -84,7 +84,7 @@ pub enum CurrentSongMsg {
     Start,
     Next,
     Previous,
-    SongUpdate(SongInfo),
+    SongUpdate(Arc<Song>),
     PlaybackStateChange(String),
     VolumeChanged(f64),
     VolumeChangedExternal(f64),
@@ -103,123 +103,140 @@ impl AsyncComponent for CurrentSong {
     type Init = Init;
 
     view! {
-        gtk::Box {
-            set_orientation: Orientation::Vertical,
-            set_halign: Align::Center,
-            set_valign: Align::Center,
-            set_spacing: 5,
+        adw::Bin {
+            #[wrap(Some)]
+            set_child = if let Some(song) = &model.song_info {
+                &gtk::Box {
+                    set_orientation: Orientation::Vertical,
+                    set_halign: Align::Center,
+                    set_valign: Align::Center,
+                    set_spacing: 5,
 
-            #[name = "cover_image"]
-            cover_picture::CoverPicture {
-                set_cover_size: CoverSize::Huge,
-            },
-            gtk::Label {
-                #[watch]
-                set_label: &model.song_info.title,
-                add_css_class: "bold",
-            },
-            gtk::Label {
-                #[watch]
-                set_label: &model.song_info.artist,
-            },
-            gtk::Label {
-                #[watch]
-                set_label: &model.song_info.album,
-                add_css_class: "italic",
-            },
-
-            gtk::Box {
-                set_orientation: Orientation::Horizontal,
-                set_halign: Align::Center,
-                set_spacing: 10,
-
-                gtk::Button {
-                    set_icon_name: icon_names::PREVIOUS_REGULAR,
-                    connect_clicked => CurrentSongMsg::Previous,
-                    add_css_class: "track-action-btn"
-                },
-                #[name = "play_pause"]
-                gtk::Button {
-                    #[watch]
-                    set_icon_name: model.playback_state_icon,
-                    connect_clicked => CurrentSongMsg::PlayPause,
-                    add_css_class: "track-action-btn",
-                    add_css_class: "track-playpause-btn"
-                },
-                gtk::Button {
-                    set_icon_name: icon_names::NEXT_REGULAR,
-                    connect_clicked => CurrentSongMsg::Next,
-                    add_css_class: "track-action-btn"
-                }
-            },
-
-            gtk::CenterBox {
-                set_orientation: Orientation::Horizontal,
-                set_halign: Align::Center,
-
-                #[wrap(Some)]
-                set_center_widget = &gtk::Box{
-                    set_orientation: Orientation::Horizontal,
-                    set_spacing: 3,
-
+                    #[name = "cover_image"]
+                    cover_picture::CoverPicture {
+                        set_cover_size: CoverSize::Huge,
+                    },
                     gtk::Label {
                         #[watch]
-                        set_label: &*format!("{}:{:02}", (model.playback_position / 60.0) as u64, model.playback_position as u64 % 60),
-                        set_width_chars: 4
+                        set_label: &song.title,
+                        add_css_class: "bold",
                     },
-                    gtk::Scale {
+                    gtk::Label {
+                        #[watch]
+                        set_label: song.artists().as_str(),
+                    },
+                    gtk::Label {
+                        #[watch]
+                        set_label: song.album.as_ref().unwrap_or(&"Unknown artist".to_string()),
+                        add_css_class: "italic",
+                    },
+
+                    gtk::Box {
                         set_orientation: Orientation::Horizontal,
-                        #[watch]
-                        set_adjustment: &gtk::Adjustment::new(model.playback_position, 0.0, model.song_info.duration.as_secs_f64(), 0.5, 0.0, 0.0),
-                        #[watch]
-                        set_value: model.playback_position,
-                        set_hexpand: true,
-                        set_width_request: 400,
-                        connect_change_value[sender] => move |_range, scroll_type, val| {
-                            sender.input(CurrentSongMsg::Seek(val));
-                            Propagation::Proceed
+                        set_halign: Align::Center,
+                        set_spacing: 10,
+
+                        gtk::Button {
+                            set_icon_name: icon_names::PREVIOUS_REGULAR,
+                            connect_clicked => CurrentSongMsg::Previous,
+                            add_css_class: "track-action-btn"
                         },
-                    },
-                    gtk::Label {
-                        #[watch]
-                        set_label: &*format!("{}:{:02}", model.song_info.duration.as_secs() / 60, model.song_info.duration.as_secs() % 60),
-                        set_width_chars: 4
-                    }
-                },
-
-
-                #[wrap(Some)]
-                set_end_widget = &gtk::Box{
-                    set_orientation: Orientation::Horizontal,
-                    set_spacing: 3,
-
-                    #[name = "volume_btn"]
-                    gtk::ScaleButton {
-                        set_icons: &[icon_names::SPEAKER_0, icon_names::SPEAKER_3, icon_names::SPEAKER_1, icon_names::SPEAKER_2],
-                        set_adjustment: &gtk::Adjustment::new(1.0, 0.0, 1.0, 0.05, 0.0, 0.0),
-                        connect_value_changed[sender] => move |_btn, val| {
-                            sender.input(CurrentSongMsg::VolumeChanged(val));
+                        #[name = "play_pause"]
+                        gtk::Button {
+                            #[watch]
+                            set_icon_name: model.playback_state_icon,
+                            connect_clicked => CurrentSongMsg::PlayPause,
+                            add_css_class: "track-action-btn",
+                            add_css_class: "track-playpause-btn"
                         },
-                    },
-
-                    #[name = "rate_dropdown"]
-                    gtk::DropDown {
-                        set_enable_search: false,
-                        set_model: Some(&gtk::StringList::new(&["0.5x", "0.75x", "1.0x", "1.25x", "1.5x", "1.75x", "2x"])),
-                        set_selected: 2,
-                        connect_selected_notify[sender] => move |dd| {
-                            sender.input(CurrentSongMsg::RateChangeUI(match dd.selected() { // Rates from string list above
-                                0 => 0.5,
-                                1 => 0.75,
-                                2 => 1.0,
-                                3 => 1.25,
-                                4 => 1.5,
-                                5 => 1.75,
-                                6 => 2.0,
-                                _ => 1.0,
-                            }));
+                        gtk::Button {
+                            set_icon_name: icon_names::NEXT_REGULAR,
+                            connect_clicked => CurrentSongMsg::Next,
+                            add_css_class: "track-action-btn"
                         }
                     },
+
+                    gtk::CenterBox {
+                        set_orientation: Orientation::Horizontal,
+                        set_halign: Align::Center,
+
+                        #[wrap(Some)]
+                        set_center_widget = &gtk::Box{
+                            set_orientation: Orientation::Horizontal,
+                            set_spacing: 3,
+
+                            append = &gtk::Label {
+                                #[watch]
+                                set_label: &*format!("{}:{:02}", (model.playback_position / 60.0) as u64, model.playback_position as u64 % 60),
+                                set_width_chars: 4
+                            },
+                            append = if let Some(duration) = song.duration {
+                                &gtk::Scale {
+                                    set_orientation: Orientation::Horizontal,
+                                    #[watch]
+                                    set_adjustment: &gtk::Adjustment::new(model.playback_position, 0.0, duration.as_secs_f64(), 0.5, 0.0, 0.0),
+                                    #[watch]
+                                    set_value: model.playback_position,
+                                    set_hexpand: true,
+                                    set_width_request: 400,
+                                    connect_change_value[sender] => move |_range, scroll_type, val| {
+                                        sender.input(CurrentSongMsg::Seek(val));
+                                        Propagation::Proceed
+                                    },
+                                }
+                            } else {
+                                &gtk::Label {}
+                            },
+                            append = if let Some(duration) = song.duration {
+                                &gtk::Label {
+                                    #[watch]
+                                    set_label: &*format!("{}:{:02}", duration.as_secs() / 60, duration.as_secs() % 60),
+                                    set_width_chars: 4
+                                }
+                            } else {
+                                &gtk::Label {}
+                            }
+                        },
+
+
+                        #[wrap(Some)]
+                        set_end_widget = &gtk::Box{
+                            set_orientation: Orientation::Horizontal,
+                            set_spacing: 3,
+
+                            #[name = "volume_btn"]
+                            gtk::ScaleButton {
+                                set_icons: &[icon_names::SPEAKER_0, icon_names::SPEAKER_3, icon_names::SPEAKER_1, icon_names::SPEAKER_2],
+                                set_adjustment: &gtk::Adjustment::new(1.0, 0.0, 1.0, 0.05, 0.0, 0.0),
+                                connect_value_changed[sender] => move |_btn, val| {
+                                    sender.input(CurrentSongMsg::VolumeChanged(val));
+                                },
+                            },
+
+                            #[name = "rate_dropdown"]
+                            gtk::DropDown {
+                                set_enable_search: false,
+                                set_model: Some(&gtk::StringList::new(&["0.5x", "0.75x", "1.0x", "1.25x", "1.5x", "1.75x", "2x"])),
+                                set_selected: 2,
+                                connect_selected_notify[sender] => move |dd| {
+                                    sender.input(CurrentSongMsg::RateChangeUI(match dd.selected() { // Rates from string list above
+                                        0 => 0.5,
+                                        1 => 0.75,
+                                        2 => 1.0,
+                                        3 => 1.25,
+                                        4 => 1.5,
+                                        5 => 1.75,
+                                        6 => 2.0,
+                                        _ => 1.0,
+                                    }));
+                                }
+                            },
+                        }
+                    }
+                }
+            } else {
+                gtk::Label {
+                    set_label: "No song"
                 }
             }
         }
@@ -238,7 +255,7 @@ impl AsyncComponent for CurrentSong {
             let track_list = init.1.read().await;
             match track_list.current() {
                 None => Default::default(),
-                Some(song) => sender.input(CurrentSongMsg::SongUpdate(SongInfo::from(song))),
+                Some(song) => sender.input(CurrentSongMsg::SongUpdate(song.1.clone())),
             };
         }
         let model = CurrentSong {
@@ -295,13 +312,13 @@ impl AsyncComponent for CurrentSong {
                 _ => self.playback_state_icon = icon_names::STOP,
             },
             CurrentSongMsg::SongUpdate(info) => {
-                if self.song_info.id != info.id {
+                if self.song_info.is_none() || self.song_info.as_ref().unwrap().id != info.id {
                     widgets
                         .cover_image
-                        .set_cover_from_id(info.cover_art_id.as_ref(), self.client.clone())
+                        .set_cover_from_id(info.cover_art.as_ref(), self.client.clone())
                         .await;
                 }
-                self.song_info = info;
+                self.song_info = Some(info);
                 let mpris_ref = self.player_reference.get().await;
                 self.playback_position =
                     Duration::from_micros(MprisPlayer::position(mpris_ref.deref()) as u64)
@@ -342,9 +359,8 @@ impl AsyncComponent for CurrentSong {
             CurrentSongMsg::Seek(pos) => {
                 let mut mpris_player = self.player_reference.get_mut().await;
                 mpris_player
-                    .set_position(
-                        &*self.song_info.dbus_path(),
-                        Duration::from_secs_f64(pos).as_micros() as i64,
+                    .set_position_unchecked(
+                        Duration::from_secs_f64(pos).as_micros() as u64,
                     )
                     .await
                     .expect("Error seeking");

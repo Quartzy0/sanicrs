@@ -2,7 +2,7 @@ use crate::dbus::player;
 use crate::dbus::player::MprisPlayer;
 use crate::opensonic::client::OpenSubsonicClient;
 use crate::opensonic::types::Song;
-use crate::player::TrackList;
+use crate::player::{SongEntry, TrackList};
 use std::collections::HashMap;
 use std::sync::Arc;
 use relm4::AsyncComponentSender;
@@ -10,7 +10,6 @@ use tokio::sync::RwLock;
 use zbus::interface;
 use zbus::object_server::InterfaceRef;
 use zvariant::{ObjectPath, Value};
-use crate::ui::current_song::{CurrentSong, CurrentSongMsg, SongInfo};
 use crate::ui::track_list::TrackListMsg::{ReloadList, TrackChanged};
 use crate::ui::track_list::TrackListWidget;
 
@@ -145,7 +144,7 @@ impl MprisTrackList {
         tracks_in: Vec<ObjectPath<'_>>,
     ) -> Vec<HashMap<&str, Value>> {
         let track_list = self.track_list.read().await;
-        let mut songs_refs: Vec<&Song> = Vec::new();
+        let mut songs_refs: Vec<&SongEntry> = Vec::new();
         let loaded_songs = track_list.get_songs();
         for x in tracks_in {
             let song = loaded_songs.iter().find(|x1| x1.dbus_path() == x.as_str());
