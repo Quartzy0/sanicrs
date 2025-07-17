@@ -4,12 +4,32 @@ use relm4::adw::glib::Object;
 use crate::opensonic::types::Song;
 use crate::ui::current_song::SongInfo;
 
+#[derive(Clone, Copy, Debug, glib::Enum, PartialEq, Default)]
+#[enum_type(name = "SanicPositionState")]
+pub enum PositionState {
+    Passed = 0,
+    Current = 1,
+    #[default]
+    Upcoming = 2,
+}
+
+impl AsRef<str> for PositionState {
+    fn as_ref(&self) -> &str {
+        match self {
+            PositionState::Passed => "passed",
+            PositionState::Current => "current",
+            PositionState::Upcoming => "upcoming"
+        }
+    }
+}
+
+
 glib::wrapper! {
     pub struct SongObject(ObjectSubclass<imp::SongObject>);
 }
 
 impl SongObject {
-    pub fn new(id: String, title: String, artist: String, album: String, cover_art_id: Option<String>, duration: f64) -> Self {
+    pub fn new(id: String, title: String, artist: String, album: String, cover_art_id: Option<String>, duration: f64, position_state: PositionState) -> Self {
         Object::builder()
             .property("id", id)
             .property("title", title)
@@ -17,13 +37,14 @@ impl SongObject {
             .property("album", album)
             .property("cover_art_id", cover_art_id)
             .property("duration", duration)
+            .property("position_state", position_state)
             .build()
     }
 }
 
 impl From<SongInfo> for SongObject {
     fn from(value: SongInfo) -> Self {
-        SongObject::new(value.id, value.title, value.artist, value.album, value.cover_art_id, value.duration.as_secs_f64())
+        SongObject::new(value.id, value.title, value.artist, value.album, value.cover_art_id, value.duration.as_secs_f64(), PositionState::default())
     }
 }
 
@@ -52,6 +73,7 @@ mod imp {
     use relm4::adw::gtk::glib;
     use relm4::adw::gtk::prelude::*;
     use relm4::adw::gtk::subclass::prelude::*;
+    use crate::ui::song_object::PositionState;
 
     // Object holding the state
     #[derive(Properties, Default)]
@@ -69,6 +91,8 @@ mod imp {
         cover_art_id: RefCell<Option<String>>,
         #[property(get, set)]
         duration: Cell<f64>, // Duration in seconds
+        #[property(get, set, builder(PositionState::default()))]
+        position_state: Cell<PositionState>,
     }
 
     #[glib::object_subclass]

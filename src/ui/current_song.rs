@@ -1,11 +1,10 @@
 use crate::icon_names;
-use crate::mpris::MprisPlayer;
+use crate::dbus::player::MprisPlayer;
 use crate::opensonic::client::OpenSubsonicClient;
 use crate::opensonic::types::Song;
 use crate::player::TrackList;
 use crate::ui::cover_picture;
 use crate::ui::cover_picture::CoverSize;
-use relm4::adw::gdk::Texture;
 use relm4::adw::glib;
 use relm4::adw::glib::ControlFlow;
 use relm4::adw::gtk::glib::Propagation;
@@ -19,6 +18,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 use zbus::object_server::InterfaceRef;
+use crate::ui::app::Init;
 
 #[derive(Debug)]
 pub struct SongInfo {
@@ -95,12 +95,6 @@ pub enum CurrentSongMsg {
     Seek(f64),
 }
 
-type Init = (
-    InterfaceRef<MprisPlayer>,
-    Arc<RwLock<TrackList>>,
-    Arc<OpenSubsonicClient>,
-);
-
 #[relm4::component(pub async)]
 impl AsyncComponent for CurrentSong {
     type CommandOutput = ();
@@ -170,7 +164,8 @@ impl AsyncComponent for CurrentSong {
 
                     gtk::Label {
                         #[watch]
-                        set_label: &*format!("{}:{:02}", (model.playback_position / 60.0) as u64, model.playback_position as u64 % 60)
+                        set_label: &*format!("{}:{:02}", (model.playback_position / 60.0) as u64, model.playback_position as u64 % 60),
+                        set_width_chars: 4
                     },
                     gtk::Scale {
                         set_orientation: Orientation::Horizontal,
@@ -187,7 +182,8 @@ impl AsyncComponent for CurrentSong {
                     },
                     gtk::Label {
                         #[watch]
-                        set_label: &*format!("{}:{:02}", model.song_info.duration.as_secs() / 60, model.song_info.duration.as_secs() % 60)
+                        set_label: &*format!("{}:{:02}", model.song_info.duration.as_secs() / 60, model.song_info.duration.as_secs() % 60),
+                        set_width_chars: 4
                     }
                 },
 
@@ -299,12 +295,17 @@ impl AsyncComponent for CurrentSong {
                 _ => self.playback_state_icon = icon_names::STOP,
             },
             CurrentSongMsg::SongUpdate(info) => {
+                if self.song_info.id != info.id {
+                    widgets
+                        .cover_image
+                        .set_cover_from_id(info.cover_art_id.as_ref(), self.client.clone())
+                        .await;
+                }
                 self.song_info = info;
-                self.playback_position = 0.0;
-                widgets
-                    .cover_image
-                    .set_cover_from_id(self.song_info.cover_art_id.as_ref(), self.client.clone())
-                    .await;
+                let mpris_ref = self.player_reference.get().await;
+                self.playback_position =
+                    Duration::from_micros(MprisPlayer::position(mpris_ref.deref()) as u64)
+                        .as_secs_f64();
             }
             CurrentSongMsg::VolumeChanged(volume) => {
                 self.player_reference

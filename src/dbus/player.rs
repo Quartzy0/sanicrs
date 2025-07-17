@@ -1,29 +1,27 @@
-use crate::ui::current_song::{CurrentSongMsg, CurrentSong, SongInfo};
+use std::cell::{Cell, RefCell};
 use crate::opensonic::client::OpenSubsonicClient;
 use crate::player::TrackList;
+use crate::ui::current_song::{CurrentSong, CurrentSongMsg, SongInfo};
 use relm4::AsyncComponentSender;
 use rodio::{OutputStream, Sink};
 use std::collections::HashMap;
 use std::error::Error;
 use std::io::Cursor;
-use std::ops::Add;
+use std::ops::{Add, Deref};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::RwLock;
 use zbus::interface;
 use zvariant::{Array, ObjectPath, Str, Value};
+use crate::opensonic::types::Song;
 
 const MAX_PLAYBACK_RATE: f64 = 10.0;
 const MIN_PLAYBACK_RATE: f64 = 0.0;
 
-pub enum PlayerCommand {
-    Quit,
-}
-
 pub struct MprisPlayer {
     client: Arc<OpenSubsonicClient>,
     sink: Sink,
+    current_song_id: RwLock<String>,
     // stream_handle: Mixer,
     track_list: Arc<RwLock<TrackList>>,
 
@@ -40,6 +38,7 @@ impl MprisPlayer {
         MprisPlayer {
             client,
             sink: Sink::connect_new(stream_handle.mixer()),
+            current_song_id: RwLock::new("".to_string()),
             // stream_handle,
             track_list,
             model_sender: None
@@ -54,11 +53,16 @@ impl MprisPlayer {
 
     pub async fn start_current(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
         let track_list = self.track_list.read().await;
-        let song = track_list.current();
-        if song.is_none() {
-            return Ok(());
+        let song = match track_list.current() {
+            None => {return Ok(())}
+            Some(s) => s
+        };
+        {
+            let x = self.current_song_id.read().await;
+            if song.id == x.as_str() {
+                return Ok(());
+            }
         }
-        let song = song.unwrap();
         println!("Playing: {}", song.title);
         let stream = self
             .client
@@ -94,6 +98,10 @@ impl MprisPlayer {
         self.sink.clear();
         self.sink.append(decoder);
         self.sink.play();
+        {
+            let mut x = self.current_song_id.write().await;
+            *x = song.id.clone();
+        }
 
         self.send_signal(CurrentSongMsg::SongUpdate(SongInfo::from(song)));
         self.update_playback_state();
@@ -116,8 +124,73 @@ impl MprisPlayer {
     }
 }
 
+pub async fn get_song_metadata<'a>(song: &&Song, client: Arc<OpenSubsonicClient>) -> Result<HashMap<&'a str, Value<'a>>, zbus::fdo::Error> {
+    let mut map: HashMap<&str, Value> = HashMap::new();
+    map.insert("mpris:trackid", Value::ObjectPath(ObjectPath::try_from(song.dbus_path()).expect("Invalid object path")));
+    map.insert("xesam:title", Value::Str(Str::from(song.title.clone())));
+    if let Some(cover_art) = &song.cover_art{
+        let url = client.get_cover_image_url(cover_art.as_str()).await;
+        if let Some(url) = url {
+            map.insert("mpris:artUrl", Value::Str(Str::from(url)));
+        }
+    }
+    if let Some(duration) = song.duration{
+        map.insert("mpris:length", Value::I64(duration.as_micros() as i64));
+    }
+    if let Some(album) = &song.album {
+        map.insert("xesam:album", Value::Str(Str::from(album.clone())));
+    }
+    if let Some(artists) = &song.artists {
+        let a: Vec<String> = artists.iter().map(|x| x.name.clone()).collect();
+        map.insert("xesam:artist", Value::Array(Array::from(a)));
+    }
+    if let Some(artists) = &song.album_artists {
+        let al: Vec<String> = artists.iter().map(|x| x.name.clone()).collect();
+        map.insert("xesam:albumArtist", Value::Array(Array::from(al)));
+    }
+    if let Some(artists) = &song.genres {
+        let g: Vec<String> = artists.iter().map(|x| x.name.clone()).collect();
+        map.insert("xesam:genre", Value::Array(Array::from(g)));
+    }
+    if let Some(comment) = &song.comment {
+        map.insert("xesam:comment", Value::Str(Str::from(comment.clone())));
+    }
+    if let Some(composer) = &song.display_composer {
+        map.insert("xesam:composer", Value::Str(Str::from(composer.clone())));
+    }
+    if let Some(played) = &song.played {
+        map.insert("xesam:lastUsed", Value::Str(Str::from(played.clone())));
+    }
+    if let Some(played) = song.play_count {
+        map.insert("xesam:useCount", Value::I64(played as i64));
+    }
+    if let Some(track) = song.track {
+        map.insert("xesam:trackNumber", Value::I64(track as i64));
+    }
+    if let Some(rating) = song.user_rating {
+        map.insert("xesam:trackNumber", Value::F64(rating as f64 / 5.0));
+    }
+    if let Some(disc_number) = song.disc_number {
+        map.insert("xesam:discNumber", Value::I64(disc_number as i64));
+    }
+    if let Some(bpm) = song.bpm {
+        map.insert("xesam:audioBPM", Value::I64(bpm as i64));
+    }
+
+    Ok(map)
+}
+
 #[interface(name = "org.mpris.MediaPlayer2.Player")]
 impl MprisPlayer {
+    pub async fn open_uri(&self, uri: &str) -> Result<(), zbus::fdo::Error> {
+        let mut track_list = self.track_list.write().await;
+        let err = track_list.add_song_from_uri(uri, self.client.clone(), None).await;
+        match err {
+            None => Ok(()),
+            Some(err) => Err(zbus::fdo::Error::Failed(format!("Error when adding song: {}", err)))
+        }
+    }
+
     pub async fn play(&self) {
         if !self.sink.empty() {
             self.sink.play();
@@ -135,12 +208,10 @@ impl MprisPlayer {
     }
 
     pub async fn play_pause(&self) {
-        if !self.sink.empty() {
-            if self.sink.is_paused() {
-                self.play().await;
-            } else {
-                self.pause().await;
-            }
+        if self.sink.is_paused() || self.sink.empty() {
+            self.play().await;
+        } else {
+            self.pause().await;
         }
     }
 
@@ -230,59 +301,7 @@ impl MprisPlayer {
             None => return Err(zbus::fdo::Error::Failed("No song currently playing".to_string()))
         };
 
-        let mut map: HashMap<&str, Value> = HashMap::new();
-        map.insert("mpris:trackid", Value::ObjectPath(ObjectPath::try_from(song.dbus_path()).expect("Invalid object path")));
-        map.insert("xesam:title", Value::Str(Str::from(song.title.clone())));
-        if let Some(cover_art) = &song.cover_art{
-            let url = self.client.get_cover_image_url(cover_art.as_str()).await;
-            if let Some(url) = url {
-                map.insert("mpris:artUrl", Value::Str(Str::from(url)));
-            }
-        }
-        if let Some(duration) = song.duration{
-            map.insert("mpris:length", Value::I64(duration.as_micros() as i64));
-        }
-        if let Some(album) = &song.album {
-            map.insert("xesam:album", Value::Str(Str::from(album.clone())));
-        }
-        if let Some(artists) = &song.artists {
-            let a: Vec<String> = artists.iter().map(|x| x.name.clone()).collect();
-            map.insert("xesam:artist", Value::Array(Array::from(a)));
-        }
-        if let Some(artists) = &song.album_artists {
-            let al: Vec<String> = artists.iter().map(|x| x.name.clone()).collect();
-            map.insert("xesam:albumArtist", Value::Array(Array::from(al)));
-        }
-        if let Some(artists) = &song.genres {
-            let g: Vec<String> = artists.iter().map(|x| x.name.clone()).collect();
-            map.insert("xesam:genre", Value::Array(Array::from(g)));
-        }
-        if let Some(comment) = &song.comment {
-            map.insert("xesam:comment", Value::Str(Str::from(comment.clone())));
-        }
-        if let Some(composer) = &song.display_composer {
-            map.insert("xesam:composer", Value::Str(Str::from(composer.clone())));
-        }
-        if let Some(played) = &song.played {
-            map.insert("xesam:lastUsed", Value::Str(Str::from(played.clone())));
-        }
-        if let Some(played) = song.play_count {
-            map.insert("xesam:useCount", Value::I64(played as i64));
-        }
-        if let Some(track) = song.track {
-            map.insert("xesam:trackNumber", Value::I64(track as i64));
-        }
-        if let Some(rating) = song.user_rating {
-            map.insert("xesam:trackNumber", Value::F64(rating as f64 / 5.0));
-        }
-        if let Some(disc_number) = song.disc_number {
-            map.insert("xesam:discNumber", Value::I64(disc_number as i64));
-        }
-        if let Some(bpm) = song.bpm {
-            map.insert("xesam:audioBPM", Value::I64(bpm as i64));
-        }
-
-        Ok(map)
+        get_song_metadata(&song, self.client.clone()).await
     }
 
     #[zbus(property)]
@@ -389,40 +408,4 @@ impl MprisPlayer {
     }
 }
 
-pub struct MprisBase {
-    pub quit_channel: Arc<UnboundedSender<PlayerCommand>>,
-}
 
-#[interface(name = "org.mpris.MediaPlayer2")]
-impl MprisBase {
-    fn quit(&mut self) {
-        self.quit_channel
-            .send(PlayerCommand::Quit)
-            .expect("Error when sending quit signal");
-    }
-
-    #[zbus(property)]
-    fn can_quit(&self) -> bool {
-        true
-    }
-
-    #[zbus(property)]
-    fn can_set_fullscreen(&self) -> bool {
-        false
-    }
-
-    #[zbus(property)]
-    fn can_raise(&self) -> bool {
-        false
-    }
-
-    #[zbus(property)]
-    fn has_track_list(&self) -> bool {
-        false // TODO: Implement this
-    }
-
-    #[zbus(property)]
-    fn identity(&self) -> &str {
-        "Sanic-rs"
-    }
-}

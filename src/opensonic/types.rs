@@ -197,7 +197,7 @@ impl Song {
 }
 
 impl SubsonicError {
-    pub fn from_response(val: Value) -> Box<dyn Error> {
+    pub fn from_response(val: Value) -> Box<dyn Error + Send + Sync> {
         let err = serde_json::from_value::<Self>(val["subsonic-response"]["error"].clone());
         if err.is_err(){
             err.unwrap_err().into()

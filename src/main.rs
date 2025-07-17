@@ -1,5 +1,5 @@
 use crate::ui::app::start_app;
-use crate::mpris::{MprisBase, MprisPlayer, PlayerCommand};
+use crate::dbus::player::MprisPlayer;
 use crate::opensonic::client::OpenSubsonicClient;
 use crate::player::TrackList;
 use rodio::{OutputStreamBuilder};
@@ -9,11 +9,13 @@ use tokio::signal;
 use tokio::sync::{RwLock, mpsc};
 use zbus::connection;
 use zbus::object_server::InterfaceRef;
+use crate::dbus::base::{MprisBase, PlayerCommand};
+use crate::dbus::track_list::MprisTrackList;
 
-mod mpris;
 mod opensonic;
 mod player;
 mod ui;
+mod dbus;
 
 mod icon_names {
     include!(concat!(env!("OUT_DIR"), "/icon_names.rs"));
@@ -63,12 +65,28 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .build()
         .await?;
 
-    let interface_ref: InterfaceRef<MprisPlayer> = connection
+    let player_ref: InterfaceRef<MprisPlayer> = connection
         .object_server()
         .interface("/org/mpris/MediaPlayer2")
         .await?;
 
-    let handle = start_app((interface_ref, track_list.clone(), client.clone()));
+    connection.object_server()
+        .at(
+            "/org/mpris/MediaPlayer2",
+            MprisTrackList {
+                track_list: track_list.clone(),
+                client: client.clone(),
+                player_reference: player_ref.clone(),
+                track_list_sender: None
+            }
+        ).await?;
+
+    let track_list_ref: InterfaceRef<MprisTrackList> = connection
+        .object_server()
+        .interface("/org/mpris/MediaPlayer2")
+        .await?;
+
+    let handle = start_app((player_ref, track_list.clone(), client.clone(), track_list_ref));
 
     loop {
         tokio::select! {

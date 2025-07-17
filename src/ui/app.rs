@@ -1,5 +1,5 @@
 use crate::icon_names;
-use crate::mpris::MprisPlayer;
+use crate::dbus::player::MprisPlayer;
 use crate::opensonic::client::OpenSubsonicClient;
 use crate::player::TrackList;
 use crate::ui::current_song::CurrentSong;
@@ -15,6 +15,7 @@ use std::sync::Arc;
 use std::thread;
 use tokio::sync::RwLock;
 use zbus::object_server::InterfaceRef;
+use crate::dbus::track_list::MprisTrackList;
 use crate::ui::track_list::TrackListWidget;
 
 pub struct Model {
@@ -29,10 +30,11 @@ pub enum AppMsg {
 
 }
 
-type Init = (
+pub type Init = (
     InterfaceRef<MprisPlayer>,
     Arc<RwLock<TrackList>>,
     Arc<OpenSubsonicClient>,
+    InterfaceRef<MprisTrackList>,
 );
 
 pub fn start_app(init: Init) -> thread::JoinHandle<()> {

@@ -4,16 +4,16 @@
 // SPDX-FileCopyrightText: 2022  Emmanuele Bassi
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::cell::{Cell, RefCell};
-use std::sync::Arc;
+use crate::opensonic::client::OpenSubsonicClient;
 use relm4::adw::gdk::Texture;
 use relm4::adw::glib::clone;
-use relm4::adw::gtk::{gdk, gio, glib, graphene, gsk, prelude::*, subclass::prelude::*};
 use relm4::adw::gtk;
-use crate::opensonic::client::OpenSubsonicClient;
+use relm4::adw::gtk::{gdk, gio, glib, graphene, gsk, prelude::*, subclass::prelude::*};
+use std::cell::{Cell, RefCell};
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, glib::Enum, PartialEq, Default)]
-#[enum_type(name = "AmberolCoverSize")]
+#[enum_type(name = "SanicCoverSize")]
 pub enum CoverSize {
     #[default]
     Huge = 0,
@@ -24,7 +24,7 @@ pub enum CoverSize {
 impl AsRef<str> for CoverSize {
     fn as_ref(&self) -> &str {
         match self {
-            CoverSize::Huge => "Huge",
+            CoverSize::Huge => "huge",
             CoverSize::Large => "large",
             CoverSize::Small => "small",
         }
@@ -32,11 +32,11 @@ impl AsRef<str> for CoverSize {
 }
 
 mod imp {
+    use super::*;
     use glib::{ParamSpec, ParamSpecEnum, ParamSpecObject, Value};
     use relm4::adw::gtk;
     use relm4::adw::gtk::graphene::Size;
     use relm4::once_cell::sync::Lazy;
-    use super::*;
 
     const HUGE_SIZE: i32 = 512;
     const LARGE_SIZE: i32 = 192;

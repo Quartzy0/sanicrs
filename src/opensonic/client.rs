@@ -1,16 +1,10 @@
-use crate::opensonic::types::{
-    Extensions, InvalidResponseError, License, Search3Results, SubsonicError,
-};
+use crate::opensonic::types::{Extensions, InvalidResponseError, License, Search3Results, Song, SubsonicError};
 use format_url::FormatUrl;
 use rand::distr::{Alphanumeric, SampleString};
 use reqwest;
 use reqwest::{Client, ClientBuilder, Response};
-use std::env;
 use std::error::Error;
-use std::io::Bytes;
 use std::path::Path;
-use tokio::fs::File;
-use tokio::io::AsyncReadExt;
 
 pub struct OpenSubsonicClient {
     host: String,
@@ -371,5 +365,22 @@ impl OpenSubsonicClient {
             }
         } // Caching either didn't work or is not enabled
         Some(self.get_action_request_get_url("getCoverArt.view", vec![("id", id)]))
+    }
+
+    pub async fn get_song(&self, id: &str) -> Result<Song, Box<dyn Error + Send + Sync>> {
+        let body = self
+            .get_action_request("getSong.view", vec![("id", id)])
+            .await?
+            .text()
+            .await?;
+        let response: serde_json::Value = serde_json::from_str(&body)?;
+        if response["subsonic-response"]["status"] != "ok" {
+            return Err(SubsonicError::from_response(response));
+        }
+
+        let resp: Song = serde_json::from_value(
+            response["subsonic-response"]["song"].clone(),
+        )?;
+        Ok(resp)
     }
 }
