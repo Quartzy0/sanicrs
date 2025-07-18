@@ -1,7 +1,6 @@
-use crate::icon_names;
-use crate::dbus::player::MprisPlayer;
+use crate::{icon_names, PlayerCommand};
 use crate::opensonic::client::OpenSubsonicClient;
-use crate::player::TrackList;
+use crate::player::{PlayerInfo, TrackList};
 use crate::ui::current_song::CurrentSong;
 use gtk::prelude::GtkWindowExt;
 use relm4::adw::prelude::*;
@@ -13,6 +12,8 @@ use relm4::{
 };
 use std::sync::Arc;
 use std::thread;
+use readlock_tokio::SharedReadLock;
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::RwLock;
 use zbus::object_server::InterfaceRef;
 use crate::dbus::track_list::MprisTrackList;
@@ -20,7 +21,6 @@ use crate::ui::track_list::TrackListWidget;
 
 pub struct Model {
     track_list: Arc<RwLock<TrackList>>,
-    sender: AsyncComponentSender<Self>,
     current_song: AsyncConnector<CurrentSong>,
     track_list_connector: AsyncConnector<TrackListWidget>,
 }
@@ -31,10 +31,11 @@ pub enum AppMsg {
 }
 
 pub type Init = (
-    InterfaceRef<MprisPlayer>,
+    SharedReadLock<PlayerInfo>,
     Arc<RwLock<TrackList>>,
     Arc<OpenSubsonicClient>,
     InterfaceRef<MprisTrackList>,
+    Arc<UnboundedSender<PlayerCommand>>
 );
 
 pub fn start_app(init: Init) -> thread::JoinHandle<()> {
@@ -77,7 +78,7 @@ impl AsyncComponent for Model {
     async fn init(
         init: Self::Init,
         root: Self::Root,
-        sender: AsyncComponentSender<Self>,
+        _sender: AsyncComponentSender<Self>,
     ) -> AsyncComponentParts<Self> {
         let current_song = CurrentSong::builder()
             .launch(init.clone());
@@ -85,7 +86,6 @@ impl AsyncComponent for Model {
             .launch(init.clone());
         let model = Model {
             track_list: init.1,
-            sender: sender.clone(),
             current_song,
             track_list_connector
         };

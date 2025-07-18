@@ -1,143 +1,22 @@
 use crate::opensonic::client::OpenSubsonicClient;
-use crate::player::{SongEntry, TrackList};
-use crate::ui::current_song::{CurrentSong, CurrentSongMsg};
-use relm4::AsyncComponentSender;
-use rodio::{OutputStream, Sink};
+use crate::player::{PlaybackStatus, PlayerInfo, SongEntry, TrackList, MAX_PLAYBACK_RATE, MIN_PLAYBACK_RATE};
+use crate::PlayerCommand;
 use std::collections::HashMap;
-use std::error::Error;
-use std::io::Cursor;
-use std::ops::Add;
+use std::ops::{Add, Deref};
 use std::sync::Arc;
 use std::time::Duration;
-use rodio::source::EmptyCallback;
+use readlock_tokio::SharedReadLock;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::RwLock;
-use uuid::Uuid;
-use zbus::{interface, Connection};
-use zbus::object_server::InterfaceRef;
+use zbus::interface;
+use zbus::object_server::SignalEmitter;
 use zvariant::{Array, ObjectPath, Str, Value};
-use crate::opensonic::types::Song;
-use crate::PlayerCommand;
-
-const MAX_PLAYBACK_RATE: f64 = 10.0;
-const MIN_PLAYBACK_RATE: f64 = 0.0;
 
 pub struct MprisPlayer {
-    client: Arc<OpenSubsonicClient>,
-    sink: Sink,
-    current_song_id: RwLock<String>,
-    track_list: Arc<RwLock<TrackList>>,
-    cmd_channel: Arc<UnboundedSender<PlayerCommand>>,
-
-    model_sender: Option<AsyncComponentSender<CurrentSong>>,
-}
-
-impl MprisPlayer {
-    pub fn new(
-        client: Arc<OpenSubsonicClient>,
-        stream_handle: &OutputStream,
-        track_list: Arc<RwLock<TrackList>>,
-        cmd_channel: Arc<UnboundedSender<PlayerCommand>>
-    ) -> Self {
-        MprisPlayer {
-            client,
-            sink: Sink::connect_new(stream_handle.mixer()),
-            current_song_id: RwLock::new("".to_string()),
-            track_list,
-            model_sender: None,
-            cmd_channel,
-        }
-    }
-}
-
-impl MprisPlayer {
-    pub fn set_model(&mut self, model_sender: AsyncComponentSender<CurrentSong>) {
-        self.model_sender = Some(model_sender);
-    }
-
-    pub async fn start_current(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let track_list = self.track_list.read().await;
-        let song = match track_list.current() {
-            None => {return Ok(())}
-            Some(s) => &s.1
-        };
-        {
-            let x = self.current_song_id.read().await;
-            if song.id == x.as_str() {
-                return Ok(());
-            }
-        }
-        println!("Playing: {}", song.title);
-        let stream = self
-            .client
-            .stream(&*song.id, None, None, None, None, None, None);
-
-        let x1 = stream
-            .await
-            .expect("Error when reading bytes")
-            .bytes()
-            .await?; // TODO: Figure this out without downloading entire file first
-        let reader = Cursor::new(x1);
-        /*let x = stream.await.expect("Error reading stream").bytes_stream();
-        let reader =
-            StreamReader::new(x.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)));
-
-
-        let reader = StreamDownload::new_async_read(
-            AsyncReadStreamParams::new(reader),
-            MemoryStorageProvider::default(),
-            Settings::default(),
-        ).await?;*/
-
-        let decoder = match &song.suffix {
-            None => rodio::Decoder::new(reader)?,
-            Some(suffix) => match suffix.as_str() {
-                "wav" => rodio::Decoder::new_wav(reader)?,
-                "ogg" => rodio::Decoder::new_vorbis(reader)?,
-                "flac" => rodio::Decoder::new_flac(reader)?,
-                _ => rodio::Decoder::new(reader)?,
-            },
-        };
-
-        self.sink.clear();
-        self.sink.append(decoder);
-        let cmd_channel = self.cmd_channel.clone();
-        let callback_source = EmptyCallback::new(Box::new(move || {
-            cmd_channel.send(PlayerCommand::Next).expect("Error sending message Next");
-        }));
-        self.sink.append(callback_source);
-        self.sink.play();
-        {
-            let mut x = self.current_song_id.write().await;
-            *x = song.id.clone();
-        }
-
-        self.send_signal(CurrentSongMsg::SongUpdate(song.clone()));
-        self.update_playback_state();
-
-        Ok(())
-    }
-
-    fn update_playback_state(&self) {
-        self.send_signal(CurrentSongMsg::PlaybackStateChange(String::from(self.playback_status())));
-    }
-    
-    pub fn set_volume_no_notify(&self, volume: f64){
-        self.sink.set_volume(volume as f32);
-    }
-
-    pub fn send_signal(&self, signal: CurrentSongMsg) {
-        if let Some(model_sender) = &self.model_sender{
-            model_sender.input(signal);
-        }
-    }
-
-    pub async fn set_position_unchecked(&mut self, position: u64) -> Result<(), zbus::fdo::Error> {
-        let position = Duration::from_micros(position);
-        self.sink.try_seek(position).map_err(|e| zbus::fdo::Error::IOError(format!("Error when seeking: {}", e)))?;
-        self.send_signal(CurrentSongMsg::ProgressUpdateSync(Some(position.as_secs_f64())));
-        Ok(())
-    }
+    pub client: Arc<OpenSubsonicClient>,
+    pub track_list: Arc<RwLock<TrackList>>,
+    pub cmd_channel: Arc<UnboundedSender<PlayerCommand>>,
+    pub player_ref: SharedReadLock<PlayerInfo>,
 }
 
 pub async fn get_song_metadata<'a>(song: &SongEntry, client: Arc<OpenSubsonicClient>) -> Result<HashMap<&'a str, Value<'a>>, zbus::fdo::Error> {
@@ -199,6 +78,10 @@ pub async fn get_song_metadata<'a>(song: &SongEntry, client: Arc<OpenSubsonicCli
 
 #[interface(name = "org.mpris.MediaPlayer2.Player")]
 impl MprisPlayer {
+
+    #[zbus(signal)]
+    pub async fn seeked(emitter: &SignalEmitter<'_>, position: i64) -> Result<(), zbus::Error>;
+
     pub async fn open_uri(&self, uri: &str) -> Result<(), zbus::fdo::Error> {
         let mut track_list = self.track_list.write().await;
         let err = track_list.add_song_from_uri(uri, self.client.clone(), None).await;
@@ -209,54 +92,27 @@ impl MprisPlayer {
     }
 
     pub async fn play(&self) {
-        if !self.sink.empty() {
-            self.sink.play();
-        } else {
-            self.start_current().await.expect("Error playing");
-        }
-        self.update_playback_state();
+        self.cmd_channel.send(PlayerCommand::Play).expect("Error sending message to player")
     }
 
     pub async fn pause(&self) {
-        if !self.sink.empty() {
-            self.sink.pause();
-        }
-        self.update_playback_state();
+        self.cmd_channel.send(PlayerCommand::Pause).expect("Error sending message to player")
     }
 
     pub async fn play_pause(&self) {
-        if self.sink.is_paused() || self.sink.empty() {
-            self.play().await;
-        } else {
-            self.pause().await;
-        }
+        self.cmd_channel.send(PlayerCommand::PlayPause).expect("Error sending message to player")
     }
 
-    pub async fn next(&mut self) {
-        {
-            let mut track_list = self.track_list.write().await;
-            track_list.next();
-        }
-        self.start_current()
-            .await
-            .expect("Error starting next track");
+    pub fn next(&self) {
+        self.cmd_channel.send(PlayerCommand::Next).expect("Error sending message to player")
     }
 
-    pub async fn previous(&mut self) {
-        {
-            let mut track_list = self.track_list.write().await;
-            track_list.previous();
-        }
-        self.start_current()
-            .await
-            .expect("Error starting next track");
+    pub async fn previous(&self) {
+        self.cmd_channel.send(PlayerCommand::Previous).expect("Error sending message to player")
     }
 
-    pub async fn stop(&mut self) {
-        self.sink.clear();
-        let mut track_list = self.track_list.write().await;
-        track_list.clear();
-        self.update_playback_state();
+    pub async fn stop(&self) {
+        self.cmd_channel.send(PlayerCommand::Stop).expect("Error sending message to player")
     }
 
     pub async fn set_position(&mut self, track_id: &str, position: i64) -> Result<(), zbus::fdo::Error> {
@@ -277,13 +133,12 @@ impl MprisPlayer {
                 return Ok(());
             }
         }
-        self.sink.try_seek(position).map_err(|e| zbus::fdo::Error::IOError(format!("Error when seeking: {}", e)))?;
-        self.send_signal(CurrentSongMsg::ProgressUpdateSync(Some(position.as_secs_f64())));
+        self.cmd_channel.send(PlayerCommand::SetPosition(position)).expect("Error sending message to player");
         Ok(())
     }
 
     pub async fn seek(&mut self, offset: i64) -> Result<(), zbus::fdo::Error> {
-        let current_position = self.sink.get_pos();
+        let current_position = Duration::from_micros(PlayerInfo::position(&self.player_ref.lock().await.deref()) as u64);
         let new_positon = if offset > 0 {
             current_position.add(Duration::from_micros(offset as u64))
         } else {
@@ -302,10 +157,9 @@ impl MprisPlayer {
             }
         }
         if seek_next {
-            self.next().await;
+            self.cmd_channel.send(PlayerCommand::Next).expect("Error sending message to player");
         } else {
-            self.sink.try_seek(new_positon).map_err(|e| zbus::fdo::Error::IOError(format!("Error when seeking: {}", e)))?;
-            self.send_signal(CurrentSongMsg::ProgressUpdateSync(Some(new_positon.as_secs_f64())));
+            self.cmd_channel.send(PlayerCommand::SetPosition(new_positon)).expect("Error sending message to player");
         }
         Ok(())
     }
@@ -322,32 +176,27 @@ impl MprisPlayer {
     }
 
     #[zbus(property)]
-    pub fn volume(&self) -> f64 {
-        self.sink.volume() as f64
+    pub async fn volume(&self) -> f64 {
+        self.player_ref.lock().await.volume()
     }
 
     #[zbus(property)]
     pub fn set_volume(&self, volume: f64) {
-        self.sink.set_volume(volume as f32);
-        self.send_signal(CurrentSongMsg::VolumeChangedExternal(volume));
+        self.cmd_channel.send(PlayerCommand::SetVolume(volume)).expect("Error sending message to player");
     }
 
     #[zbus(property)]
-    pub fn playback_status(&self) -> &str {
-        if self.sink.empty() {
-            "Stopped"
-        } else {
-            if self.sink.is_paused() {
-                "Paused"
-            } else {
-                "Playing"
-            }
+    pub async fn playback_status(&self) -> &str {
+        match self.player_ref.lock().await.playback_status() {
+            PlaybackStatus::Playing => "Playing",
+            PlaybackStatus::Paused => "Paused",
+            PlaybackStatus::Stopped => "Stopped"
         }
     }
 
     #[zbus(property)]
-    pub fn rate(&self) -> f64 {
-        self.sink.speed() as f64
+    pub async fn rate(&self) -> f64 {
+        self.player_ref.lock().await.rate()
     }
 
     #[zbus(property)]
@@ -362,14 +211,13 @@ impl MprisPlayer {
         if rate == 0.0 {
             self.pause().await;
         } else {
-            self.sink.set_speed(rate as f32);
-            self.send_signal(CurrentSongMsg::RateChange(rate));
+            self.cmd_channel.send(PlayerCommand::SetRate(rate)).expect("Error sending message to player");
         }
     }
 
     #[zbus(property)]
-    pub fn position(&self) -> i64 {
-        (self.sink.get_pos().as_micros() as f64 * self.sink.speed() as f64) as i64
+    pub async fn position(&self) -> i64 {
+        PlayerInfo::position(&self.player_ref.lock().await.deref())
     }
 
     #[zbus(property)]
@@ -416,7 +264,7 @@ impl MprisPlayer {
 
     #[zbus(property)]
     pub fn can_seek(&self) -> bool {
-        false // TODO: Implement
+        true
     }
 
     #[zbus(property)]

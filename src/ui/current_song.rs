@@ -1,10 +1,11 @@
-use crate::icon_names;
-use crate::dbus::player::MprisPlayer;
 use crate::opensonic::client::OpenSubsonicClient;
 use crate::opensonic::types::Song;
-use crate::player::TrackList;
+use crate::player::{PlaybackStatus, PlayerInfo, SongEntry};
+use crate::ui::app::Init;
 use crate::ui::cover_picture;
 use crate::ui::cover_picture::CoverSize;
+use crate::{PlayerCommand, icon_names};
+use readlock_tokio::SharedReadLock;
 use relm4::adw::glib;
 use relm4::adw::glib::ControlFlow;
 use relm4::adw::gtk::glib::Propagation;
@@ -15,77 +16,30 @@ use relm4::component::{AsyncComponent, AsyncComponentParts, AsyncComponentSender
 use relm4::prelude::*;
 use std::ops::Deref;
 use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::RwLock;
-use zbus::object_server::InterfaceRef;
-use crate::ui::app::Init;
-
-/*#[derive(Debug)]
-pub struct SongInfo {
-    pub id: String,
-    pub title: String,
-    pub artist: String,
-    pub album: String,
-    pub cover_art_id: Option<String>,
-    pub duration: Duration,
-}
-
-impl SongInfo {
-    pub fn dbus_path(&self) -> String {
-        format!("/me/quartzy/sanicrs/track/{}", self.id.replace("-", "/"))
-    }
-}
-
-impl From<&Song> for SongInfo {
-    fn from(value: &Song) -> Self {
-        SongInfo {
-            id: value.id.clone(),
-            title: value.title.clone(),
-            artist: value
-                .display_artists
-                .clone()
-                .unwrap_or(value.artist.clone().unwrap_or("Unknown Artist".to_string())),
-            album: value.album.clone().unwrap_or("Unknown Album".to_string()),
-            cover_art_id: value.cover_art.clone(),
-            duration: value.duration.unwrap(),
-        }
-    }
-}
-
-impl Default for SongInfo {
-    fn default() -> Self {
-        SongInfo {
-            id: "".to_string(),
-            album: "".to_string(),
-            artist: "".to_string(),
-            title: "".to_string(),
-            cover_art_id: None,
-            duration: Duration::from_secs(0),
-        }
-    }
-}*/
+use std::time::{Duration, SystemTime};
+use tokio::sync::mpsc::UnboundedSender;
+use uuid::Uuid;
 
 pub struct CurrentSong {
-    player_reference: InterfaceRef<MprisPlayer>,
-    track_list: Arc<RwLock<TrackList>>,
-    sender: AsyncComponentSender<Self>,
+    player_ref: SharedReadLock<PlayerInfo>,
     client: Arc<OpenSubsonicClient>,
+    cmd_sender: Arc<UnboundedSender<PlayerCommand>>,
 
     // UI data
     song_info: Option<Arc<Song>>,
     playback_state_icon: &'static str,
     playback_position: f64,
     playback_rate: f64,
+    previous_progress_check: SystemTime
 }
 
 #[derive(Debug)]
 pub enum CurrentSongMsg {
     PlayPause,
-    Start,
     Next,
     Previous,
-    SongUpdate(Arc<Song>),
-    PlaybackStateChange(String),
+    SongUpdate(Option<SongEntry>),
+    PlaybackStateChange(PlaybackStatus),
     VolumeChanged(f64),
     VolumeChangedExternal(f64),
     ProgressUpdate,
@@ -179,7 +133,7 @@ impl AsyncComponent for CurrentSong {
                                     set_value: model.playback_position,
                                     set_hexpand: true,
                                     set_width_request: 400,
-                                    connect_change_value[sender] => move |_range, scroll_type, val| {
+                                    connect_change_value[sender] => move |_range, _scroll_type, val| {
                                         sender.input(CurrentSongMsg::Seek(val));
                                         Propagation::Proceed
                                     },
@@ -247,28 +201,26 @@ impl AsyncComponent for CurrentSong {
         root: Self::Root,
         sender: AsyncComponentSender<Self>,
     ) -> AsyncComponentParts<Self> {
-        let x1 = init.0.clone();
-        let mut x = x1.get_mut().await;
-        x.set_model(sender.clone());
-
         {
             let track_list = init.1.read().await;
             match track_list.current() {
                 None => Default::default(),
-                Some(song) => sender.input(CurrentSongMsg::SongUpdate(song.1.clone())),
+                Some(song) => sender.input(CurrentSongMsg::SongUpdate(Some(SongEntry(Uuid::new_v4(), song.1.clone())))),
             };
         }
         let model = CurrentSong {
-            player_reference: init.0,
-            track_list: init.1,
+            player_ref: init.0,
             client: init.2,
             playback_state_icon: icon_names::PLAY,
-            sender: sender.clone(),
             song_info: Default::default(),
             playback_position: 0.0,
             playback_rate: 1.0,
+            cmd_sender: init.4,
+            previous_progress_check: SystemTime::now(),
         };
         let widgets: Self::Widgets = view_output!();
+        
+        model.cmd_sender.send(PlayerCommand::CurrentSongSendSender(sender.clone())).expect("Error sending sender to player");
 
         let sender1 = sender.clone();
         glib::timeout_add_local(Duration::from_millis(500), move || {
@@ -291,80 +243,80 @@ impl AsyncComponent for CurrentSong {
         _root: &Self::Root,
     ) {
         match message {
-            CurrentSongMsg::Start => {
-                self.player_reference
-                    .get()
-                    .await
-                    .start_current()
-                    .await
-                    .expect("Error starting!");
-            }
-            CurrentSongMsg::PlayPause => {
-                self.player_reference.get().await.play_pause().await;
-            }
-            CurrentSongMsg::Next => {
-                self.player_reference.get_mut().await.next().await;
-            }
-            CurrentSongMsg::Previous => self.player_reference.get_mut().await.previous().await,
-            CurrentSongMsg::PlaybackStateChange(new_state) => match new_state.as_str() {
-                "Paused" => self.playback_state_icon = icon_names::PLAY,
-                "Playing" => self.playback_state_icon = icon_names::PAUSE,
-                _ => self.playback_state_icon = icon_names::STOP,
+            CurrentSongMsg::PlayPause => self
+                .cmd_sender
+                .send(PlayerCommand::PlayPause)
+                .expect("Error sending message to player"),
+            CurrentSongMsg::Next => self
+                .cmd_sender
+                .send(PlayerCommand::Next)
+                .expect("Error sending message to player"),
+            CurrentSongMsg::Previous => self
+                .cmd_sender
+                .send(PlayerCommand::Previous)
+                .expect("Error sending message to player"),
+            CurrentSongMsg::PlaybackStateChange(new_state) => match new_state {
+                PlaybackStatus::Paused => self.playback_state_icon = icon_names::PLAY,
+                PlaybackStatus::Playing => self.playback_state_icon = icon_names::PAUSE,
+                PlaybackStatus::Stopped => self.playback_state_icon = icon_names::STOP,
             },
             CurrentSongMsg::SongUpdate(info) => {
-                if self.song_info.is_none() || self.song_info.as_ref().unwrap().id != info.id {
-                    widgets
-                        .cover_image
-                        .set_cover_from_id(info.cover_art.as_ref(), self.client.clone())
-                        .await;
-                }
-                self.song_info = Some(info);
-                let mpris_ref = self.player_reference.get().await;
-                self.playback_position =
-                    Duration::from_micros(MprisPlayer::position(mpris_ref.deref()) as u64)
+                if let Some(info) = &info {
+                    if self.song_info.is_none() || self.song_info.as_ref().unwrap().id != info.1.id {
+                        widgets
+                            .cover_image
+                            .set_cover_from_id(info.1.cover_art.as_ref(), self.client.clone())
+                            .await;
+                    }
+                    self.playback_position = Duration::from_micros(PlayerInfo::position(
+                        self.player_ref.lock().await.deref(),
+                    ) as u64)
                         .as_secs_f64();
+                }
+                self.song_info = match info {
+                    None => None,
+                    Some(i) => Some(i.1)
+                };
+                self.previous_progress_check = SystemTime::now();
             }
-            CurrentSongMsg::VolumeChanged(volume) => {
-                self.player_reference
-                    .get()
-                    .await
-                    .set_volume_no_notify(volume);
-            }
-            CurrentSongMsg::VolumeChangedExternal(volume) => {
-                widgets.volume_btn.set_value(volume);
-            }
+            CurrentSongMsg::VolumeChanged(v) => self
+                .cmd_sender
+                .send(PlayerCommand::SetVolume(v))
+                .expect("Error sending message to player"),
+            CurrentSongMsg::VolumeChangedExternal(v) => widgets.volume_btn.set_value(v),
             CurrentSongMsg::ProgressUpdate => {
                 if self.playback_state_icon == icon_names::PAUSE {
                     // If icon is PAUSE, then its currently playing
-                    self.playback_position += (0.5 * self.playback_rate);
+                    self.playback_position += SystemTime::now()
+                        .duration_since(self.previous_progress_check)
+                        .expect("Error calculating progress tiem")
+                        .as_secs_f64()
+                        * self.playback_rate;
                 }
+                self.previous_progress_check = SystemTime::now();
             }
             CurrentSongMsg::RateChange(rate) => {
                 self.playback_rate = rate;
                 sender.input(CurrentSongMsg::ProgressUpdateSync(None));
             }
-            CurrentSongMsg::RateChangeUI(rate) => {
-                self.player_reference.get().await.set_rate(rate).await;
-            }
+            CurrentSongMsg::RateChangeUI(r) => self
+                .cmd_sender
+                .send(PlayerCommand::SetRate(r))
+                .expect("Error sending message to player"),
             CurrentSongMsg::ProgressUpdateSync(pos) => {
                 if let Some(pos) = pos {
                     self.playback_position = pos;
                 } else {
-                    let mpris_ref = self.player_reference.get().await;
-                    self.playback_position =
-                        Duration::from_micros(MprisPlayer::position(mpris_ref.deref()) as u64)
-                            .as_secs_f64();
+                    self.playback_position = Duration::from_micros(PlayerInfo::position(
+                        self.player_ref.lock().await.deref(),
+                    ) as u64)
+                    .as_secs_f64();
                 }
             }
-            CurrentSongMsg::Seek(pos) => {
-                let mut mpris_player = self.player_reference.get_mut().await;
-                mpris_player
-                    .set_position_unchecked(
-                        Duration::from_secs_f64(pos).as_micros() as u64,
-                    )
-                    .await
-                    .expect("Error seeking");
-            }
+            CurrentSongMsg::Seek(pos) => self
+                .cmd_sender
+                .send(PlayerCommand::SetPosition(Duration::from_secs_f64(pos)))
+                .expect("Error sending message to player"),
         }
         self.update_view(widgets, sender);
     }

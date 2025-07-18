@@ -1,10 +1,8 @@
-use std::sync::Arc;
+use crate::player::SongEntry;
 use relm4::adw::glib;
 use relm4::adw::glib::Object;
 use relm4::adw::prelude::*;
 use relm4::adw::subclass::prelude::*;
-use crate::opensonic::types::Song;
-use crate::player::SongEntry;
 
 #[derive(Clone, Copy, Debug, glib::Enum, PartialEq, Default)]
 #[enum_type(name = "SanicPositionState")]
@@ -53,15 +51,15 @@ impl SongObject {
 }
 
 mod imp {
-    use std::cell::{Cell, RefCell};
-    use std::ops::Deref;
+    use crate::player::SongEntry;
+    use crate::ui::song_object::PositionState;
     use relm4::adw::glib::{ParamSpec, ParamSpecEnum, ParamSpecString, Value};
     use relm4::adw::gtk::glib;
     use relm4::adw::gtk::prelude::*;
     use relm4::adw::gtk::subclass::prelude::*;
     use relm4::once_cell::sync::Lazy;
-    use crate::player::SongEntry;
-    use crate::ui::song_object::PositionState;
+    use std::cell::{Cell, RefCell};
+    use std::ops::Deref;
 
     // Object holding the state
     pub struct SongObject {

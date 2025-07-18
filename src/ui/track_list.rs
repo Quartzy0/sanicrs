@@ -1,27 +1,23 @@
-use std::sync::Arc;
-use relm4::adw::gio::ListStore;
-use relm4::prelude::*;
-use tokio::sync::RwLock;
-use zbus::object_server::InterfaceRef;
-use relm4::adw::{glib, gtk};
-use relm4::adw::glib::{clone, closure, Object};
-use relm4::adw::glib::gobject_ffi::GObject;
-use relm4::adw::prelude::*;
-use relm4::adw::gtk::{Align, ListItem, Orientation, SignalListItemFactory, Widget};
-use crate::dbus::player::MprisPlayer;
-use crate::dbus::track_list::MprisTrackList;
 use crate::opensonic::client::OpenSubsonicClient;
-use crate::opensonic::types::Song;
 use crate::player::TrackList;
 use crate::ui::app::Init;
 use crate::ui::cover_picture::{CoverPicture, CoverSize};
 use crate::ui::song_object::{PositionState, SongObject};
+use relm4::adw::gio::ListStore;
+use relm4::adw::glib::{clone, closure, Object};
+use relm4::adw::gtk::{Align, ListItem, Orientation, SignalListItemFactory, Widget};
+use relm4::adw::prelude::*;
+use relm4::adw::{glib, gtk};
+use relm4::prelude::*;
+use std::sync::Arc;
+use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::RwLock;
+use crate::PlayerCommand;
 
 pub struct TrackListWidget {
-    player_reference: InterfaceRef<MprisPlayer>,
     track_list: Arc<RwLock<TrackList>>,
-    track_list_mpris: InterfaceRef<MprisTrackList>,
     client: Arc<OpenSubsonicClient>,
+    cmd_sender: Arc<UnboundedSender<PlayerCommand>>,
 
     factory: SignalListItemFactory,
 }
@@ -63,17 +59,13 @@ impl AsyncComponent for TrackListWidget {
         sender: AsyncComponentSender<Self>,
     ) -> AsyncComponentParts<Self> {
         let model = TrackListWidget {
-            player_reference: init.0,
             track_list: init.1,
             client: init.2,
             factory: SignalListItemFactory::new(),
-            track_list_mpris: init.3,
+            cmd_sender: init.4,
         };
+        model.cmd_sender.send(PlayerCommand::TrackListSendSender(sender.clone())).expect("Error sending sender to player");
         let widgets: Self::Widgets = view_output!();
-        {
-            let mut track_list_mpris = model.track_list_mpris.get_mut().await;
-            track_list_mpris.track_list_sender = Some(sender.clone());
-        }
 
         model.factory.connect_setup(move |_, list_item| {
             let hbox = gtk::Box::builder()
@@ -178,10 +170,7 @@ impl AsyncComponent for TrackListWidget {
         _root: &Self::Root,
     ) {
         match message {
-            TrackListMsg::TrackActivated(i) => {
-                let tracklist_ref = self.track_list_mpris.get().await;
-                tracklist_ref.go_to_index(i).await.expect("Error performing goto index");
-            },
+            TrackListMsg::TrackActivated(i) => self.cmd_sender.send(PlayerCommand::GoTo(i)).expect("Error sending message to player"),
             TrackListMsg::TrackChanged(pos) => {
                 let model = widgets.list.model();
                 if let Some(model) = model {

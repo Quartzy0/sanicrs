@@ -5,7 +5,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use crate::opensonic::client::OpenSubsonicClient;
-use relm4::adw::gdk::Texture;
 use relm4::adw::glib::clone;
 use relm4::adw::gtk;
 use relm4::adw::gtk::{gdk, gio, glib, graphene, gsk, prelude::*, subclass::prelude::*};
@@ -80,7 +79,7 @@ mod imp {
 
             self.obj()
                 .upcast_ref::<gtk::Accessible>()
-                .update_property(&[(gtk::accessible::Property::Label("Cover image"))]);
+                .update_property(&[gtk::accessible::Property::Label("Cover image")]);
         }
 
         fn properties() -> &'static [ParamSpec] {
@@ -218,7 +217,7 @@ impl CoverPicture {
                     .await
                     .expect("Error getting cover image");
                 let bytes = glib::Bytes::from(&img_resp);
-                Some(Texture::from_bytes(&bytes).expect("Error loading textre"))
+                Some(gdk::Texture::from_bytes(&bytes).expect("Error loading textre"))
             }
         };
         self.set_cover(texture.as_ref());

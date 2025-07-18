@@ -1,10 +1,242 @@
 use std::error::Error;
+use std::io::Cursor;
 use std::sync::Arc;
+use std::time::Duration;
+use rodio::{Decoder, OutputStream, Sink};
+use rodio::source::EmptyCallback;
+use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::RwLock;
 use uuid::Uuid;
 use crate::opensonic::client::OpenSubsonicClient;
 use crate::opensonic::types::{InvalidResponseError, Song};
+use crate::PlayerCommand;
 
-#[derive(Clone)]
+pub const MAX_PLAYBACK_RATE: f64 = 10.0;
+pub const MIN_PLAYBACK_RATE: f64 = 0.0;
+
+#[derive(Debug)]
+pub enum PlaybackStatus {
+    Playing,
+    Paused,
+    Stopped
+}
+
+pub struct PlayerInfo {
+    client: Arc<OpenSubsonicClient>,
+    sink: Sink,
+    current_song_id: RwLock<String>,
+    track_list: Arc<RwLock<TrackList>>,
+    cmd_channel: Arc<UnboundedSender<PlayerCommand>>,
+}
+
+impl PlayerInfo {
+    pub fn new(
+        client: Arc<OpenSubsonicClient>,
+        stream_handle: &OutputStream,
+        track_list: Arc<RwLock<TrackList>>,
+        cmd_channel: Arc<UnboundedSender<PlayerCommand>>,
+    ) -> Self {
+        PlayerInfo {
+            client,
+            sink: Sink::connect_new(stream_handle.mixer()),
+            current_song_id: RwLock::new("".to_string()),
+            track_list,
+            cmd_channel
+        }
+    }
+
+    pub async fn goto(&self, index: usize) -> Result<(), Box<dyn Error + Send + Sync>> {
+        self.track_list.write().await.set_current(index);
+        self.start_current().await
+    }
+
+    pub async fn remove_song(&self, index: usize) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let mut guard = self.track_list.write().await;
+        let c = guard.current_index();
+        guard.remove_song(index);
+        if c != guard.current_index() {
+            self.start_current().await?;
+        }
+        Ok(())
+    }
+
+    pub async fn play(&self) {
+        if !self.sink.empty() {
+            self.sink.play();
+        } else {
+            self.start_current().await.expect("Error playing");
+        }
+    }
+
+    pub fn pause(&self) {
+        self.sink.pause();
+    }
+
+    pub async fn playpause(&self) {
+        if self.sink.is_paused() || self.sink.empty() {
+            self.play().await;
+        } else {
+            self.pause();
+        }
+    }
+
+    pub async fn start_current(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let track_list = self.track_list.read().await;
+        let song = match track_list.current() {
+            None => {return Ok(())}
+            Some(s) => &s.1
+        };
+        {
+            let x = self.current_song_id.read().await;
+            if song.id == x.as_str() {
+                return Ok(());
+            }
+        }
+        println!("Playing: {}", song.title);
+        let stream = self
+            .client
+            .stream(&*song.id, None, None, None, None, Some(true), None);
+
+        let response = stream
+            .await
+            .expect("Error when reading bytes");
+        let len = response.headers().get("Content-Length").and_then(|t| match t.to_str() {
+            Ok(v) => match v.parse::<u64>() {
+                Ok(v) => Some(v),
+                Err(_) => None
+            },
+            Err(_) => None
+        });
+        let x1 = response
+            .bytes()
+            .await?; // TODO: Figure this out without downloading entire file first
+        let reader = Cursor::new(x1);
+        /*let x = stream.await.expect("Error reading stream").bytes_stream();
+        let reader =
+            StreamReader::new(x.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)));
+
+
+        let reader = StreamDownload::new_async_read(
+            AsyncReadStreamParams::new(reader),
+            MemoryStorageProvider::default(),
+            Settings::default(),
+        ).await?;*/
+
+        let mut decoder = Decoder::builder().with_data(reader).with_seekable(true);
+        if let Some(len) = len {
+            decoder = decoder.with_byte_len(len);
+        }
+        if let Some(suffix) = &song.suffix {
+            decoder = decoder.with_hint(suffix);
+        }
+        if let Some(mime) = &song.media_type {
+            decoder = decoder.with_mime_type(mime);
+        }
+
+        self.sink.clear();
+        self.sink.append(decoder.build()?);
+        let cmd_channel = self.cmd_channel.clone();
+        let callback_source = EmptyCallback::new(Box::new(move || {
+            cmd_channel.send(PlayerCommand::Next).expect("Error sending message Next");
+        }));
+        self.sink.append(callback_source);
+        self.sink.play();
+        {
+            let mut x = self.current_song_id.write().await;
+            *x = song.id.clone();
+        }
+
+        Ok(())
+    }
+
+    pub async fn next(&self) {
+        {
+            let mut track_list = self.track_list.write().await;
+            track_list.next();
+        }
+        self.start_current()
+            .await
+            .expect("Error starting next track");
+    }
+
+    pub async fn previous(&self) {
+        {
+            let mut track_list = self.track_list.write().await;
+            track_list.previous();
+        }
+        self.start_current()
+            .await
+            .expect("Error starting next track");
+    }
+
+    pub async fn stop(&self) {
+        self.sink.clear();
+        let mut track_list = self.track_list.write().await;
+        track_list.clear();
+    }
+
+    pub async fn set_position(&self, position: Duration) -> Result<(), Box<dyn Error>> {
+        let position = position;
+        {
+            let track_list = self.track_list.read().await;
+            let song = match track_list.current() {
+                Some(t) => t,
+                None => return Ok(())
+            };
+            if let Some(duration) = song.1.duration && position > duration {
+                return Ok(());
+            }
+        }
+        self.sink.try_seek(position)?;
+        Ok(())
+    }
+
+    pub fn volume(&self) -> f64 {
+        self.sink.volume() as f64
+    }
+
+    pub fn set_volume(&self, volume: f64) {
+        self.sink.set_volume(volume as f32);
+    }
+
+    pub fn playback_status(&self) -> PlaybackStatus {
+        if self.sink.empty() {
+            PlaybackStatus::Stopped
+        } else {
+            if self.sink.is_paused() {
+                PlaybackStatus::Paused
+            } else {
+                PlaybackStatus::Playing
+            }
+        }
+    }
+
+    pub fn rate(&self) -> f64 {
+        self.sink.speed() as f64
+    }
+
+    pub fn set_rate(&self, rate: f64) {
+        let rate = if rate > MAX_PLAYBACK_RATE {
+            MAX_PLAYBACK_RATE
+        } else if rate < MIN_PLAYBACK_RATE {
+            MIN_PLAYBACK_RATE
+        } else {
+            rate
+        };
+        if rate == 0.0 {
+            self.pause();
+        } else {
+            self.sink.set_speed(rate as f32);
+            // self.send_signal(CurrentSongMsg::RateChange(rate));
+        }
+    }
+
+    pub fn position(&self) -> i64 {
+        (self.sink.get_pos().as_micros() as f64 /* * self.sink.speed() as f64*/) as i64
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct SongEntry(
     pub Uuid,
     pub Arc<Song>

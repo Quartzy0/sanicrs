@@ -1,75 +1,28 @@
 use crate::dbus::player;
-use crate::dbus::player::MprisPlayer;
 use crate::opensonic::client::OpenSubsonicClient;
-use crate::opensonic::types::Song;
 use crate::player::{SongEntry, TrackList};
 use std::collections::HashMap;
 use std::sync::Arc;
-use relm4::AsyncComponentSender;
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::RwLock;
 use zbus::interface;
-use zbus::object_server::InterfaceRef;
 use zvariant::{ObjectPath, Value};
-use crate::ui::track_list::TrackListMsg::{ReloadList, TrackChanged};
-use crate::ui::track_list::TrackListWidget;
+use crate::PlayerCommand;
 
 pub struct MprisTrackList {
     pub track_list: Arc<RwLock<TrackList>>,
     pub client: Arc<OpenSubsonicClient>,
-    pub player_reference: InterfaceRef<MprisPlayer>,
-    pub track_list_sender: Option<AsyncComponentSender<TrackListWidget>>,
-}
-
-impl MprisTrackList {
-    pub async fn remove_track_index(&self, index: usize) -> Result<(), zbus::fdo::Error> {
-        {
-            let mut track_list = self.track_list.write().await;
-            track_list.remove_song(index);
-        }
-        self.notify_reload_list();
-        self.player_reference
-            .get()
-            .await
-            .start_current()
-            .await
-            .map_err(|e| {
-                zbus::fdo::Error::Failed(format!("Error trying to play song: {}", e))
-            })
-    }
-
-    pub async fn go_to_index(&self, index: usize) -> Result<(), zbus::fdo::Error> {
-        {
-            let mut track_list = self.track_list.write().await;
-            track_list.set_current(index);
-            if let Some(sender) = &self.track_list_sender {
-                sender.input(TrackChanged(index));
-            }
-        }
-        self.player_reference
-            .get()
-            .await
-            .start_current()
-            .await
-            .map_err(|e| {
-                zbus::fdo::Error::Failed(format!("Error trying to play song: {}", e))
-            })
-    }
-
-    fn notify_reload_list(&self) {
-        if let Some(sender) = &self.track_list_sender {
-            sender.input(ReloadList);
-        }
-    }
+    pub cmd_channel: Arc<UnboundedSender<PlayerCommand>>,
 }
 
 #[interface(name = "org.mpris.MediaPlayer2.TrackList")]
 impl MprisTrackList {
     async fn add_track(
         &self,
-        uri: &str,
+        uri: String,
         after_track: ObjectPath<'_>,
         set_as_current: bool,
-    ) -> Result<(), zbus::fdo::Error> {
+    ) {
         let index: Option<usize> =
             if after_track.as_str() == "/org/mpris/MediaPlayer2/TrackList/NoTrack" {
                 Some(0)
@@ -81,61 +34,32 @@ impl MprisTrackList {
                     .position(|x| x.dbus_path() == after_track.as_str())
                     .and_then(|t| Some(t+1))
             };
-        let mut track_list = self.track_list.write().await;
-        match track_list
-            .add_song_from_uri(uri, self.client.clone(), index)
-            .await
-        {
-            None => {
-                if set_as_current {
-                    let new_i = track_list.get_songs().len() - 1;
-                    track_list.set_current(index.unwrap_or(new_i));
-                    self.notify_reload_list();
-                    drop(track_list);
-                    return self.player_reference
-                        .get()
-                        .await
-                        .start_current()
-                        .await
-                        .map_err(|e| {
-                            zbus::fdo::Error::Failed(format!("Error trying to play song: {}", e))
-                        });
-                }
-                self.notify_reload_list();
-                Ok(())
-            }
-            Some(err) => Err(zbus::fdo::Error::Failed(format!(
-                "Error when adding song: {}",
-                err
-            ))),
-        }
+        self.cmd_channel.send(PlayerCommand::AddFromUri(uri, index, set_as_current)).expect("Error sending message to player");
     }
 
     async fn remove_track(&self, track_id: ObjectPath<'_>) -> Result<(), zbus::fdo::Error> {
-        let index: Option<usize> = {
+        let index: usize = {
             let track_list = self.track_list.read().await;
             track_list
                 .get_songs()
                 .iter()
                 .position(|x| x.dbus_path() == track_id.as_str())
+                .ok_or(zbus::fdo::Error::Failed("Track not found".to_string()))?
         };
-        if let Some(index) = index {
-            return self.remove_track_index(index).await
-        }
+        self.cmd_channel.send(PlayerCommand::Remove(index)).expect("Error sending message to player");
         Ok(())
     }
 
     async fn go_to(&self, track_id: ObjectPath<'_>) -> Result<(), zbus::fdo::Error> {
-        let index: Option<usize> = {
+        let index: usize = {
             let track_list = self.track_list.read().await;
             track_list
                 .get_songs()
                 .iter()
                 .position(|x| x.dbus_path() == track_id.as_str())
+                .ok_or(zbus::fdo::Error::Failed("Track not found".to_string()))?
         };
-        if let Some(index) = index {
-            return self.go_to_index(index).await;
-        }
+        self.cmd_channel.send(PlayerCommand::GoTo(index)).expect("Error sending message to player");
         Ok(())
     }
 
