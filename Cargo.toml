@@ -22,6 +22,7 @@ relm4 = { version = "0.9.1", default-features = false, features = ["libadwaita",
 relm4-icons = "0.10.0-beta.2"
 uuid = {version = "1.17.0", default-features = false, features = ["v4"]}
 readlock-tokio = "0.1.4"
+color-thief = "0.2.2"
 
 [build-dependencies]
 relm4-icons-build = "0.10.0-beta.2"

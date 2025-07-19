@@ -10,7 +10,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::RwLock;
 use zbus::interface;
 use zbus::object_server::SignalEmitter;
-use zvariant::{Array, ObjectPath, Str, Value};
+use zvariant::{Array, Str, Value};
 
 pub struct MprisPlayer {
     pub client: Arc<OpenSubsonicClient>,
@@ -19,9 +19,9 @@ pub struct MprisPlayer {
     pub player_ref: SharedReadLock<PlayerInfo>,
 }
 
-pub async fn get_song_metadata<'a>(song: &SongEntry, client: Arc<OpenSubsonicClient>) -> Result<HashMap<&'a str, Value<'a>>, zbus::fdo::Error> {
+pub async fn get_song_metadata<'a>(song: &SongEntry, client: Arc<OpenSubsonicClient>) -> HashMap<&'a str, Value<'a>> {
     let mut map: HashMap<&str, Value> = HashMap::new();
-    map.insert("mpris:trackid", Value::ObjectPath(ObjectPath::try_from(song.dbus_path()).expect("Invalid object path")));
+    map.insert("mpris:trackid", Value::ObjectPath(song.dbus_obj()));
     let song = &song.1;
     map.insert("xesam:title", Value::Str(Str::from(song.title.clone())));
     if let Some(cover_art) = &song.cover_art{
@@ -73,7 +73,7 @@ pub async fn get_song_metadata<'a>(song: &SongEntry, client: Arc<OpenSubsonicCli
         map.insert("xesam:audioBPM", Value::I64(bpm as i64));
     }
 
-    Ok(map)
+    map
 }
 
 #[interface(name = "org.mpris.MediaPlayer2.Player")]
@@ -142,7 +142,7 @@ impl MprisPlayer {
         let new_positon = if offset > 0 {
             current_position.add(Duration::from_micros(offset as u64))
         } else {
-            current_position.checked_sub(Duration::from_micros((-offset) as u64)).unwrap_or_else(|| Duration::from_secs(0))
+            current_position.checked_sub(Duration::from_micros((-offset) as u64)).unwrap_or(Duration::from_secs(0))
         };
         let mut seek_next = false;
         {
@@ -172,7 +172,7 @@ impl MprisPlayer {
             None => return Err(zbus::fdo::Error::Failed("No song currently playing".to_string()))
         };
 
-        get_song_metadata(&song, self.client.clone()).await
+        Ok(get_song_metadata(&song, self.client.clone()).await)
     }
 
     #[zbus(property)]

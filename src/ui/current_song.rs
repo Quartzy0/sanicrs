@@ -49,11 +49,16 @@ pub enum CurrentSongMsg {
     Seek(f64),
 }
 
+#[derive(Debug)]
+pub enum CurrentSongOut {
+    ColorSchemeChange,
+}
+
 #[relm4::component(pub async)]
 impl AsyncComponent for CurrentSong {
     type CommandOutput = ();
     type Input = CurrentSongMsg;
-    type Output = ();
+    type Output = CurrentSongOut;
     type Init = Init;
 
     view! {
@@ -265,8 +270,7 @@ impl AsyncComponent for CurrentSong {
                     if self.song_info.is_none() || self.song_info.as_ref().unwrap().id != info.1.id {
                         widgets
                             .cover_image
-                            .set_cover_from_id(info.1.cover_art.as_ref(), self.client.clone())
-                            .await;
+                            .set_cover_from_id(info.1.cover_art.as_ref(), self.client.clone());
                     }
                     self.playback_position = Duration::from_micros(PlayerInfo::position(
                         self.player_ref.lock().await.deref(),
@@ -278,6 +282,7 @@ impl AsyncComponent for CurrentSong {
                     Some(i) => Some(i.1)
                 };
                 self.previous_progress_check = SystemTime::now();
+                sender.output(CurrentSongOut::ColorSchemeChange).expect("Error sending message out of CurrentSong component");
             }
             CurrentSongMsg::VolumeChanged(v) => self
                 .cmd_sender

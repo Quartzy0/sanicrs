@@ -7,6 +7,7 @@ use std::error::Error;
 use std::path::Path;
 use std::sync::Arc;
 
+#[derive(Default)]
 pub struct OpenSubsonicClient {
     host: String,
     username: String,

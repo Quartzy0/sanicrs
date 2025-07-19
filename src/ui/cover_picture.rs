@@ -33,18 +33,24 @@ impl AsRef<str> for CoverSize {
 mod imp {
     use super::*;
     use glib::{ParamSpec, ParamSpecEnum, ParamSpecObject, Value};
+    use relm4::adw::glib::{JoinHandle, ParamSpecString};
     use relm4::adw::gtk;
     use relm4::adw::gtk::graphene::Size;
+    use relm4::gtk::graphene::{Point, Rect};
     use relm4::once_cell::sync::Lazy;
+    use zbus::export::futures_core::FusedFuture;
 
     const HUGE_SIZE: i32 = 512;
     const LARGE_SIZE: i32 = 192;
     const SMALL_SIZE: i32 = 48;
 
-    #[derive(Debug, Default)]
+    #[derive(Default)]
     pub struct CoverPicture {
         pub cover: RefCell<Option<gdk::Texture>>,
+        pub cover_id: RefCell<Option<String>>,
+        pub handle: Cell<Option<JoinHandle<()>>>,
         pub cover_size: Cell<CoverSize>,
+        pub client: RefCell<Arc<OpenSubsonicClient>>,
     }
 
     #[glib::object_subclass]
@@ -87,6 +93,7 @@ mod imp {
                 vec![
                     ParamSpecObject::builder::<gdk::Texture>("cover").build(),
                     ParamSpecEnum::builder::<CoverSize>("cover-size").build(),
+                    ParamSpecString::builder("cover-id").build(),
                 ]
             });
             PROPERTIES.as_ref()
@@ -96,6 +103,7 @@ mod imp {
             match pspec.name() {
                 "cover" => self.cover.borrow().to_value(),
                 "cover-size" => self.cover_size.get().to_value(),
+                "cover-id" => self.cover_id.borrow().to_value(),
                 _ => unimplemented!(),
             }
         }
@@ -108,6 +116,13 @@ mod imp {
                 "cover-size" => self
                     .obj()
                     .set_cover_size(value.get::<CoverSize>().expect("Required CoverSize")),
+                "cover-id" => self.obj().set_cover_from_id(
+                    value
+                        .get::<Option<String>>()
+                        .expect("Requited Option<String>")
+                        .as_ref(),
+                    self.client.borrow().clone(),
+                ),
                 _ => unimplemented!(),
             };
         }
@@ -127,11 +142,11 @@ mod imp {
         }
 
         fn snapshot(&self, snapshot: &gtk::Snapshot) {
+            let widget = self.obj();
+            let scale_factor = widget.scale_factor() as f64;
+            let width = widget.width() as f64 * scale_factor;
+            let height = widget.height() as f64 * scale_factor;
             if let Some(ref cover) = *self.cover.borrow() {
-                let widget = self.obj();
-                let scale_factor = widget.scale_factor() as f64;
-                let width = widget.width() as f64 * scale_factor;
-                let height = widget.height() as f64 * scale_factor;
                 let ratio = cover.intrinsic_aspect_ratio();
                 let w;
                 let h;
@@ -145,7 +160,7 @@ mod imp {
 
                 let x = (width - w.ceil()) / 2.0;
                 let y = (height - h).floor() / 2.0;
-                let bounds = graphene::Rect::new(0.0, 0.0, w as f32, h as f32);
+                let bounds = Rect::new(0.0, 0.0, w as f32, h as f32);
 
                 let border_radius: f32 = match self.cover_size.get() {
                     CoverSize::Huge => 10.0,
@@ -153,10 +168,9 @@ mod imp {
                     CoverSize::Small => 3.0,
                 };
 
-
                 snapshot.save();
                 snapshot.scale(1.0 / scale_factor as f32, 1.0 / scale_factor as f32);
-                snapshot.translate(&graphene::Point::new(x as f32, y as f32));
+                snapshot.translate(&Point::new(x as f32, y as f32));
                 snapshot.push_rounded_clip(&gsk::RoundedRect::new(
                     bounds,
                     Size::new(border_radius, border_radius),
@@ -164,12 +178,89 @@ mod imp {
                     Size::new(border_radius, border_radius),
                     Size::new(border_radius, border_radius),
                 ));
-                snapshot.append_scaled_texture(
-                    cover,
-                    gsk::ScalingFilter::Trilinear,
-                    &bounds,
-                );
+                snapshot.append_scaled_texture(cover, gsk::ScalingFilter::Trilinear, &bounds);
                 snapshot.pop();
+                snapshot.restore();
+            } else {
+                snapshot.save();
+                snapshot.scale(1.0 / scale_factor as f32, 1.0 / scale_factor as f32);
+                let center_x: f32 = width as f32 / 2.0;
+                let center_y: f32 = height as f32 / 2.0;
+                let length: f32 = match self.cover_size.get() {
+                    CoverSize::Huge => 150.0,
+                    CoverSize::Large => 50.0,
+                    CoverSize::Small => 15.0,
+                };
+                let thickness: f32 = match self.cover_size.get() {
+                    CoverSize::Huge => 20.0,
+                    CoverSize::Large => 10.0,
+                    CoverSize::Small => 5.0,
+                };
+                let handle = self.handle.take();
+                if handle.is_none() || handle.unwrap().is_terminated() {   // If loading has finished and image is still None,
+                    let p1 = gsk::PathBuilder::new();           // draw X to indicate loading failed or there is no
+                    p1.move_to(center_x - length, center_y - length);// cover.
+                    p1.line_to(center_x + length, center_y + length);
+                    let p2 = gsk::PathBuilder::new();
+                    p2.move_to(center_x + length, center_y - length);
+                    p2.line_to(center_x - length, center_y + length);
+
+                    snapshot.append_stroke(
+                        &p1.to_path(),
+                        &gsk::Stroke::new(thickness),
+                        &gdk::RGBA::new(0.2, 0.2, 0.2, 1.0),
+                    );
+                    snapshot.append_stroke(
+                        &p2.to_path(),
+                        &gsk::Stroke::new(thickness),
+                        &gdk::RGBA::new(0.2, 0.2, 0.2, 1.0),
+                    );
+                } else {
+                    // Draw three dots (...) to indicate loading
+                    let p1 = gsk::PathBuilder::new();
+                    p1.add_rounded_rect(&gsk::RoundedRect::new(
+                        Rect::new(
+                            center_x - thickness / 2.0,
+                            center_y - thickness / 2.0,
+                            thickness,
+                            thickness,
+                        ),
+                        Size::new(thickness, thickness),
+                        Size::new(thickness, thickness),
+                        Size::new(thickness, thickness),
+                        Size::new(thickness, thickness),
+                    ));
+                    p1.add_rounded_rect(&gsk::RoundedRect::new(
+                        Rect::new(
+                            center_x - thickness / 2.0 - length,
+                            center_y - thickness / 2.0,
+                            thickness,
+                            thickness,
+                        ),
+                        Size::new(thickness, thickness),
+                        Size::new(thickness, thickness),
+                        Size::new(thickness, thickness),
+                        Size::new(thickness, thickness),
+                    ));
+                    p1.add_rounded_rect(&gsk::RoundedRect::new(
+                        Rect::new(
+                            center_x - thickness / 2.0 + length,
+                            center_y - thickness / 2.0,
+                            thickness,
+                            thickness,
+                        ),
+                        Size::new(thickness, thickness),
+                        Size::new(thickness, thickness),
+                        Size::new(thickness, thickness),
+                        Size::new(thickness, thickness),
+                    ));
+
+                    snapshot.append_stroke(
+                        &p1.to_path(),
+                        &gsk::Stroke::new(thickness),
+                        &gdk::RGBA::new(0.2, 0.2, 0.2, 1.0),
+                    );
+                }
                 snapshot.restore();
             }
         }
@@ -189,8 +280,10 @@ impl Default for CoverPicture {
 }
 
 impl CoverPicture {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(client: Arc<OpenSubsonicClient>) -> Self {
+        let obj = Self::default();
+        obj.imp().client.replace(client);
+        obj
     }
 
     pub fn cover(&self) -> Option<gdk::Texture> {
@@ -207,20 +300,37 @@ impl CoverPicture {
         self.queue_draw();
         self.notify("cover");
     }
-    
-    pub async fn set_cover_from_id(&self, cover_id: Option<&String>, client: Arc<OpenSubsonicClient>) {
-        let texture = match cover_id {
-            None => None,
-            Some(cover_id) => {
-                let img_resp = client
-                    .get_cover_image(cover_id.as_str(), Some("512"))
-                    .await
-                    .expect("Error getting cover image");
-                let bytes = glib::Bytes::from(&img_resp);
-                Some(gdk::Texture::from_bytes(&bytes).expect("Error loading textre"))
-            }
-        };
-        self.set_cover(texture.as_ref());
+
+    pub fn set_cover_from_id(&self, cover_id: Option<&String>, client: Arc<OpenSubsonicClient>) {
+        self.imp().cover_id.replace(cover_id.cloned());
+        if let Some(handle) = self.imp().handle.take() {
+            handle.abort();
+        }
+        self.set_cover(None);
+        if let Some(cover_id) = cover_id {
+            self.imp()
+                .handle
+                .replace(Some(glib::spawn_future_local(clone!(
+                    #[strong]
+                    cover_id,
+                    #[weak(rename_to = cover_widget)]
+                    self,
+                    async move {
+                        match client.get_cover_image(cover_id.as_str(), Some("512")).await {
+                            Ok(resp) => {
+                                let bytes = glib::Bytes::from(&resp);
+                                let texture =
+                                    gdk::Texture::from_bytes(&bytes).expect("Error loading textre");
+                                cover_widget.set_cover(Some(&texture));
+                            }
+                            Err(e) => {
+                                println!("Error getting cover image: {}", e);
+                                cover_widget.set_cover(None);
+                            }
+                        }
+                    }
+                ))));
+        }
     }
 
     pub fn set_cover_size(&self, cover_size: CoverSize) {

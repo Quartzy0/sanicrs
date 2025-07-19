@@ -1,6 +1,6 @@
 use crate::dbus::base::MprisBase;
 use crate::dbus::player::{MprisPlayer, MprisPlayerSignals};
-use crate::dbus::track_list::MprisTrackList;
+use crate::dbus::track_list::{MprisTrackList, MprisTrackListSignals};
 use crate::opensonic::client::OpenSubsonicClient;
 use crate::player::{PlayerInfo, TrackList};
 use crate::ui::app::start_app;
@@ -16,6 +16,7 @@ use tokio::signal;
 use tokio::sync::{RwLock, mpsc};
 use zbus::connection;
 use zbus::object_server::InterfaceRef;
+use zvariant::ObjectPath;
 
 mod dbus;
 mod opensonic;
@@ -65,6 +66,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             "xqFs@4GX0x}W-Sdx!~C\"\\T^)z",
             "Sanic-rs",
             Some("cache"),
+            // None
         )
         .await,
     );
@@ -137,7 +139,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Shared::<PlayerInfo>::get_read_lock(&player),
         track_list.clone(),
         client.clone(),
-        track_list_ref,
+        track_list_ref.clone(),
         command_send.clone(),
     ));
 
@@ -179,7 +181,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         PlayerCommand::Stop => {
                             player.stop().await;
                             send_cs_msg(&cs_sender, CurrentSongMsg::PlaybackStateChange(player.playback_status()));
+                            send_cs_msg(&cs_sender, CurrentSongMsg::SongUpdate(None));
                             player_ref.get().await.playback_status_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
+                            track_list_ref.track_list_replaced(Vec::new(),
+                                ObjectPath::from_static_str_unchecked("/org/mpris/MediaPlayer2/TrackList/NoTrack"))
+                            .await.expect("Error sending DBus signal");
                         },
                         PlayerCommand::SetRate(r) => {
                             player.set_rate(r);
@@ -203,10 +209,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             player_ref.get().await.metadata_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
                         },
                         PlayerCommand::Remove(i) => {
-                            player.remove_song(i).await.expect("Error removing track");
+                            let e = player.remove_song(i).await.expect("Error removing track");
                             send_tl_msg(&tl_sender, TrackListMsg::ReloadList);
                             send_cs_msg(&cs_sender, CurrentSongMsg::SongUpdate(track_list.read().await.current().cloned()));
                             player_ref.get().await.metadata_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
+                            track_list_ref.track_removed(e.dbus_obj()).await.expect("Error sending DBus signal");
                         },
                         PlayerCommand::TrackListSendSender(s) => tl_sender = Some(s),
                         PlayerCommand::CurrentSongSendSender(s) => cs_sender = Some(s),
@@ -217,12 +224,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 .await
                             {
                                 None => {
+                                    let new_i = index.unwrap_or(track_list.get_songs().len() - 1);
+                                    let songs = track_list.get_songs();
+                                    track_list_ref.track_added(
+                                        dbus::player::get_song_metadata(&songs[new_i], client.clone()).await,
+                                        if new_i == 0 {
+                                            ObjectPath::from_static_str_unchecked("/org/mpris/MediaPlayer2/TrackList/NoTrack")
+                                        } else {
+                                            songs[new_i-1].dbus_obj()
+                                        }
+                                    ).await.expect("Error sending DBus signal");
                                     if set_as_current {
-                                        let new_i = track_list.get_songs().len() - 1;
-                                        track_list.set_current(index.unwrap_or(new_i));
+                                        track_list.set_current(new_i);
                                         send_tl_msg(&tl_sender, TrackListMsg::ReloadList);
                                         send_cs_msg(&cs_sender, CurrentSongMsg::SongUpdate(track_list.current().cloned()));
-                                        player_ref.get().await.metadata_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
+                                        player_ref.get().await
+                                            .metadata_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
                                         drop(track_list);
                                         player.start_current().await.expect("Error when starting current track");
                                     } else {
@@ -232,7 +249,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 Some(err) => println!("Error when adding song from URI: {}", err),
                             };
                         }
-                        // _ => todo!(),
                     }
                 }
             }

@@ -67,7 +67,10 @@ impl AsyncComponent for TrackListWidget {
         model.cmd_sender.send(PlayerCommand::TrackListSendSender(sender.clone())).expect("Error sending sender to player");
         let widgets: Self::Widgets = view_output!();
 
-        model.factory.connect_setup(move |_, list_item| {
+        model.factory.connect_setup(clone!(
+            #[strong(rename_to = client)]
+            model.client,
+            move |_, list_item| {
             let hbox = gtk::Box::builder()
                 .orientation(Orientation::Horizontal)
                 .valign(Align::Start)
@@ -91,7 +94,7 @@ impl AsyncComponent for TrackListWidget {
             artist.set_halign(Align::Start);
             vbox.append(&artist);
 
-            let picture = CoverPicture::new();
+            let picture = CoverPicture::new(client.clone());
             picture.set_cover_size(CoverSize::Small);
             hbox.append(&picture);
             hbox.append(&vbox);
@@ -112,6 +115,10 @@ impl AsyncComponent for TrackListWidget {
                 .bind(&artist, "label", Widget::NONE);
             list_item
                 .property_expression("item")
+                .chain_property::<SongObject>("cover-art-id")
+                .bind(&picture, "cover-id", Widget::NONE);
+            list_item
+                .property_expression("item")
                 .chain_property::<SongObject>("position-state")
                 .chain_closure::<Vec<String>>(closure!(
                     move |_: Option<Object>, position_state: PositionState| {
@@ -122,40 +129,7 @@ impl AsyncComponent for TrackListWidget {
                         }
                 }))
                 .bind(&hbox, "css-classes", Widget::NONE);
-        });
-        let client = model.client.clone();
-        model.factory.connect_bind(move |_, list_item| {
-            let song_object = list_item
-                .downcast_ref::<ListItem>()
-                .expect("Needs to be ListItem")
-                .item()
-                .and_downcast::<SongObject>()
-                .expect("The item has to be an `SongObject`.");
-
-            let hbox = list_item
-                .downcast_ref::<ListItem>()
-                .expect("Needs to be ListItem")
-                .child()
-                .and_downcast::<gtk::Box>()
-                .expect("The child has to be a `Box`.");
-
-            let cover_picture = hbox
-                .first_child()
-                .expect("No child in HBox")
-                .downcast::<CoverPicture>()
-                .expect("First child needs to be cover picture");
-            glib::spawn_future_local(clone!(
-                #[strong]
-                cover_picture,
-                #[strong]
-                client,
-                #[strong]
-                song_object,
-                async move {
-                    cover_picture.set_cover_from_id(song_object.cover_art_id().as_ref(), client).await;
-                }
-            ));
-        });
+        }));
 
         sender.input(TrackListMsg::ReloadList);
 

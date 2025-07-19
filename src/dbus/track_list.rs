@@ -1,13 +1,14 @@
+use crate::PlayerCommand;
 use crate::dbus::player;
 use crate::opensonic::client::OpenSubsonicClient;
 use crate::player::{SongEntry, TrackList};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::RwLock;
+use tokio::sync::mpsc::UnboundedSender;
 use zbus::interface;
+use zbus::object_server::SignalEmitter;
 use zvariant::{ObjectPath, Value};
-use crate::PlayerCommand;
 
 pub struct MprisTrackList {
     pub track_list: Arc<RwLock<TrackList>>,
@@ -17,12 +18,34 @@ pub struct MprisTrackList {
 
 #[interface(name = "org.mpris.MediaPlayer2.TrackList")]
 impl MprisTrackList {
-    async fn add_track(
-        &self,
-        uri: String,
+    #[zbus(signal)]
+    pub async fn track_list_replaced(
+        emitter: &SignalEmitter<'_>,
+        tracks: Vec<ObjectPath<'_>>,
+        current: ObjectPath<'_>,
+    ) -> Result<(), zbus::Error>;
+
+    #[zbus(signal)]
+    pub async fn track_added(
+        emitter: &SignalEmitter<'_>,
+        metadata: HashMap<&str, Value<'_>>,
         after_track: ObjectPath<'_>,
-        set_as_current: bool,
-    ) {
+    ) -> Result<(), zbus::Error>;
+
+    #[zbus(signal)]
+    pub async fn track_removed(
+        emitter: &SignalEmitter<'_>,
+        track_id: ObjectPath<'_>,
+    ) -> Result<(), zbus::Error>;
+
+    #[zbus(signal)]
+    pub async fn track_metadata_changed(
+        emitter: &SignalEmitter<'_>,
+        track: ObjectPath<'_>,
+        metadata: HashMap<&str, Value<'_>>,
+    ) -> Result<(), zbus::Error>;
+
+    async fn add_track(&self, uri: String, after_track: ObjectPath<'_>, set_as_current: bool) {
         let index: Option<usize> =
             if after_track.as_str() == "/org/mpris/MediaPlayer2/TrackList/NoTrack" {
                 Some(0)
@@ -32,9 +55,11 @@ impl MprisTrackList {
                     .get_songs()
                     .iter()
                     .position(|x| x.dbus_path() == after_track.as_str())
-                    .and_then(|t| Some(t+1))
+                    .and_then(|t| Some(t + 1))
             };
-        self.cmd_channel.send(PlayerCommand::AddFromUri(uri, index, set_as_current)).expect("Error sending message to player");
+        self.cmd_channel
+            .send(PlayerCommand::AddFromUri(uri, index, set_as_current))
+            .expect("Error sending message to player");
     }
 
     async fn remove_track(&self, track_id: ObjectPath<'_>) -> Result<(), zbus::fdo::Error> {
@@ -46,7 +71,9 @@ impl MprisTrackList {
                 .position(|x| x.dbus_path() == track_id.as_str())
                 .ok_or(zbus::fdo::Error::Failed("Track not found".to_string()))?
         };
-        self.cmd_channel.send(PlayerCommand::Remove(index)).expect("Error sending message to player");
+        self.cmd_channel
+            .send(PlayerCommand::Remove(index))
+            .expect("Error sending message to player");
         Ok(())
     }
 
@@ -59,7 +86,9 @@ impl MprisTrackList {
                 .position(|x| x.dbus_path() == track_id.as_str())
                 .ok_or(zbus::fdo::Error::Failed("Track not found".to_string()))?
         };
-        self.cmd_channel.send(PlayerCommand::GoTo(index)).expect("Error sending message to player");
+        self.cmd_channel
+            .send(PlayerCommand::GoTo(index))
+            .expect("Error sending message to player");
         Ok(())
     }
 
@@ -80,10 +109,7 @@ impl MprisTrackList {
 
         let mut map: Vec<HashMap<&str, Value>> = Vec::new();
         for x in songs_refs {
-            let result = player::get_song_metadata(&x, self.client.clone()).await;
-            if let Ok(meta) = result {
-                map.push(meta);
-            }
+            map.push(player::get_song_metadata(&x, self.client.clone()).await);
         }
 
         map

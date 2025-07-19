@@ -7,6 +7,7 @@ use rodio::source::EmptyCallback;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::RwLock;
 use uuid::Uuid;
+use zvariant::ObjectPath;
 use crate::opensonic::client::OpenSubsonicClient;
 use crate::opensonic::types::{InvalidResponseError, Song};
 use crate::PlayerCommand;
@@ -50,14 +51,14 @@ impl PlayerInfo {
         self.start_current().await
     }
 
-    pub async fn remove_song(&self, index: usize) -> Result<(), Box<dyn Error + Send + Sync>> {
+    pub async fn remove_song(&self, index: usize) -> Result<SongEntry, Box<dyn Error + Send + Sync>> {
         let mut guard = self.track_list.write().await;
         let c = guard.current_index();
-        guard.remove_song(index);
+        let e = guard.remove_song(index);
         if c != guard.current_index() {
             self.start_current().await?;
         }
-        Ok(())
+        Ok(e)
     }
 
     pub async fn play(&self) {
@@ -245,6 +246,10 @@ pub struct SongEntry(
 impl SongEntry {
     pub fn dbus_path(&self) -> String {
         format!("/me/quartzy/sanicrs/song/{}", self.0.as_simple().to_string())
+    }
+
+    pub fn dbus_obj<'a>(&self) -> ObjectPath<'a> {
+        ObjectPath::try_from(self.dbus_path().clone()).expect("Error when making object path")
     }
 }
 
