@@ -2,12 +2,11 @@ use crate::opensonic::client::OpenSubsonicClient;
 use crate::opensonic::types::Song;
 use crate::player::{PlaybackStatus, PlayerInfo, SongEntry};
 use crate::ui::app::Init;
-use crate::ui::cover_picture;
-use crate::ui::cover_picture::CoverSize;
+use crate::ui::cover_picture::{CoverPicture, CoverSize};
 use crate::{PlayerCommand, icon_names};
 use readlock_tokio::SharedReadLock;
 use relm4::adw::glib;
-use relm4::adw::glib::ControlFlow;
+use relm4::adw::glib::{clone, closure_local, ControlFlow};
 use relm4::adw::gtk::glib::Propagation;
 use relm4::adw::gtk::prelude::OrientableExt;
 use relm4::adw::gtk::{Align, Orientation};
@@ -17,6 +16,7 @@ use relm4::prelude::*;
 use std::ops::Deref;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
+use color_thief::Color;
 use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
@@ -47,11 +47,12 @@ pub enum CurrentSongMsg {
     RateChange(f64),
     RateChangeUI(f64),
     Seek(f64),
+    CoverLoaded(Option<Vec<Color>>),
 }
 
 #[derive(Debug)]
 pub enum CurrentSongOut {
-    ColorSchemeChange,
+    ColorSchemeChange(Option<Vec<Color>>),
 }
 
 #[relm4::component(pub async)]
@@ -63,6 +64,8 @@ impl AsyncComponent for CurrentSong {
 
     view! {
         adw::Bin {
+            add_css_class: "current-song",
+
             #[wrap(Some)]
             set_child = if let Some(song) = &model.song_info {
                 &gtk::Box {
@@ -70,15 +73,17 @@ impl AsyncComponent for CurrentSong {
                     set_halign: Align::Center,
                     set_valign: Align::Center,
                     set_spacing: 5,
+                    add_css_class: "t2",
 
                     #[name = "cover_image"]
-                    cover_picture::CoverPicture {
+                    CoverPicture {
                         set_cover_size: CoverSize::Huge,
                     },
                     gtk::Label {
                         #[watch]
                         set_label: &song.title,
                         add_css_class: "bold",
+                        add_css_class: "t1",
                     },
                     gtk::Label {
                         #[watch]
@@ -227,15 +232,30 @@ impl AsyncComponent for CurrentSong {
         
         model.cmd_sender.send(PlayerCommand::CurrentSongSendSender(sender.clone())).expect("Error sending sender to player");
 
-        let sender1 = sender.clone();
-        glib::timeout_add_local(Duration::from_millis(500), move || {
-            sender1.input(CurrentSongMsg::ProgressUpdate);
-            return ControlFlow::Continue;
-        });
-        glib::timeout_add_seconds(10, move || {
-            sender.input(CurrentSongMsg::ProgressUpdateSync(None));
-            return ControlFlow::Continue;
-        });
+        glib::timeout_add_local(Duration::from_millis(500), clone!(
+            #[strong]
+            sender,
+            move || {
+                sender.input(CurrentSongMsg::ProgressUpdateSync(None));
+                return ControlFlow::Continue;
+            }
+        ));
+        glib::timeout_add_seconds(10, clone!(
+            #[strong]
+            sender,
+            move || {
+                sender.input(CurrentSongMsg::ProgressUpdateSync(None));
+                return ControlFlow::Continue;
+            }
+        ));
+
+        widgets.cover_image.connect_closure(
+            "cover-loaded",
+            false,
+            closure_local!(move |cover_picture: CoverPicture| {
+                sender.input(CurrentSongMsg::CoverLoaded(cover_picture.get_palette()));
+            }
+        ));
 
         AsyncComponentParts { model, widgets }
     }
@@ -282,7 +302,7 @@ impl AsyncComponent for CurrentSong {
                     Some(i) => Some(i.1)
                 };
                 self.previous_progress_check = SystemTime::now();
-                sender.output(CurrentSongOut::ColorSchemeChange).expect("Error sending message out of CurrentSong component");
+                sender.input(CurrentSongMsg::PlaybackStateChange(self.player_ref.lock().await.playback_status()));
             }
             CurrentSongMsg::VolumeChanged(v) => self
                 .cmd_sender
@@ -322,6 +342,8 @@ impl AsyncComponent for CurrentSong {
                 .cmd_sender
                 .send(PlayerCommand::SetPosition(Duration::from_secs_f64(pos)))
                 .expect("Error sending message to player"),
+            CurrentSongMsg::CoverLoaded(colors) =>
+                sender.output(CurrentSongOut::ColorSchemeChange(colors)).expect("Error sending message out of CurrentSong component"),
         }
         self.update_view(widgets, sender);
     }

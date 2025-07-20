@@ -1,25 +1,26 @@
-use crate::{icon_names, PlayerCommand};
+use crate::dbus::track_list::MprisTrackList;
 use crate::opensonic::client::OpenSubsonicClient;
 use crate::player::{PlayerInfo, TrackList};
 use crate::ui::current_song::{CurrentSong, CurrentSongOut};
+use crate::ui::track_list::TrackListWidget;
+use crate::{PlayerCommand, icon_names};
+use color_thief::Color;
 use gtk::prelude::GtkWindowExt;
+use readlock_tokio::SharedReadLock;
+use relm4::adw::gdk;
 use relm4::adw::prelude::*;
 use relm4::component::AsyncConnector;
+use relm4::gtk::CssProvider;
 use relm4::prelude::*;
 use relm4::{
-    adw, component::{AsyncComponent, AsyncComponentParts, AsyncComponentSender},
-    RelmApp,
+    RelmApp, adw,
+    component::{AsyncComponent, AsyncComponentParts, AsyncComponentSender},
 };
 use std::sync::Arc;
 use std::thread;
-use readlock_tokio::SharedReadLock;
-use relm4::adw::gdk;
-use relm4::gtk::CssProvider;
-use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::RwLock;
+use tokio::sync::mpsc::UnboundedSender;
 use zbus::object_server::InterfaceRef;
-use crate::dbus::track_list::MprisTrackList;
-use crate::ui::track_list::TrackListWidget;
 
 pub struct Model {
     current_song: AsyncController<CurrentSong>,
@@ -29,7 +30,8 @@ pub struct Model {
 
 #[derive(Debug)]
 pub enum AppMsg {
-    ColorschemeChange,
+    ColorschemeChange(Option<Vec<Color>>),
+    Quit,
 }
 
 pub type Init = (
@@ -60,12 +62,14 @@ impl AsyncComponent for Model {
             set_title: Some("Sanic-rs"),
             set_default_width: 400,
             set_default_height: 400,
-            add_css_class: "main-window",
 
             adw::ToolbarView {
                 #[wrap(Some)]
                 set_content = &adw::ViewStack {
                     add = &adw::OverlaySplitView{
+                        // set_collapsed: true,
+                        // set_show_sidebar: true,
+
                         #[wrap(Some)]
                         set_content = model.current_song.widget(),
 
@@ -82,28 +86,35 @@ impl AsyncComponent for Model {
         root: adw::ApplicationWindow,
         sender: AsyncComponentSender<Self>,
     ) -> AsyncComponentParts<Self> {
-        let current_song = CurrentSong::builder()
-            .launch(init.clone())
-            .forward(sender.input_sender(), |msg| match msg {
-            CurrentSongOut::ColorSchemeChange => AppMsg::ColorschemeChange,
-        });
-        let track_list_connector = TrackListWidget::builder()
-            .launch(init.clone());
+        let current_song =
+            CurrentSong::builder()
+                .launch(init.clone())
+                .forward(sender.input_sender(), |msg| match msg {
+                    CurrentSongOut::ColorSchemeChange(colors) => AppMsg::ColorschemeChange(colors),
+                });
+        let track_list_connector = TrackListWidget::builder().launch(init.clone());
         let model = Model {
             current_song,
             track_list_connector,
-            provider: CssProvider::new()
+            provider: CssProvider::new(),
         };
         let base_provider = CssProvider::new();
         let display = gdk::Display::default().expect("Unable to create Display object");
         base_provider.load_from_string(include_str!("../css/style.css"));
-        gtk::style_context_add_provider_for_display(&display, &base_provider, gtk::STYLE_PROVIDER_PRIORITY_SETTINGS);
-        // gtk::style_context_add_provider_for_display(&display, &model.provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+        gtk::style_context_add_provider_for_display(
+            &display,
+            &base_provider,
+            gtk::STYLE_PROVIDER_PRIORITY_SETTINGS,
+        );
+        gtk::style_context_add_provider_for_display(
+            &display,
+            &model.provider,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+
+        init.4.send(PlayerCommand::AppSendSender(sender)).expect("Error sending sender to app");
 
         let widgets = view_output!();
-
-        /*model.provider.load_from_string(":root {--background-color-0: #ffffffff;}");
-        root.action_set_enabled("win.enable-recoloring", true);*/
 
         AsyncComponentParts { model, widgets }
     }
@@ -113,12 +124,28 @@ impl AsyncComponent for Model {
         widgets: &mut Self::Widgets,
         message: Self::Input,
         sender: AsyncComponentSender<Self>,
-        _root: &Self::Root,
+        root: &Self::Root,
     ) {
         match message {
-            AppMsg::ColorschemeChange => {
-
+            AppMsg::ColorschemeChange(colors) => {
+                let mut css = String::from(":root {");
+                if let Some(colors) = colors {
+                    for (i, color) in colors.iter().enumerate() {
+                        css.push_str(
+                            format!(
+                                "--background-color-{}:rgb({},{},{});",
+                                i, color.r, color.g, color.b
+                            )
+                            .as_str(),
+                        );
+                    }
+                }
+                css.push_str("}");
+                self.provider
+                    .load_from_string(css.as_str());
+                root.action_set_enabled("win.enable-recoloring", true);
             },
+            AppMsg::Quit => root.application().expect("Error getting GIO application").quit(),
         };
         self.update_view(widgets, sender);
     }

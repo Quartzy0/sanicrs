@@ -27,7 +27,7 @@ impl MprisBase {
 
     #[zbus(property)]
     fn can_raise(&self) -> bool {
-        false
+        true
     }
 
     #[zbus(property)]

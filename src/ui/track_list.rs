@@ -37,17 +37,41 @@ impl AsyncComponent for TrackListWidget {
     type Init = Init;
 
     view! {
-        gtk::ScrolledWindow {
-            set_hscrollbar_policy: gtk::PolicyType::Never,
-            set_min_content_width: 360,
+        gtk::Box {
+            set_orientation: Orientation::Vertical,
+            add_css_class: "track-list",
+            add_css_class: "t2",
 
-            #[name = "list"]
-            gtk::ListView {
-                set_factory: Some(&model.factory),
-                set_single_click_activate: true,
+            gtk::Box {
+                set_orientation: Orientation::Vertical,
+                add_css_class: "no-bg",
+                add_css_class: "padded",
 
-                connect_activate[sender] => move |_, index| {
-                    sender.input(TrackListMsg::TrackActivated(index as usize));
+                gtk::Label {
+                    set_label: "Song Queue",
+                    add_css_class: "bold"
+                },
+            },
+            gtk::Separator {
+                set_orientation: Orientation::Horizontal,
+            },
+            gtk::ScrolledWindow {
+                set_hscrollbar_policy: gtk::PolicyType::Never,
+                set_min_content_width: 360,
+                set_vexpand: true,
+                set_vexpand_set: true,
+                set_valign: Align::Fill,
+                add_css_class: "no-bg",
+
+                #[name = "list"]
+                gtk::ListView {
+                    set_factory: Some(&model.factory),
+                    set_single_click_activate: true,
+                    add_css_class: "no-bg",
+
+                    connect_activate[sender] => move |_, index| {
+                        sender.input(TrackListMsg::TrackActivated(index as usize));
+                    }
                 }
             }
         }

@@ -1,5 +1,6 @@
 // Code taken from: https://gitlab.gnome.org/World/amberol/-/blob/main/src/cover_picture.rs
-// Modified to have rounded corners rendered directly + Huge size added
+// Modified to have rounded corners rendered directly + Huge size added +
+// Load cover image directly in this widget + some other changes
 
 // SPDX-FileCopyrightText: 2022  Emmanuele Bassi
 // SPDX-License-Identifier: GPL-3.0-or-later
@@ -7,9 +8,11 @@
 use crate::opensonic::client::OpenSubsonicClient;
 use relm4::adw::glib::clone;
 use relm4::adw::gtk;
-use relm4::adw::gtk::{gdk, gio, glib, graphene, gsk, prelude::*, subclass::prelude::*};
+use relm4::adw::gtk::{gdk, gio, glib, gsk, prelude::*, subclass::prelude::*};
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
+use color_thief::{Color, ColorFormat};
+use relm4::adw::gdk::{MemoryFormat, TextureDownloader};
 
 #[derive(Clone, Copy, Debug, glib::Enum, PartialEq, Default)]
 #[enum_type(name = "SanicCoverSize")]
@@ -31,9 +34,11 @@ impl AsRef<str> for CoverSize {
 }
 
 mod imp {
+    use std::sync::OnceLock;
     use super::*;
     use glib::{ParamSpec, ParamSpecEnum, ParamSpecObject, Value};
     use relm4::adw::glib::{JoinHandle, ParamSpecString};
+    use relm4::adw::glib::subclass::Signal;
     use relm4::adw::gtk;
     use relm4::adw::gtk::graphene::Size;
     use relm4::gtk::graphene::{Point, Rect};
@@ -42,7 +47,7 @@ mod imp {
 
     const HUGE_SIZE: i32 = 512;
     const LARGE_SIZE: i32 = 192;
-    const SMALL_SIZE: i32 = 48;
+    const SMALL_SIZE: i32 = 64;
 
     #[derive(Default)]
     pub struct CoverPicture {
@@ -125,6 +130,13 @@ mod imp {
                 ),
                 _ => unimplemented!(),
             };
+        }
+
+        fn signals() -> &'static [Signal] {
+            static SIGNALS: OnceLock<Vec<Signal>> = OnceLock::new();
+            SIGNALS.get_or_init(|| {
+                vec![Signal::builder("cover-loaded").build()]
+            })
         }
     }
 
@@ -322,6 +334,7 @@ impl CoverPicture {
                                 let texture =
                                     gdk::Texture::from_bytes(&bytes).expect("Error loading textre");
                                 cover_widget.set_cover(Some(&texture));
+                                cover_widget.emit_by_name::<()>("cover-loaded", &[]);
                             }
                             Err(e) => {
                                 println!("Error getting cover image: {}", e);
@@ -337,5 +350,15 @@ impl CoverPicture {
         self.imp().cover_size.replace(cover_size);
         self.queue_resize();
         self.notify("cover-size");
+    }
+
+    pub fn get_palette(&self) -> Option<Vec<Color>> {
+        if let Some(ref cover) = *self.imp().cover.borrow() {
+            let mut downloader = TextureDownloader::new(cover);
+            downloader.set_format(MemoryFormat::A8r8g8b8);
+            let (pixels, _size) = downloader.download_bytes();
+            return color_thief::get_palette(&pixels, ColorFormat::Argb, 10, 4).ok();
+        }
+        None
     }
 }

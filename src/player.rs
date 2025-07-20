@@ -46,7 +46,7 @@ impl PlayerInfo {
         }
     }
 
-    pub async fn goto(&self, index: usize) -> Result<(), Box<dyn Error + Send + Sync>> {
+    pub async fn goto(&self, index: usize) -> Result<Option<SongEntry>, Box<dyn Error + Send + Sync>> {
         self.track_list.write().await.set_current(index);
         self.start_current().await
     }
@@ -81,22 +81,22 @@ impl PlayerInfo {
         }
     }
 
-    pub async fn start_current(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    pub async fn start_current(&self) -> Result<Option<SongEntry>, Box<dyn Error + Send + Sync>> {
         let track_list = self.track_list.read().await;
         let song = match track_list.current() {
-            None => {return Ok(())}
-            Some(s) => &s.1
+            None => {return Ok(None)}
+            Some(s) => s
         };
         {
             let x = self.current_song_id.read().await;
-            if song.id == x.as_str() {
-                return Ok(());
+            if song.1.id == x.as_str() {
+                return Ok(Some(song.clone()));
             }
         }
-        println!("Playing: {}", song.title);
+        println!("Playing: {}", song.1.title);
         let stream = self
             .client
-            .stream(&*song.id, None, None, None, None, Some(true), None);
+            .stream(&*song.1.id, None, None, None, None, Some(true), None);
 
         let response = stream
             .await
@@ -127,10 +127,10 @@ impl PlayerInfo {
         if let Some(len) = len {
             decoder = decoder.with_byte_len(len);
         }
-        if let Some(suffix) = &song.suffix {
+        if let Some(suffix) = &song.1.suffix {
             decoder = decoder.with_hint(suffix);
         }
-        if let Some(mime) = &song.media_type {
+        if let Some(mime) = &song.1.media_type {
             decoder = decoder.with_mime_type(mime);
         }
 
@@ -144,30 +144,30 @@ impl PlayerInfo {
         self.sink.play();
         {
             let mut x = self.current_song_id.write().await;
-            *x = song.id.clone();
+            *x = song.1.id.clone();
         }
 
-        Ok(())
+        Ok(Some(song.clone()))
     }
 
-    pub async fn next(&self) {
+    pub async fn next(&self) -> Option<SongEntry> {
         {
             let mut track_list = self.track_list.write().await;
             track_list.next();
         }
         self.start_current()
             .await
-            .expect("Error starting next track");
+            .expect("Error starting next track")
     }
 
-    pub async fn previous(&self) {
+    pub async fn previous(&self) -> Option<SongEntry> {
         {
             let mut track_list = self.track_list.write().await;
             track_list.previous();
         }
         self.start_current()
             .await
-            .expect("Error starting next track");
+            .expect("Error starting next track")
     }
 
     pub async fn stop(&self) {
