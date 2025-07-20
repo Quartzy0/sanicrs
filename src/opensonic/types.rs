@@ -4,8 +4,28 @@ use serde_with::DurationSeconds;
 use serde_with::serde_as;
 use std::error::Error;
 use std::fmt;
-use std::fmt::Debug;
+use std::fmt::{Debug, Display, Formatter};
 use std::time::Duration;
+
+
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum SupportedExtensions { // Only extensions used by this client are included here
+    FormPost,
+    SongLyrics,
+}
+
+impl TryFrom<&String> for SupportedExtensions {
+    type Error = InvalidResponseError;
+
+    fn try_from(value: &String) -> Result<Self, Self::Error> {
+        match value.as_str() {
+            "formPost" => Ok(SupportedExtensions::FormPost),
+            "songLyrics" => Ok(SupportedExtensions::SongLyrics),
+            _ => Err(InvalidResponseError::new("Unsupported extension type (non fatal)"))
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]

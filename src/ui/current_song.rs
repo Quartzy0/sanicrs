@@ -6,7 +6,7 @@ use crate::ui::cover_picture::{CoverPicture, CoverSize};
 use crate::{PlayerCommand, icon_names};
 use readlock_tokio::SharedReadLock;
 use relm4::adw::glib;
-use relm4::adw::glib::{clone, closure_local, ControlFlow};
+use relm4::adw::glib::closure_local;
 use relm4::adw::gtk::glib::Propagation;
 use relm4::adw::gtk::prelude::OrientableExt;
 use relm4::adw::gtk::{Align, Orientation};
@@ -15,15 +15,15 @@ use relm4::component::{AsyncComponent, AsyncComponentParts, AsyncComponentSender
 use relm4::prelude::*;
 use std::ops::Deref;
 use std::sync::Arc;
+use async_channel::Sender;
 use std::time::{Duration, SystemTime};
 use color_thief::Color;
-use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
 pub struct CurrentSong {
     player_ref: SharedReadLock<PlayerInfo>,
     client: Arc<OpenSubsonicClient>,
-    cmd_sender: Arc<UnboundedSender<PlayerCommand>>,
+    cmd_sender: Arc<Sender<PlayerCommand>>,
 
     // UI data
     song_info: Option<Arc<Song>>,
@@ -225,29 +225,30 @@ impl AsyncComponent for CurrentSong {
             song_info: Default::default(),
             playback_position: 0.0,
             playback_rate: 1.0,
-            cmd_sender: init.4,
+            cmd_sender: init.3,
             previous_progress_check: SystemTime::now(),
         };
         let widgets: Self::Widgets = view_output!();
         
-        model.cmd_sender.send(PlayerCommand::CurrentSongSendSender(sender.clone())).expect("Error sending sender to player");
+        model.cmd_sender.send(PlayerCommand::CurrentSongSendSender(sender.clone())).await.expect("Error sending sender to player");
 
-        glib::timeout_add_local(Duration::from_millis(500), clone!(
-            #[strong]
-            sender,
-            move || {
-                sender.input(CurrentSongMsg::ProgressUpdateSync(None));
-                return ControlFlow::Continue;
-            }
-        ));
-        glib::timeout_add_seconds(10, clone!(
-            #[strong]
-            sender,
-            move || {
-                sender.input(CurrentSongMsg::ProgressUpdateSync(None));
-                return ControlFlow::Continue;
-            }
-        ));
+        let s1 = sender.clone();
+        sender.command(|out, shutdown| {
+            shutdown
+                .register(async move {
+                    let mut n = 0;
+                    loop {
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                        s1.input(CurrentSongMsg::ProgressUpdate);
+                        if n >= 20 {
+                            s1.input(CurrentSongMsg::ProgressUpdateSync(None));
+                            n = 0;
+                        }
+                        n += 1;
+                    }
+                })
+                .drop_on_shutdown()
+        });
 
         widgets.cover_image.connect_closure(
             "cover-loaded",
@@ -271,14 +272,17 @@ impl AsyncComponent for CurrentSong {
             CurrentSongMsg::PlayPause => self
                 .cmd_sender
                 .send(PlayerCommand::PlayPause)
+                .await
                 .expect("Error sending message to player"),
             CurrentSongMsg::Next => self
                 .cmd_sender
                 .send(PlayerCommand::Next)
+                .await
                 .expect("Error sending message to player"),
             CurrentSongMsg::Previous => self
                 .cmd_sender
                 .send(PlayerCommand::Previous)
+                .await
                 .expect("Error sending message to player"),
             CurrentSongMsg::PlaybackStateChange(new_state) => match new_state {
                 PlaybackStatus::Paused => self.playback_state_icon = icon_names::PLAY,
@@ -307,6 +311,7 @@ impl AsyncComponent for CurrentSong {
             CurrentSongMsg::VolumeChanged(v) => self
                 .cmd_sender
                 .send(PlayerCommand::SetVolume(v))
+                .await
                 .expect("Error sending message to player"),
             CurrentSongMsg::VolumeChangedExternal(v) => widgets.volume_btn.set_value(v),
             CurrentSongMsg::ProgressUpdate => {
@@ -327,6 +332,7 @@ impl AsyncComponent for CurrentSong {
             CurrentSongMsg::RateChangeUI(r) => self
                 .cmd_sender
                 .send(PlayerCommand::SetRate(r))
+                .await
                 .expect("Error sending message to player"),
             CurrentSongMsg::ProgressUpdateSync(pos) => {
                 if let Some(pos) = pos {
@@ -341,6 +347,7 @@ impl AsyncComponent for CurrentSong {
             CurrentSongMsg::Seek(pos) => self
                 .cmd_sender
                 .send(PlayerCommand::SetPosition(Duration::from_secs_f64(pos)))
+                .await
                 .expect("Error sending message to player"),
             CurrentSongMsg::CoverLoaded(colors) =>
                 sender.output(CurrentSongOut::ColorSchemeChange(colors)).expect("Error sending message out of CurrentSong component"),

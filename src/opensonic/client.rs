@@ -1,4 +1,5 @@
-use crate::opensonic::types::{Extensions, InvalidResponseError, License, Search3Results, Song, SubsonicError};
+use std::convert::Infallible;
+use crate::opensonic::types::{Extension, Extensions, InvalidResponseError, License, Search3Results, Song, SubsonicError, SupportedExtensions};
 use format_url::FormatUrl;
 use rand::distr::{Alphanumeric, SampleString};
 use reqwest;
@@ -17,33 +18,12 @@ pub struct OpenSubsonicClient {
     version: String,
     cover_cache: Option<String>,
 
-    post_form: bool,
-    lyrics: bool,
+    extensions: Vec<SupportedExtensions>
 }
 
 impl OpenSubsonicClient {
-    pub fn new_non_inited(
-        host: &str,
-        username: &str,
-        password: &str,
-        client_name: &str,
-        cover_cache: Option<&str>,
-    ) -> Self {
-        OpenSubsonicClient {
-            host: String::from(host),
-            username: String::from(username),
-            password: String::from(password),
-            client_name: String::from(client_name),
-            client: ClientBuilder::new().build().unwrap(),
-            version: String::from("1.15"),
-            cover_cache: cover_cache.and_then(|t| Some(String::from(t))),
 
-            post_form: false,
-            lyrics: false,
-        }
-    }
-
-    pub async fn new(
+    pub fn new(
         host: &str,
         username: &str,
         password: &str,
@@ -51,22 +31,54 @@ impl OpenSubsonicClient {
         cover_cache: Option<&str>,
     ) -> Self {
         let mut client: Self =
-            Self::new_non_inited(host, username, password, client_name, cover_cache);
-        client.init().await.expect("Error when initializing");
+            OpenSubsonicClient {
+                host: String::from(host),
+                username: String::from(username),
+                password: String::from(password),
+                client_name: String::from(client_name),
+                client: ClientBuilder::new().build().unwrap(),
+                version: String::from("1.15"),
+                cover_cache: cover_cache.and_then(|t| Some(String::from(t))),
+                extensions: Vec::new(),
+            };
+        client.init().expect("Error when initializing");
         client
     }
 
-    pub async fn init(&mut self) -> Result<(), Box<dyn Error>> {
-        // Get supported extension and save status
-        let extensions = self.get_extensions().await?;
+    pub fn init(&mut self) -> Result<(), Box<dyn Error>> {
+        // Perform request building and parsing manually because it needs to be done blocking here
+        // since initialization happens before event loop start up. Everything else uses async.
+        let salt = Alphanumeric.sample_string(&mut rand::rng(), 16);
+        let token_str = String::from(&self.password) + salt.as_str();
+        let hash: String = format!("{:x}", md5::compute(token_str));
+        let params = vec![
+            ("c", self.client_name.as_str()),
+            ("v", self.version.as_str()),
+            ("f", "json"),
+            ("u", self.username.as_str()),
+            ("s", salt.as_str()),
+            ("t", hash.as_str()),
+        ];
+        let url = FormatUrl::new(&self.host)
+            .with_path_template("/rest/getOpenSubsonicExtensions.view");
+        println!("Initializing OpenSusonicClient. Getting extensions. (params: {:?})", params);
+        let resp = reqwest::blocking::get(url.with_query_params(params).format_url())?;
+        let response: serde_json::Value = serde_json::from_str(&resp.text()?)?;
+        if response["subsonic-response"]["status"] != "ok" {
+            return Err(SubsonicError::from_response(response));
+        }
+
+        let extensions: Extensions = serde_json::from_value(
+            response["subsonic-response"]["openSubsonicExtensions"].clone(),
+        )?;
 
         for ext in extensions.0 {
-            if ext.name == "formPost" {
-                self.post_form = true;
-            } else if ext.name == "songLyrics" {
-                self.lyrics = true;
-            }
+            match SupportedExtensions::try_from(&ext.name) {
+                Ok(e) => self.extensions.push(e),
+                Err(_) => println!("Unused extension '{}' supported by server", ext.name)
+            };
         }
+        println!("Supported extensions present: {:?}", self.extensions);
 
         // Validate cache dir
         if let Some(cover_cache) = &self.cover_cache {
@@ -153,7 +165,7 @@ impl OpenSubsonicClient {
             .with_path_template("/rest/:action")
             .with_substitutes(vec![("action", action)]);
         println!("Making request to '{}' with params: {:?}", action, params);
-        if self.post_form {
+        if self.extensions.contains(&SupportedExtensions::FormPost) {
             self.client.post(url.format_url()).form(&params).send()
         } else {
             self.client

@@ -1,26 +1,23 @@
-use crate::dbus::track_list::MprisTrackList;
 use crate::opensonic::client::OpenSubsonicClient;
 use crate::player::{PlayerInfo, TrackList};
 use crate::ui::current_song::{CurrentSong, CurrentSongOut};
 use crate::ui::track_list::TrackListWidget;
-use crate::{PlayerCommand, icon_names};
+use crate::{PlayerCommand};
 use color_thief::Color;
 use gtk::prelude::GtkWindowExt;
 use readlock_tokio::SharedReadLock;
-use relm4::adw::gdk;
+use relm4::adw::{gdk};
 use relm4::adw::prelude::*;
 use relm4::component::AsyncConnector;
 use relm4::gtk::CssProvider;
 use relm4::prelude::*;
 use relm4::{
-    RelmApp, adw,
+    adw,
     component::{AsyncComponent, AsyncComponentParts, AsyncComponentSender},
 };
 use std::sync::Arc;
-use std::thread;
+use async_channel::Sender;
 use tokio::sync::RwLock;
-use tokio::sync::mpsc::UnboundedSender;
-use zbus::object_server::InterfaceRef;
 
 pub struct Model {
     current_song: AsyncController<CurrentSong>,
@@ -38,17 +35,8 @@ pub type Init = (
     SharedReadLock<PlayerInfo>,
     Arc<RwLock<TrackList>>,
     Arc<OpenSubsonicClient>,
-    InterfaceRef<MprisTrackList>,
-    Arc<UnboundedSender<PlayerCommand>>,
+    Arc<Sender<PlayerCommand>>,
 );
-
-pub fn start_app(init: Init) -> thread::JoinHandle<()> {
-    thread::spawn(move || {
-        let app = RelmApp::new("me.quartzy.sanicrs");
-        relm4_icons::initialize_icons(icon_names::GRESOURCE_BYTES, icon_names::RESOURCE_PREFIX);
-        app.run_async::<Model>(init);
-    })
-}
 
 #[relm4::component(pub async)]
 impl AsyncComponent for Model {
@@ -69,6 +57,7 @@ impl AsyncComponent for Model {
                     add = &adw::OverlaySplitView{
                         // set_collapsed: true,
                         // set_show_sidebar: true,
+                        add_css_class: "no-bg",
 
                         #[wrap(Some)]
                         set_content = model.current_song.widget(),
@@ -112,7 +101,7 @@ impl AsyncComponent for Model {
             gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
         );
 
-        init.4.send(PlayerCommand::AppSendSender(sender)).expect("Error sending sender to app");
+        init.3.send(PlayerCommand::AppSendSender(sender)).await.expect("Error sending sender to app");
 
         let widgets = view_output!();
 
@@ -145,7 +134,11 @@ impl AsyncComponent for Model {
                     .load_from_string(css.as_str());
                 root.action_set_enabled("win.enable-recoloring", true);
             },
-            AppMsg::Quit => root.application().expect("Error getting GIO application").quit(),
+            AppMsg::Quit => {
+                if let Some(app) = root.application() {
+                    app.quit();
+                }
+            },
         };
         self.update_view(widgets, sender);
     }

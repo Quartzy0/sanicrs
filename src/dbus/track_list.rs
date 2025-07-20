@@ -4,8 +4,8 @@ use crate::opensonic::client::OpenSubsonicClient;
 use crate::player::{SongEntry, TrackList};
 use std::collections::HashMap;
 use std::sync::Arc;
+use async_channel::Sender;
 use tokio::sync::RwLock;
-use tokio::sync::mpsc::UnboundedSender;
 use zbus::interface;
 use zbus::object_server::SignalEmitter;
 use zvariant::{ObjectPath, Value};
@@ -13,7 +13,7 @@ use zvariant::{ObjectPath, Value};
 pub struct MprisTrackList {
     pub track_list: Arc<RwLock<TrackList>>,
     pub client: Arc<OpenSubsonicClient>,
-    pub cmd_channel: Arc<UnboundedSender<PlayerCommand>>,
+    pub cmd_channel: Arc<Sender<PlayerCommand>>,
 }
 
 #[interface(name = "org.mpris.MediaPlayer2.TrackList")]
@@ -59,6 +59,7 @@ impl MprisTrackList {
             };
         self.cmd_channel
             .send(PlayerCommand::AddFromUri(uri, index, set_as_current))
+            .await
             .expect("Error sending message to player");
     }
 
@@ -73,6 +74,7 @@ impl MprisTrackList {
         };
         self.cmd_channel
             .send(PlayerCommand::Remove(index))
+            .await
             .expect("Error sending message to player");
         Ok(())
     }
@@ -88,6 +90,7 @@ impl MprisTrackList {
         };
         self.cmd_channel
             .send(PlayerCommand::GoTo(index))
+            .await
             .expect("Error sending message to player");
         Ok(())
     }

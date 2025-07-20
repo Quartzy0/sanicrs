@@ -10,14 +10,14 @@ use relm4::adw::prelude::*;
 use relm4::adw::{glib, gtk};
 use relm4::prelude::*;
 use std::sync::Arc;
-use tokio::sync::mpsc::UnboundedSender;
+use async_channel::Sender;
 use tokio::sync::RwLock;
 use crate::PlayerCommand;
 
 pub struct TrackListWidget {
     track_list: Arc<RwLock<TrackList>>,
     client: Arc<OpenSubsonicClient>,
-    cmd_sender: Arc<UnboundedSender<PlayerCommand>>,
+    cmd_sender: Arc<Sender<PlayerCommand>>,
 
     factory: SignalListItemFactory,
 }
@@ -86,9 +86,9 @@ impl AsyncComponent for TrackListWidget {
             track_list: init.1,
             client: init.2,
             factory: SignalListItemFactory::new(),
-            cmd_sender: init.4,
+            cmd_sender: init.3,
         };
-        model.cmd_sender.send(PlayerCommand::TrackListSendSender(sender.clone())).expect("Error sending sender to player");
+        model.cmd_sender.send(PlayerCommand::TrackListSendSender(sender.clone())).await.expect("Error sending sender to player");
         let widgets: Self::Widgets = view_output!();
 
         model.factory.connect_setup(clone!(
@@ -168,7 +168,7 @@ impl AsyncComponent for TrackListWidget {
         _root: &Self::Root,
     ) {
         match message {
-            TrackListMsg::TrackActivated(i) => self.cmd_sender.send(PlayerCommand::GoTo(i)).expect("Error sending message to player"),
+            TrackListMsg::TrackActivated(i) => self.cmd_sender.send(PlayerCommand::GoTo(i)).await.expect("Error sending message to player"),
             TrackListMsg::TrackChanged(pos) => {
                 let model = widgets.list.model();
                 if let Some(model) = model {

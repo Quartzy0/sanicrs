@@ -4,9 +4,9 @@ use crate::PlayerCommand;
 use std::collections::HashMap;
 use std::ops::{Add, Deref};
 use std::sync::Arc;
+use async_channel::Sender;
 use std::time::Duration;
 use readlock_tokio::SharedReadLock;
-use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::RwLock;
 use zbus::interface;
 use zbus::object_server::SignalEmitter;
@@ -15,7 +15,7 @@ use zvariant::{Array, Str, Value};
 pub struct MprisPlayer {
     pub client: Arc<OpenSubsonicClient>,
     pub track_list: Arc<RwLock<TrackList>>,
-    pub cmd_channel: Arc<UnboundedSender<PlayerCommand>>,
+    pub cmd_channel: Arc<Sender<PlayerCommand>>,
     pub player_ref: SharedReadLock<PlayerInfo>,
 }
 
@@ -92,27 +92,27 @@ impl MprisPlayer {
     }
 
     pub async fn play(&self) {
-        self.cmd_channel.send(PlayerCommand::Play).expect("Error sending message to player")
+        self.cmd_channel.send(PlayerCommand::Play).await.expect("Error sending message to player")
     }
 
     pub async fn pause(&self) {
-        self.cmd_channel.send(PlayerCommand::Pause).expect("Error sending message to player")
+        self.cmd_channel.send(PlayerCommand::Pause).await.expect("Error sending message to player")
     }
 
     pub async fn play_pause(&self) {
-        self.cmd_channel.send(PlayerCommand::PlayPause).expect("Error sending message to player")
+        self.cmd_channel.send(PlayerCommand::PlayPause).await.expect("Error sending message to player")
     }
 
-    pub fn next(&self) {
-        self.cmd_channel.send(PlayerCommand::Next).expect("Error sending message to player")
+    pub async fn next(&self) {
+        self.cmd_channel.send(PlayerCommand::Next).await.expect("Error sending message to player")
     }
 
     pub async fn previous(&self) {
-        self.cmd_channel.send(PlayerCommand::Previous).expect("Error sending message to player")
+        self.cmd_channel.send(PlayerCommand::Previous).await.expect("Error sending message to player")
     }
 
     pub async fn stop(&self) {
-        self.cmd_channel.send(PlayerCommand::Stop).expect("Error sending message to player")
+        self.cmd_channel.send(PlayerCommand::Stop).await.expect("Error sending message to player")
     }
 
     pub async fn set_position(&mut self, track_id: &str, position: i64) -> Result<(), zbus::fdo::Error> {
@@ -133,7 +133,7 @@ impl MprisPlayer {
                 return Ok(());
             }
         }
-        self.cmd_channel.send(PlayerCommand::SetPosition(position)).expect("Error sending message to player");
+        self.cmd_channel.send(PlayerCommand::SetPosition(position)).await.expect("Error sending message to player");
         Ok(())
     }
 
@@ -157,9 +157,9 @@ impl MprisPlayer {
             }
         }
         if seek_next {
-            self.cmd_channel.send(PlayerCommand::Next).expect("Error sending message to player");
+            self.cmd_channel.send(PlayerCommand::Next).await.expect("Error sending message to player");
         } else {
-            self.cmd_channel.send(PlayerCommand::SetPosition(new_positon)).expect("Error sending message to player");
+            self.cmd_channel.send(PlayerCommand::SetPosition(new_positon)).await.expect("Error sending message to player");
         }
         Ok(())
     }
@@ -181,8 +181,8 @@ impl MprisPlayer {
     }
 
     #[zbus(property)]
-    pub fn set_volume(&self, volume: f64) {
-        self.cmd_channel.send(PlayerCommand::SetVolume(volume)).expect("Error sending message to player");
+    pub async fn set_volume(&self, volume: f64) {
+        self.cmd_channel.send(PlayerCommand::SetVolume(volume)).await.expect("Error sending message to player");
     }
 
     #[zbus(property)]
@@ -211,7 +211,7 @@ impl MprisPlayer {
         if rate == 0.0 {
             self.pause().await;
         } else {
-            self.cmd_channel.send(PlayerCommand::SetRate(rate)).expect("Error sending message to player");
+            self.cmd_channel.send(PlayerCommand::SetRate(rate)).await.expect("Error sending message to player");
         }
     }
 

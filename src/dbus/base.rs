@@ -1,18 +1,26 @@
 use std::sync::Arc;
-use tokio::sync::mpsc::UnboundedSender;
+use async_channel::Sender;
 use zbus::interface;
 use crate::PlayerCommand;
 
 pub struct MprisBase {
-    pub cmd_channel: Arc<UnboundedSender<PlayerCommand>>,
+    pub cmd_channel: Arc<Sender<PlayerCommand>>,
 }
 
 #[interface(name = "org.mpris.MediaPlayer2")]
 impl MprisBase {
-    fn quit(&mut self) {
+    async fn quit(&self) {
         self.cmd_channel
             .send(PlayerCommand::Quit)
+            .await
             .expect("Error when sending quit signal");
+    }
+
+    async fn raise(&self) {
+        self.cmd_channel
+            .send(PlayerCommand::Raise)
+            .await
+            .expect("Error when sending raise signal");
     }
 
     #[zbus(property)]

@@ -1,10 +1,10 @@
 use std::error::Error;
 use std::io::Cursor;
 use std::sync::Arc;
+use async_channel::Sender;
 use std::time::Duration;
 use rodio::{Decoder, OutputStream, Sink};
 use rodio::source::EmptyCallback;
-use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 use zvariant::ObjectPath;
@@ -27,7 +27,7 @@ pub struct PlayerInfo {
     sink: Sink,
     current_song_id: RwLock<String>,
     track_list: Arc<RwLock<TrackList>>,
-    cmd_channel: Arc<UnboundedSender<PlayerCommand>>,
+    cmd_channel: Arc<Sender<PlayerCommand>>,
 }
 
 impl PlayerInfo {
@@ -35,7 +35,7 @@ impl PlayerInfo {
         client: Arc<OpenSubsonicClient>,
         stream_handle: &OutputStream,
         track_list: Arc<RwLock<TrackList>>,
-        cmd_channel: Arc<UnboundedSender<PlayerCommand>>,
+        cmd_channel: Arc<Sender<PlayerCommand>>,
     ) -> Self {
         PlayerInfo {
             client,
@@ -138,7 +138,7 @@ impl PlayerInfo {
         self.sink.append(decoder.build()?);
         let cmd_channel = self.cmd_channel.clone();
         let callback_source = EmptyCallback::new(Box::new(move || {
-            cmd_channel.send(PlayerCommand::Next).expect("Error sending message Next");
+            cmd_channel.send_blocking(PlayerCommand::Next).expect("Error sending message Next");
         }));
         self.sink.append(callback_source);
         self.sink.play();
