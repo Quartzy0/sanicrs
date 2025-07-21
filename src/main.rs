@@ -21,6 +21,7 @@ use tokio::sync::{RwLock};
 use zbus::connection;
 use zbus::object_server::InterfaceRef;
 use zvariant::ObjectPath;
+use crate::opensonic::types::Song;
 
 mod dbus;
 mod opensonic;
@@ -51,6 +52,7 @@ pub enum PlayerCommand {
     Raise,
     SetLoopStatus(LoopStatus),
     SetShuffle(bool),
+    PlayAlbum(String),
 }
 
 fn send_app_msg(sender_opt: &mut Option<AsyncComponentSender<Model>>, msg: AppMsg) {
@@ -324,6 +326,21 @@ async fn app_main(
                 }
                 send_cs_msg(&mut cs_sender, CurrentSongMsg::SetShuffle(shuffle));
                 player_ref.get().await.shuffle_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
+            }
+            PlayerCommand::PlayAlbum(id) => {
+                let album = client.get_album(id.as_str()).await.expect("Error getting album"); // TODO: this shouldn't panic
+                if let Some(songs) = album.songs {
+                    {
+                        let mut guard = track_list.write().await;
+                        guard.clear();
+                        guard.add_songs(&songs.into_iter().map(Arc::new).collect::<Vec<Arc<Song>>>());
+                    }
+                    let song = player.start_current().await.expect("Error playing current song");
+                    send_cs_msg(&mut cs_sender, CurrentSongMsg::SongUpdate(song));
+                    player_ref.get().await
+                        .metadata_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
+                    send_tl_msg(&mut tl_sender, TrackListMsg::ReloadList);
+                }
             }
         }
     }

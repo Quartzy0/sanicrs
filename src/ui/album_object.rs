@@ -23,6 +23,10 @@ impl AlbumObject {
     pub fn cover_art_id(&self) -> Option<String> {
         self.property("cover-art-id")
     }
+
+    pub fn id(&self) -> Option<String> {
+        self.property("id")
+    }
 }
 
 mod imp {
@@ -62,7 +66,7 @@ mod imp {
         }
 
 
-        fn set_property(&self, _id: usize, value: &Value, pspec: &ParamSpec) {
+        fn set_property(&self, _id: usize, _value: &Value, pspec: &ParamSpec) {
             match pspec.name() {
                 p => unimplemented!("{}", p),
             };

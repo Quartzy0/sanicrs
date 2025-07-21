@@ -23,11 +23,14 @@ pub struct BrowseWidget {
     client: Arc<OpenSubsonicClient>,
     cmd_sender: Arc<Sender<PlayerCommand>>,
 
-    newest_factory: SignalListItemFactory,
+    album_factory: SignalListItemFactory,
 }
 
 #[derive(Debug)]
-pub enum BrowseMsg {}
+pub enum BrowseMsg {
+    ScrollNewest(i32),
+    PlayAlbum(String),
+}
 
 #[relm4::component(pub async)]
 impl AsyncComponent for BrowseWidget {
@@ -45,18 +48,65 @@ impl AsyncComponent for BrowseWidget {
 
             gtk::Box {
                 set_orientation: Orientation::Vertical,
+                add_css_class: "padded",
 
-                gtk::ScrolledWindow {
-                    set_vscrollbar_policy: gtk::PolicyType::Never,
-                    set_hexpand: true,
-                    set_hexpand_set: true,
-                    set_halign: Align::Fill,
+                gtk::Box {
+                    set_orientation: Orientation::Vertical,
 
-                    #[name = "newest_list"]
-                    gtk::ListView {
+                    gtk::CenterBox {
                         set_orientation: Orientation::Horizontal,
-                        set_factory: Some(&model.newest_factory),
-                        set_single_click_activate: true,
+                        set_halign: Align::Fill,
+                        set_hexpand: true,
+                        set_hexpand_set: true,
+
+                        #[wrap(Some)]
+                        set_start_widget = &gtk::Label {
+                            add_css_class: "t0",
+                            add_css_class: "bold",
+                            set_label: "Newest"
+                        },
+
+                        #[wrap(Some)]
+                        set_end_widget = &gtk::Box {
+                            set_orientation: Orientation::Horizontal,
+                            set_spacing: 5,
+                            gtk::Button {
+                                set_label: "<",
+                                add_css_class: "no-bg",
+                                add_css_class: "bold",
+                                connect_clicked => BrowseMsg::ScrollNewest(-100)
+                            },
+                            gtk::Button {
+                                set_label: ">",
+                                add_css_class: "no-bg",
+                                add_css_class: "bold",
+                                connect_clicked => BrowseMsg::ScrollNewest(100)
+                            }
+                        }
+                    },
+                    #[name = "newest_scroll"]
+                    gtk::ScrolledWindow {
+                        set_vscrollbar_policy: gtk::PolicyType::Never,
+                        set_hscrollbar_policy: gtk::PolicyType::Always,
+                        set_hexpand: true,
+                        set_hexpand_set: true,
+                        set_halign: Align::Fill,
+                        #[name = "newest_list"]
+                        gtk::ListView {
+                            set_orientation: Orientation::Horizontal,
+                            set_factory: Some(&model.album_factory),
+                            set_single_click_activate: true,
+                            connect_activate[sender] => move |view, index| {
+                                let model = view.model();
+                                if let Some(model) = model {
+                                    let album: AlbumObject = model.item(index)
+                                        .expect("Item at index clicked expected to exist")
+                                        .downcast::<AlbumObject>()
+                                        .expect("Item expected to be AlbumObject");
+                                    sender.input(BrowseMsg::PlayAlbum(album.id().expect("Album should have ID set")));
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -72,12 +122,12 @@ impl AsyncComponent for BrowseWidget {
             track_list: init.1,
             client: init.2,
             cmd_sender: init.3,
-            newest_factory: SignalListItemFactory::new(),
+            album_factory: SignalListItemFactory::new(),
         };
 
         let widgets: Self::Widgets = view_output!();
 
-        model.newest_factory.connect_setup(clone!(
+        model.album_factory.connect_setup(clone!(
             #[strong(rename_to = client)]
             model.client,
             move |_, list_item| {
@@ -85,6 +135,7 @@ impl AsyncComponent for BrowseWidget {
                     .orientation(Orientation::Vertical)
                     .spacing(3)
                     .build();
+                vbox.add_css_class("album-entry");
 
                 let cover_picture = CoverPicture::new(client.clone());
                 cover_picture.set_cover_size(CoverSize::Large);
@@ -135,13 +186,21 @@ impl AsyncComponent for BrowseWidget {
         AsyncComponentParts { model, widgets }
     }
 
-    async fn update_cmd_with_view(
+    async fn update_with_view(
         &mut self,
         widgets: &mut Self::Widgets,
-        message: Self::CommandOutput,
+        message: Self::Input,
         sender: AsyncComponentSender<Self>,
         root: &Self::Root,
     ) {
-        self.update_cmd(message, sender, root).await;
+        match message {
+            BrowseMsg::ScrollNewest(s) => {
+                widgets.newest_scroll.hadjustment().set_value(widgets.newest_scroll.hadjustment().value() + s as f64);
+            },
+            BrowseMsg::PlayAlbum(id) => {
+                self.cmd_sender.send(PlayerCommand::PlayAlbum(id)).await.expect("Error sending command to Player");
+            }
+        }
+        self.update_view(widgets, sender);
     }
 }

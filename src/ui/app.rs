@@ -17,11 +17,10 @@ use relm4::{
 };
 use std::sync::Arc;
 use async_channel::Sender;
-use relm4::adw::glib::{closure, Object};
+use relm4::adw::glib::closure;
 use tokio::sync::RwLock;
 use crate::ui::browse::BrowseWidget;
 use relm4::adw::glib as glib;
-use relm4::gtk::Widget;
 
 pub struct Model {
     current_song: AsyncController<CurrentSong>,

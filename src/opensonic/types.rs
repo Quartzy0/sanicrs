@@ -168,6 +168,7 @@ pub struct Album {
     pub is_compilation: Option<bool>,
     pub explicit_status: Option<String>,
     pub disc_titles: Option<Vec<DiscTitle>>,
+    #[serde(rename = "song")]
     pub songs: Option<Vec<Song>>,
 }
 
