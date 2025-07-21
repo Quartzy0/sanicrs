@@ -112,7 +112,7 @@ mod imp {
                 match pspec.name() {
                     "id" => song.1.id.to_value(),
                     "title" => song.1.title.to_value(),
-                    "artist" => song.1.artist.to_value(),
+                    "artist" => song.1.artists().to_value(),
                     "album" => song.1.album.to_value(),
                     "cover-art-id" => song.1.cover_art.to_value(),
                     "position-state" => self.position_state.get().to_value(),

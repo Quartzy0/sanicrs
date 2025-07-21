@@ -1,4 +1,4 @@
-use crate::opensonic::types::{Extensions, InvalidResponseError, License, Search3Results, Song, SubsonicError, SupportedExtensions};
+use crate::opensonic::types::{Album, AlbumListType, Albums, Extensions, InvalidResponseError, License, Search3Results, Song, SubsonicError, SupportedExtensions};
 use format_url::FormatUrl;
 use rand::distr::{Alphanumeric, SampleString};
 use reqwest;
@@ -62,13 +62,13 @@ impl OpenSubsonicClient {
             .with_path_template("/rest/getOpenSubsonicExtensions.view");
         println!("Initializing OpenSusonicClient. Getting extensions. (params: {:?})", params);
         let resp = reqwest::blocking::get(url.with_query_params(params).format_url())?;
-        let response: serde_json::Value = serde_json::from_str(&resp.text()?)?;
+        let mut response: serde_json::Value = serde_json::from_str(&resp.text()?)?;
         if response["subsonic-response"]["status"] != "ok" {
             return Err(SubsonicError::from_response(response));
         }
 
         let extensions: Extensions = serde_json::from_value(
-            response["subsonic-response"]["openSubsonicExtensions"].clone(),
+            response["subsonic-response"]["openSubsonicExtensions"].take(),
         )?;
 
         for ext in extensions.0 {
@@ -179,13 +179,13 @@ impl OpenSubsonicClient {
             .await?
             .text()
             .await?;
-        let response: serde_json::Value = serde_json::from_str(&body)?;
+        let mut response: serde_json::Value = serde_json::from_str(&body)?;
         if response["subsonic-response"]["status"] != "ok" {
             return Err(SubsonicError::from_response(response));
         }
 
         let resp: License =
-            serde_json::from_value(response["subsonic-response"]["license"].clone())?;
+            serde_json::from_value(response["subsonic-response"]["license"].take())?;
         Ok(resp)
     }
 
@@ -195,13 +195,13 @@ impl OpenSubsonicClient {
             .await?
             .text()
             .await?;
-        let response: serde_json::Value = serde_json::from_str(&body)?;
+        let mut response: serde_json::Value = serde_json::from_str(&body)?;
         if response["subsonic-response"]["status"] != "ok" {
             return Err(SubsonicError::from_response(response));
         }
 
         let resp: Extensions = serde_json::from_value(
-            response["subsonic-response"]["openSubsonicExtensions"].clone(),
+            response["subsonic-response"]["openSubsonicExtensions"].take(),
         )?;
         Ok(resp)
     }
@@ -243,13 +243,13 @@ impl OpenSubsonicClient {
             .await?
             .text()
             .await?;
-        let response: serde_json::Value = serde_json::from_str(&body)?;
+        let mut response: serde_json::Value = serde_json::from_str(&body)?;
         if response["subsonic-response"]["status"] != "ok" {
             return Err(SubsonicError::from_response(response));
         }
 
         let resp: Search3Results =
-            serde_json::from_value(response["subsonic-response"]["searchResult3"].clone())?;
+            serde_json::from_value(response["subsonic-response"]["searchResult3"].take())?;
         Ok(resp)
     }
 
@@ -386,14 +386,81 @@ impl OpenSubsonicClient {
             .await?
             .text()
             .await?;
-        let response: serde_json::Value = serde_json::from_str(&body)?;
+        let mut response: serde_json::Value = serde_json::from_str(&body)?;
         if response["subsonic-response"]["status"] != "ok" {
             return Err(SubsonicError::from_response(response));
         }
 
         let resp: Song = serde_json::from_value(
-            response["subsonic-response"]["song"].clone(),
+            response["subsonic-response"]["song"].take(),
         )?;
         Ok(Arc::new(resp))
+    }
+
+    pub async fn get_album_list(
+        &self,
+        list_type: AlbumListType,
+        size: Option<u32>,
+        offset: Option<u32>,
+        from_year: Option<u32>,
+        to_year: Option<u32>,
+        genre: Option<String>,
+        music_folder_id: Option<String>
+    ) -> Result<Albums, Box<dyn Error + Send + Sync>> {
+        let size = size.unwrap_or(10).to_string();
+        let offset = offset.unwrap_or(10).to_string();
+        let from_year = from_year.and_then(|x| Some(x.to_string()));
+        let to_year = to_year.and_then(|x| Some(x.to_string()));
+        let mut params: Vec<(&str, &str)> = vec![
+            ("type", list_type.into()),
+            ("size", size.as_str()),
+            ("offset", offset.as_str()),
+        ];
+
+        if from_year.is_some() {
+            params.push(("fromYear", from_year.as_ref().unwrap()));
+        }
+        if to_year.is_some() {
+            params.push(("toYear", to_year.as_ref().unwrap()));
+        }
+        if genre.is_some() {
+            params.push(("genre", genre.as_ref().unwrap()));
+        }
+        if music_folder_id.is_some() {
+            params.push(("musicFolderId", music_folder_id.as_ref().unwrap()));
+        }
+
+        let body = self
+            .get_action_request("getAlbumList2.view", params)
+            .await?
+            .text()
+            .await?;
+        let mut response: serde_json::Value = serde_json::from_str(&body)?;
+        if response["subsonic-response"]["status"] != "ok" {
+            return Err(SubsonicError::from_response(response));
+        }
+
+        let resp: Albums =
+            serde_json::from_value(response["subsonic-response"]["albumList2"]["album"].take())?;
+        Ok(resp)
+    }
+
+    pub async fn get_album(
+        &self,
+        id: &str
+    ) ->  Result<Album, Box<dyn Error + Send + Sync>> {
+        let body = self
+            .get_action_request("getAlbum.view", vec![("id", id)])
+            .await?
+            .text()
+            .await?;
+        let mut response: serde_json::Value = serde_json::from_str(&body)?;
+        if response["subsonic-response"]["status"] != "ok" {
+            return Err(SubsonicError::from_response(response));
+        }
+
+        let resp: Album =
+            serde_json::from_value(response["subsonic-response"]["album"].take())?;
+        Ok(resp)
     }
 }

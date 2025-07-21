@@ -4,10 +4,39 @@ use serde_with::DurationSeconds;
 use serde_with::serde_as;
 use std::error::Error;
 use std::fmt;
-use std::fmt::{Debug, Display, Formatter};
+use std::fmt::Debug;
 use std::time::Duration;
 
+#[derive(Debug, Eq, PartialEq)]
+pub enum AlbumListType {
+    Random,
+    Newest,
+    Highest,
+    Frequent,
+    Recent,
+    AlphabeticalByName,
+    AlphabeticalByArtist,
+    Starred,
+    ByYear,
+    ByGenre
+}
 
+impl Into<&str> for AlbumListType {
+    fn into(self) -> &'static str {
+        match self {
+            AlbumListType::Random => "random",
+            AlbumListType::Newest => "newest",
+            AlbumListType::Highest => "highest",
+            AlbumListType::Frequent => "frequent",
+            AlbumListType::Recent => "recent",
+            AlbumListType::AlphabeticalByName => "alphabeticalByName",
+            AlbumListType::AlphabeticalByArtist => "alphabeticalByArtist",
+            AlbumListType::Starred => "starred",
+            AlbumListType::ByYear => "byYear",
+            AlbumListType::ByGenre => "byGenre",
+        }
+    }
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum SupportedExtensions { // Only extensions used by this client are included here
@@ -101,6 +130,15 @@ pub struct DiscTitle {
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
+pub struct RecordLabel {
+    pub name: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Albums(pub Vec<Album>);
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct Album {
     pub id: String,
     pub name: String,
@@ -117,7 +155,7 @@ pub struct Album {
     pub genre: Option<String>,
     pub played: Option<String>,
     pub user_rating: Option<u8>,
-    pub record_labels: Option<Vec<String>>, // TODO: RecordLabel
+    pub record_labels: Option<Vec<RecordLabel>>,
     pub music_brainz_id: Option<String>,
     pub genres: Option<Vec<Genre>>,
     pub artists: Option<Vec<Artist>>,
@@ -130,6 +168,7 @@ pub struct Album {
     pub is_compilation: Option<bool>,
     pub explicit_status: Option<String>,
     pub disc_titles: Option<Vec<DiscTitle>>,
+    pub songs: Option<Vec<Song>>,
 }
 
 #[serde_as]
@@ -211,7 +250,25 @@ pub struct InvalidResponseError {
 }
 
 impl Song {
+    pub fn artists(&self) -> String {
+        match &self.display_artists {
+            None => match &self.artist {
+                None => match &self.artists {
+                    None => "Unknown artist".to_string(),
+                    Some(a) => a
+                        .iter()
+                        .map(|x| x.name.clone())
+                        .collect::<Vec<String>>()
+                        .join(", "),
+                },
+                Some(a) => a.clone(),
+            },
+            Some(a) => a.clone(),
+        }
+    }
+}
 
+impl Album {
     pub fn artists(&self) -> String {
         match &self.display_artists {
             None => match &self.artist {
@@ -231,8 +288,8 @@ impl Song {
 }
 
 impl SubsonicError {
-    pub fn from_response(val: Value) -> Box<dyn Error + Send + Sync> {
-        let err = serde_json::from_value::<Self>(val["subsonic-response"]["error"].clone());
+    pub fn from_response(mut val: Value) -> Box<dyn Error + Send + Sync> {
+        let err = serde_json::from_value::<Self>(val["subsonic-response"]["error"].take());
         if err.is_err() {
             err.unwrap_err().into()
         } else {

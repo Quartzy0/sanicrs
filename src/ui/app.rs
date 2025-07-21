@@ -2,14 +2,14 @@ use crate::opensonic::client::OpenSubsonicClient;
 use crate::player::{PlayerInfo, TrackList};
 use crate::ui::current_song::{CurrentSong, CurrentSongOut};
 use crate::ui::track_list::TrackListWidget;
-use crate::{PlayerCommand};
+use crate::{icon_names, PlayerCommand};
 use color_thief::Color;
 use gtk::prelude::GtkWindowExt;
 use readlock_tokio::SharedReadLock;
-use relm4::adw::{gdk};
+use relm4::adw::{gdk, ViewSwitcherPolicy};
 use relm4::adw::prelude::*;
 use relm4::component::AsyncConnector;
-use relm4::gtk::CssProvider;
+use relm4::adw::gtk::CssProvider;
 use relm4::prelude::*;
 use relm4::{
     adw,
@@ -17,11 +17,16 @@ use relm4::{
 };
 use std::sync::Arc;
 use async_channel::Sender;
+use relm4::adw::glib::{closure, Object};
 use tokio::sync::RwLock;
+use crate::ui::browse::BrowseWidget;
+use relm4::adw::glib as glib;
+use relm4::gtk::Widget;
 
 pub struct Model {
     current_song: AsyncController<CurrentSong>,
     track_list_connector: AsyncConnector<TrackListWidget>,
+    browse_connector: AsyncConnector<BrowseWidget>,
     provider: CssProvider,
 }
 
@@ -52,23 +57,31 @@ impl AsyncComponent for Model {
             set_default_width: 400,
             set_default_height: 400,
 
-            adw::ToolbarView {
+            #[name = "split_view"]
+            adw::OverlaySplitView{
+                add_css_class: "no-bg",
+
                 #[wrap(Some)]
-                set_content = &adw::ViewStack {
-                    #[name = "split_view"]
-                    add = &adw::OverlaySplitView{
-                        // set_collapsed: true,
-                        // set_show_sidebar: true,
-                        add_css_class: "no-bg",
+                set_content = &adw::ToolbarView {
+                    #[name = "view_stack"]
+                    #[wrap(Some)]
+                    set_content = &adw::ViewStack {
+                        add = model.current_song.widget(),
+                        add = model.browse_connector.widget(),
+                    },
 
+                    add_top_bar = &adw::HeaderBar {
+                        #[name = "view_switcher"]
                         #[wrap(Some)]
-                        set_content = model.current_song.widget(),
+                        set_title_widget = &adw::ViewSwitcher {
+                            set_policy: ViewSwitcherPolicy::Wide,
+                        }
+                    },
+                },
 
-                        #[wrap(Some)]
-                        set_sidebar = model.track_list_connector.widget(),
-                    }
-                }
-            }
+                #[wrap(Some)]
+                set_sidebar = model.track_list_connector.widget(),
+            },
         }
     }
 
@@ -85,9 +98,11 @@ impl AsyncComponent for Model {
                     CurrentSongOut::ToggleSidebar => AppMsg::ToggleSidebar,
                 });
         let track_list_connector = TrackListWidget::builder().launch(init.clone());
+        let browse_connector = BrowseWidget::builder().launch(init.clone());
         let model = Model {
             current_song,
             track_list_connector,
+            browse_connector,
             provider: CssProvider::new(),
         };
         let base_provider = CssProvider::new();
@@ -111,6 +126,23 @@ impl AsyncComponent for Model {
         let breakpoint = adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 1000px").unwrap());
         breakpoint.add_setter(&widgets.split_view, "collapsed", Some(&true.to_value()));
         root.add_breakpoint(breakpoint);
+
+        let song_page = widgets.view_stack.page(model.current_song.widget());
+        song_page.set_title(Some("Song"));
+        song_page.set_name(Some("Song"));
+        song_page.set_icon_name(Some(icon_names::MUSIC_NOTE));
+        let browse_page = widgets.view_stack.page(model.browse_connector.widget());
+        browse_page.set_title(Some("Browse"));
+        browse_page.set_name(Some("Browse"));
+        browse_page.set_icon_name(Some(icon_names::EXPLORE2));
+        widgets.view_switcher.set_stack(Some(&widgets.view_stack));
+
+        widgets.view_stack
+            .property_expression("visible-child-name")
+            .chain_closure::<bool>(closure!(|this: Option<adw::OverlaySplitView>, name: Option<&str>| {
+                name.is_some() && name.unwrap() == "Song" && !this.unwrap().is_collapsed()
+            }))
+            .bind(&widgets.split_view, "show-sidebar", Some(&widgets.split_view));
 
         AsyncComponentParts { model, widgets }
     }
