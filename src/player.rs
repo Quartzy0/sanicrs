@@ -1,8 +1,10 @@
+use std::cmp::PartialEq;
 use std::error::Error;
 use std::io::Cursor;
 use std::sync::Arc;
 use async_channel::Sender;
 use std::time::Duration;
+use rand::prelude::SliceRandom;
 use rodio::{Decoder, OutputStream, Sink};
 use rodio::source::EmptyCallback;
 use tokio::sync::RwLock;
@@ -20,6 +22,36 @@ pub enum PlaybackStatus {
     Playing,
     Paused,
     Stopped
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum LoopStatus {
+    None,
+    Track,
+    Playlist,
+}
+
+impl Into<String> for LoopStatus {
+    fn into(self) -> String {
+        match self {
+            LoopStatus::None => "None",
+            LoopStatus::Track => "Track",
+            LoopStatus::Playlist => "Playlist"
+        }.to_string()
+    }
+}
+
+impl TryFrom<String> for LoopStatus {
+    type Error = zbus::fdo::Error;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        match value.as_str() {
+            "None" => Ok(LoopStatus::None),
+            "Track" => Ok(LoopStatus::Track),
+            "Playlist" => Ok(LoopStatus::Playlist),
+            _ => Err(zbus::fdo::Error::Failed(format!("Unknown loop status: {}", value)))
+        }
+    }
 }
 
 pub struct PlayerInfo {
@@ -44,6 +76,10 @@ impl PlayerInfo {
             track_list,
             cmd_channel
         }
+    }
+
+    pub async fn loop_status(&self) -> LoopStatus {
+        self.track_list.read().await.loop_status
     }
 
     pub async fn goto(&self, index: usize) -> Result<Option<SongEntry>, Box<dyn Error + Send + Sync>> {
@@ -87,12 +123,12 @@ impl PlayerInfo {
             None => {return Ok(None)}
             Some(s) => s
         };
-        {
+        /*{
             let x = self.current_song_id.read().await;
             if song.1.id == x.as_str() {
                 return Ok(Some(song.clone()));
             }
-        }
+        }*/
         println!("Playing: {}", song.1.title);
         let stream = self
             .client
@@ -151,13 +187,19 @@ impl PlayerInfo {
     }
 
     pub async fn next(&self) -> Option<SongEntry> {
+        let over;
         {
             let mut track_list = self.track_list.write().await;
-            track_list.next();
+            over = track_list.next();
         }
-        self.start_current()
-            .await
-            .expect("Error starting next track")
+        if over {
+            self.cmd_channel.send(PlayerCommand::Pause).await.expect("Error sending message to player");
+            None
+        } else {
+            self.start_current()
+                .await
+                .expect("Error starting next track")
+        }
     }
 
     pub async fn previous(&self) -> Option<SongEntry> {
@@ -235,6 +277,10 @@ impl PlayerInfo {
     pub fn position(&self) -> i64 {
         (self.sink.get_pos().as_micros() as f64 /* * self.sink.speed() as f64*/) as i64
     }
+
+    pub async fn shuffled(&self) -> bool {
+        self.track_list.read().await.shuffled
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -265,9 +311,10 @@ impl From<(Uuid, Arc<Song>)> for SongEntry {
 pub struct TrackList {
     songs: Vec<SongEntry>,
     current: usize,
+    shuffled_order: Vec<usize>,
 
     pub shuffled: bool,
-    pub looping: bool,
+    pub loop_status: LoopStatus,
 }
 
 impl TrackList {
@@ -276,7 +323,8 @@ impl TrackList {
             songs: Vec::new(),
             current: 0,
             shuffled: false,
-            looping: false
+            loop_status: LoopStatus::None,
+            shuffled_order: Vec::new(),
         }
     }
 
@@ -299,7 +347,11 @@ impl TrackList {
     }
     
     pub fn set_current(&mut self, index: usize) {
-        self.current = index;
+        if !self.shuffled {
+            self.current = index;
+        } else {
+            self.current = self.shuffled_order.iter().position(|i| *i == index).unwrap_or(index);
+        }
     }
 
     pub fn remove_song(&mut self, index: usize) -> SongEntry {
@@ -313,18 +365,29 @@ impl TrackList {
         self.songs.clear();
         self.current = 0;
         self.shuffled = false;
-        self.looping = false;
+        self.loop_status = LoopStatus::None;
     }
 
     pub fn empty(&self) -> bool {
         self.songs.is_empty()
     }
 
-    pub fn next(&mut self) {
-        if self.current != self.songs.len()-1 {
-            self.current += 1;
-        } else {
-            self.current = 0;
+    pub fn next(&mut self) -> bool {
+        match self.loop_status {
+            LoopStatus::None => {
+                self.current += 1;
+
+                self.current >= self.songs.len()
+            },
+            LoopStatus::Track => false,
+            LoopStatus::Playlist => {
+                if self.current != self.songs.len()-1 {
+                    self.current += 1;
+                } else {
+                    self.current = 0;
+                }
+                false
+            }
         }
     }
 
@@ -335,12 +398,20 @@ impl TrackList {
     }
 
     pub fn current(&self) -> Option<&SongEntry> {
-        self.songs.get(self.current)
+        if self.shuffled {
+            self.songs.get(self.shuffled_order[self.current])
+        } else {
+            self.songs.get(self.current)
+        }
     }
 
     pub fn current_index(&self) -> Option<usize> {
         if self.songs.len() > 0{
-            Some(self.current)
+            if self.shuffled {
+                Some(self.shuffled_order[self.current])
+            } else {
+                Some(self.current)
+            }
         } else {
             None
         }
@@ -356,6 +427,8 @@ impl TrackList {
                 self.songs.insert(i, (Uuid::new_v4(), song).into());
             }
         }
+        self.shuffled_order = (0..self.songs.len()).collect();
+        self.shuffled_order.shuffle(&mut rand::rng());
     }
 
     pub fn add_songs(&mut self, songs: &Vec<Arc<Song>>) {
@@ -363,6 +436,8 @@ impl TrackList {
             (Uuid::new_v4(), song.clone()).into()
         }).collect();
         self.songs.append(&mut x);
+        self.shuffled_order = (0..self.songs.len()).collect();
+        self.shuffled_order.shuffle(&mut rand::rng());
     }
 
     pub fn get_songs(&self) -> &Vec<SongEntry> {

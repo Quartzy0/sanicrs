@@ -2,7 +2,7 @@ use crate::dbus::base::MprisBase;
 use crate::dbus::player::{MprisPlayer, MprisPlayerSignals};
 use crate::dbus::track_list::{MprisTrackList, MprisTrackListSignals};
 use crate::opensonic::client::OpenSubsonicClient;
-use crate::player::{PlayerInfo, TrackList};
+use crate::player::{LoopStatus, PlayerInfo, TrackList};
 use crate::ui::app::{AppMsg, Init, Model};
 use crate::ui::current_song::{CurrentSong, CurrentSongMsg};
 use crate::ui::track_list::{TrackListMsg, TrackListWidget};
@@ -49,6 +49,8 @@ pub enum PlayerCommand {
     AppSendSender(AsyncComponentSender<Model>),
     AddFromUri(String, Option<usize>, bool),
     Raise,
+    SetLoopStatus(LoopStatus),
+    SetShuffle(bool),
 }
 
 fn send_app_msg(sender_opt: &mut Option<AsyncComponentSender<Model>>, msg: AppMsg) {
@@ -138,7 +140,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 
 async fn app_main(
-    mut command_recv: Receiver<PlayerCommand>,
+    command_recv: Receiver<PlayerCommand>,
     command_send: Arc<Sender<PlayerCommand>>,
     client: Arc<OpenSubsonicClient>,
     track_list: Arc<RwLock<TrackList>>,
@@ -197,11 +199,13 @@ async fn app_main(
             PlayerCommand::Next => {
                 let s = player.next().await;
                 send_cs_msg(&mut cs_sender, CurrentSongMsg::SongUpdate(s));
+                send_tl_msg(&mut tl_sender, TrackListMsg::TrackChanged(None));
                 player_ref.get().await.metadata_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
             },
             PlayerCommand::Previous => {
                 let s = player.previous().await;
                 send_cs_msg(&mut cs_sender, CurrentSongMsg::SongUpdate(s));
+                send_tl_msg(&mut tl_sender, TrackListMsg::TrackChanged(None));
                 player_ref.get().await.metadata_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
             },
             PlayerCommand::Play => {
@@ -227,6 +231,8 @@ async fn app_main(
                 track_list_ref.track_list_replaced(Vec::new(),
                     ObjectPath::from_static_str_unchecked("/org/mpris/MediaPlayer2/TrackList/NoTrack"))
                 .await.expect("Error sending DBus signal");
+                send_cs_msg(&mut cs_sender, CurrentSongMsg::SetLoopStatus(LoopStatus::None));
+                player_ref.get().await.loop_status_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
             },
             PlayerCommand::SetRate(r) => {
                 player.set_rate(r);
@@ -245,7 +251,7 @@ async fn app_main(
             },
             PlayerCommand::GoTo(i) => {
                 let song = player.goto(i).await.expect("Error performing goto");
-                send_tl_msg(&mut tl_sender, TrackListMsg::TrackChanged(i));
+                send_tl_msg(&mut tl_sender, TrackListMsg::TrackChanged(Some(i)));
                 send_cs_msg(&mut cs_sender, CurrentSongMsg::SongUpdate(song));
                 player_ref.get().await.metadata_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
             },
@@ -269,7 +275,7 @@ async fn app_main(
                         let songs = track_list_guard.get_songs();
                         let new_i = index.unwrap_or(songs.len() - 1);
                         track_list_ref.track_added(
-                            dbus::player::get_song_metadata(&songs[new_i], client.clone()).await,
+                            dbus::player::get_song_metadata(Some(&songs[new_i]), client.clone()).await,
                             if new_i == 0 {
                                 ObjectPath::from_static_str_unchecked("/org/mpris/MediaPlayer2/TrackList/NoTrack")
                             } else {
@@ -302,6 +308,22 @@ async fn app_main(
 
                     controller.detach_runtime();
                 }
+            },
+            PlayerCommand::SetLoopStatus(loop_status) => {
+                {
+                    let mut guard = track_list.write().await;
+                    guard.loop_status = loop_status;
+                }
+                send_cs_msg(&mut cs_sender, CurrentSongMsg::SetLoopStatus(loop_status));
+                player_ref.get().await.loop_status_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
+            },
+            PlayerCommand::SetShuffle(shuffle) => {
+                {
+                    let mut guard = track_list.write().await;
+                    guard.shuffled = shuffle;
+                }
+                send_cs_msg(&mut cs_sender, CurrentSongMsg::SetShuffle(shuffle));
+                player_ref.get().await.shuffle_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
             }
         }
     }

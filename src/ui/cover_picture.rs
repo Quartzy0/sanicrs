@@ -124,8 +124,7 @@ mod imp {
                 "cover-id" => self.obj().set_cover_from_id(
                     value
                         .get::<Option<String>>()
-                        .expect("Requited Option<String>")
-                        .as_ref(),
+                        .expect("Requited Option<String>"),
                     self.client.borrow().clone(),
                 ),
                 _ => unimplemented!(),
@@ -302,6 +301,10 @@ impl CoverPicture {
         (*self.imp().cover.borrow()).as_ref().cloned()
     }
 
+    pub fn cover_id(&self) -> Option<String> {
+        (*self.imp().cover_id.borrow()).as_ref().cloned()
+    }
+
     pub fn set_cover(&self, cover: Option<&gdk::Texture>) {
         if let Some(cover) = cover {
             self.imp().cover.replace(Some(cover.clone()));
@@ -313,8 +316,11 @@ impl CoverPicture {
         self.notify("cover");
     }
 
-    pub fn set_cover_from_id(&self, cover_id: Option<&String>, client: Arc<OpenSubsonicClient>) {
-        self.imp().cover_id.replace(cover_id.cloned());
+    pub fn set_cover_from_id(&self, cover_id: Option<String>, client: Arc<OpenSubsonicClient>) {
+        let old = self.imp().cover_id.replace(cover_id.clone());
+        if old == cover_id {
+            return;
+        }
         if let Some(handle) = self.imp().handle.take() {
             handle.abort();
         }
@@ -334,15 +340,16 @@ impl CoverPicture {
                                 let texture =
                                     gdk::Texture::from_bytes(&bytes).expect("Error loading textre");
                                 cover_widget.set_cover(Some(&texture));
-                                cover_widget.emit_by_name::<()>("cover-loaded", &[]);
                             }
                             Err(e) => {
                                 println!("Error getting cover image: {}", e);
-                                cover_widget.set_cover(None);
                             }
-                        }
+                        };
+                        cover_widget.emit_by_name::<()>("cover-loaded", &[]);
                     }
                 ))));
+        } else {
+            self.emit_by_name::<()>("cover-loaded", &[]);
         }
     }
 

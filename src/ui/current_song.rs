@@ -1,9 +1,11 @@
 use crate::opensonic::client::OpenSubsonicClient;
 use crate::opensonic::types::Song;
-use crate::player::{PlaybackStatus, PlayerInfo, SongEntry};
+use crate::player::{LoopStatus, PlaybackStatus, PlayerInfo, SongEntry};
 use crate::ui::app::Init;
 use crate::ui::cover_picture::{CoverPicture, CoverSize};
 use crate::{PlayerCommand, icon_names};
+use async_channel::Sender;
+use color_thief::Color;
 use readlock_tokio::SharedReadLock;
 use relm4::adw::glib;
 use relm4::adw::glib::closure_local;
@@ -15,9 +17,7 @@ use relm4::component::{AsyncComponent, AsyncComponentParts, AsyncComponentSender
 use relm4::prelude::*;
 use std::ops::Deref;
 use std::sync::Arc;
-use async_channel::Sender;
 use std::time::{Duration, SystemTime};
-use color_thief::Color;
 use uuid::Uuid;
 
 pub struct CurrentSong {
@@ -28,9 +28,10 @@ pub struct CurrentSong {
     // UI data
     song_info: Option<Arc<Song>>,
     playback_state_icon: &'static str,
+    loop_status_icon: &'static str,
     playback_position: f64,
     playback_rate: f64,
-    previous_progress_check: SystemTime
+    previous_progress_check: SystemTime,
 }
 
 #[derive(Debug)]
@@ -47,6 +48,10 @@ pub enum CurrentSongMsg {
     RateChange(f64),
     RateChangeUI(f64),
     Seek(f64),
+    CycleLoopStatusUI,
+    SetLoopStatus(LoopStatus),
+    ToggleShuffleUI,
+    SetShuffle(bool),
 }
 
 #[derive(Debug)]
@@ -159,7 +164,7 @@ impl AsyncComponent for CurrentSong {
                     },
                     gtk::CenterBox {
                         set_orientation: Orientation::Horizontal,
-                        set_halign: Align::Center,
+                        set_halign: Align::Fill,
                         set_hexpand: true,
 
                         #[wrap(Some)]
@@ -179,10 +184,29 @@ impl AsyncComponent for CurrentSong {
                         },
 
                         #[wrap(Some)]
+                        set_center_widget = &gtk::Box{
+                            set_orientation: Orientation::Horizontal,
+                            set_halign: Align::Center,
+                            set_spacing: 5,
+
+                            gtk::Button {
+                                #[watch]
+                                set_icon_name: model.loop_status_icon,
+                                set_tooltip_text: Some("Cycle loop status"),
+                                connect_clicked => CurrentSongMsg::CycleLoopStatusUI,
+                            },
+                            #[name = "shuffle_toggle"]
+                            gtk::ToggleButton {
+                                set_icon_name: icon_names::PLAYLIST_SHUFFLE,
+                                connect_clicked => CurrentSongMsg::ToggleShuffleUI,
+                            }
+                        },
+
+                        #[wrap(Some)]
                         set_end_widget = &gtk::Box{
                             set_orientation: Orientation::Horizontal,
                             set_halign: Align::Center,
-                            set_spacing: 3,
+                            set_spacing: 5,
 
                             #[name = "volume_btn"]
                             gtk::ScaleButton {
@@ -231,13 +255,17 @@ impl AsyncComponent for CurrentSong {
             let track_list = init.1.read().await;
             match track_list.current() {
                 None => Default::default(),
-                Some(song) => sender.input(CurrentSongMsg::SongUpdate(Some(SongEntry(Uuid::new_v4(), song.1.clone())))),
+                Some(song) => sender.input(CurrentSongMsg::SongUpdate(Some(SongEntry(
+                    Uuid::new_v4(),
+                    song.1.clone(),
+                )))),
             };
         }
         let model = CurrentSong {
             player_ref: init.0,
             client: init.2,
             playback_state_icon: icon_names::PLAY,
+            loop_status_icon: icon_names::PLAYLIST_CONSECUTIVE,
             song_info: Default::default(),
             playback_position: 0.0,
             playback_rate: 1.0,
@@ -245,8 +273,12 @@ impl AsyncComponent for CurrentSong {
             previous_progress_check: SystemTime::now(),
         };
         let widgets: Self::Widgets = view_output!();
-        
-        model.cmd_sender.send(PlayerCommand::CurrentSongSendSender(sender.clone())).await.expect("Error sending sender to player");
+
+        model
+            .cmd_sender
+            .send(PlayerCommand::CurrentSongSendSender(sender.clone()))
+            .await
+            .expect("Error sending sender to player");
 
         let s1 = sender.clone();
         sender.command(|out, shutdown| {
@@ -266,13 +298,18 @@ impl AsyncComponent for CurrentSong {
                 .drop_on_shutdown()
         });
 
+        let s2 = sender.clone();
         widgets.cover_image.connect_closure(
             "cover-loaded",
             false,
             closure_local!(move |cover_picture: CoverPicture| {
-                sender.output(CurrentSongOut::ColorSchemeChange(cover_picture.get_palette())).expect("Error when sending color scheme change event");
-            }
-        ));
+                s2
+                    .output(CurrentSongOut::ColorSchemeChange(
+                        cover_picture.get_palette(),
+                    ))
+                    .expect("Error when sending color scheme change event");
+            }),
+        );
 
         AsyncComponentParts { model, widgets }
     }
@@ -306,23 +343,20 @@ impl AsyncComponent for CurrentSong {
                 PlaybackStatus::Stopped => self.playback_state_icon = icon_names::STOP,
             },
             CurrentSongMsg::SongUpdate(info) => {
-                if let Some(info) = &info {
-                    if self.song_info.is_none() || self.song_info.as_ref().unwrap().id != info.1.id {
-                        widgets
-                            .cover_image
-                            .set_cover_from_id(info.1.cover_art.as_ref(), self.client.clone());
-                    }
-                    self.playback_position = Duration::from_micros(PlayerInfo::position(
-                        self.player_ref.lock().await.deref(),
-                    ) as u64)
-                        .as_secs_f64();
-                }
+                self.playback_position = Duration::from_micros(PlayerInfo::position(
+                    self.player_ref.lock().await.deref(),
+                ) as u64).as_secs_f64();
+                widgets
+                    .cover_image
+                    .set_cover_from_id(info.as_ref().and_then(|t| {t.1.cover_art.clone()}), self.client.clone());
                 self.song_info = match info {
                     None => None,
-                    Some(i) => Some(i.1)
+                    Some(i) => Some(i.1),
                 };
                 self.previous_progress_check = SystemTime::now();
-                sender.input(CurrentSongMsg::PlaybackStateChange(self.player_ref.lock().await.playback_status()));
+                sender.input(CurrentSongMsg::PlaybackStateChange(
+                    self.player_ref.lock().await.playback_status(),
+                ));
             }
             CurrentSongMsg::VolumeChanged(v) => self
                 .cmd_sender
@@ -365,6 +399,35 @@ impl AsyncComponent for CurrentSong {
                 .send(PlayerCommand::SetPosition(Duration::from_secs_f64(pos)))
                 .await
                 .expect("Error sending message to player"),
+            CurrentSongMsg::CycleLoopStatusUI => {
+                let loop_status = self.player_ref.lock().await.loop_status().await;
+                let new_status = match loop_status {
+                    LoopStatus::None => LoopStatus::Playlist,
+                    LoopStatus::Playlist => LoopStatus::Track,
+                    LoopStatus::Track => LoopStatus::None,
+                };
+                self.cmd_sender
+                    .send(PlayerCommand::SetLoopStatus(new_status))
+                    .await
+                    .expect("Error sending message to player");
+            }
+            CurrentSongMsg::SetLoopStatus(loop_status) => {
+                self.loop_status_icon = match loop_status {
+                    LoopStatus::None => icon_names::PLAYLIST_CONSECUTIVE,
+                    LoopStatus::Track => icon_names::PLAYLIST_REPEAT_SONG,
+                    LoopStatus::Playlist => icon_names::PLAYLIST_REPEAT,
+                }
+            },
+            CurrentSongMsg::ToggleShuffleUI => {
+                let shuffle = !self.player_ref.lock().await.shuffled().await;
+                self.cmd_sender
+                    .send(PlayerCommand::SetShuffle(shuffle))
+                    .await
+                    .expect("Error sending message to player");
+            }
+            CurrentSongMsg::SetShuffle(shuffle) => {
+                widgets.shuffle_toggle.set_active(shuffle);
+            }
         }
         self.update_view(widgets, sender);
     }

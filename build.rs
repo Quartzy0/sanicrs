@@ -25,7 +25,11 @@ fn main() {
             "speaker-1",
             "speaker-2",
             "speaker-3",
-            "list"
+            "list",
+            "playlist-consecutive",
+            "playlist-repeat",
+            "playlist-repeat-song",
+            "playlist-shuffle"
         ],
     );
 }

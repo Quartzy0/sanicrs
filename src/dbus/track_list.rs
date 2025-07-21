@@ -112,7 +112,7 @@ impl MprisTrackList {
 
         let mut map: Vec<HashMap<&str, Value>> = Vec::new();
         for x in songs_refs {
-            map.push(player::get_song_metadata(&x, self.client.clone()).await);
+            map.push(player::get_song_metadata(Some(&x), self.client.clone()).await);
         }
 
         map

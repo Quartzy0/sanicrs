@@ -25,7 +25,7 @@ pub struct TrackListWidget {
 #[derive(Debug)]
 pub enum TrackListMsg {
     TrackActivated(usize),
-    TrackChanged(usize),
+    TrackChanged(Option<usize>),
     ReloadList,
 }
 
@@ -170,6 +170,11 @@ impl AsyncComponent for TrackListWidget {
         match message {
             TrackListMsg::TrackActivated(i) => self.cmd_sender.send(PlayerCommand::GoTo(i)).await.expect("Error sending message to player"),
             TrackListMsg::TrackChanged(pos) => {
+                let pos = match pos {
+                    Some(p) => p,
+                    None => self.track_list.read().await.current_index().unwrap_or(0),
+                };
+                
                 let model = widgets.list.model();
                 if let Some(model) = model {
                     model.iter::<Object>().enumerate().for_each(|x| {

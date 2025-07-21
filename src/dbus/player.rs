@@ -1,5 +1,5 @@
 use crate::opensonic::client::OpenSubsonicClient;
-use crate::player::{PlaybackStatus, PlayerInfo, SongEntry, TrackList, MAX_PLAYBACK_RATE, MIN_PLAYBACK_RATE};
+use crate::player::{LoopStatus, PlaybackStatus, PlayerInfo, SongEntry, TrackList, MAX_PLAYBACK_RATE, MIN_PLAYBACK_RATE};
 use crate::PlayerCommand;
 use std::collections::HashMap;
 use std::ops::{Add, Deref};
@@ -10,7 +10,7 @@ use readlock_tokio::SharedReadLock;
 use tokio::sync::RwLock;
 use zbus::interface;
 use zbus::object_server::SignalEmitter;
-use zvariant::{Array, Str, Value};
+use zvariant::{Array, ObjectPath, Str, Value};
 
 pub struct MprisPlayer {
     pub client: Arc<OpenSubsonicClient>,
@@ -19,8 +19,13 @@ pub struct MprisPlayer {
     pub player_ref: SharedReadLock<PlayerInfo>,
 }
 
-pub async fn get_song_metadata<'a>(song: &SongEntry, client: Arc<OpenSubsonicClient>) -> HashMap<&'a str, Value<'a>> {
+pub async fn get_song_metadata<'a>(song: Option<&SongEntry>, client: Arc<OpenSubsonicClient>) -> HashMap<&'a str, Value<'a>> {
     let mut map: HashMap<&str, Value> = HashMap::new();
+    if song.is_none() {
+        map.insert("mpris:trackid", Value::ObjectPath(ObjectPath::from_static_str_unchecked("/org/mpris/MediaPlayer2/TrackList/NoTrack")));
+        return map;
+    }
+    let song = song.unwrap();
     map.insert("mpris:trackid", Value::ObjectPath(song.dbus_obj()));
     let song = &song.1;
     map.insert("xesam:title", Value::Str(Str::from(song.title.clone())));
@@ -81,6 +86,18 @@ impl MprisPlayer {
 
     #[zbus(signal)]
     pub async fn seeked(emitter: &SignalEmitter<'_>, position: i64) -> Result<(), zbus::Error>;
+    
+    #[zbus(property)]
+    pub async fn loop_status(&self) -> String {
+        self.track_list.read().await.loop_status.clone().into()
+    }
+
+    #[zbus(property)]
+    pub async fn set_loop_status(&self, loop_status: String) -> Result<(), zbus::Error> {
+        let loop_status = LoopStatus::try_from(loop_status)?;
+        self.cmd_channel.send(PlayerCommand::SetLoopStatus(loop_status)).await.expect("Error sending message to player");
+        Ok(())
+    }
 
     pub async fn open_uri(&self, uri: &str) -> Result<(), zbus::fdo::Error> {
         let mut track_list = self.track_list.write().await;
@@ -167,12 +184,7 @@ impl MprisPlayer {
     #[zbus(property)]
     pub async fn metadata(&self) -> Result<HashMap<&str, Value>, zbus::fdo::Error> {
         let track_list = self.track_list.read().await;
-        let song = match track_list.current() {
-            Some(t) => t,
-            None => return Err(zbus::fdo::Error::Failed("No song currently playing".to_string()))
-        };
-
-        Ok(get_song_metadata(&song, self.client.clone()).await)
+        Ok(get_song_metadata(track_list.current(), self.client.clone()).await)
     }
 
     #[zbus(property)]
