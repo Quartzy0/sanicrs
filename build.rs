@@ -24,7 +24,8 @@ fn main() {
             "speaker-0",
             "speaker-1",
             "speaker-2",
-            "speaker-3"
+            "speaker-3",
+            "list"
         ],
     );
 }

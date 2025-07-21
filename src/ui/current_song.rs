@@ -47,12 +47,12 @@ pub enum CurrentSongMsg {
     RateChange(f64),
     RateChangeUI(f64),
     Seek(f64),
-    CoverLoaded(Option<Vec<Color>>),
 }
 
 #[derive(Debug)]
 pub enum CurrentSongOut {
     ColorSchemeChange(Option<Vec<Color>>),
+    ToggleSidebar,
 }
 
 #[relm4::component(pub async)]
@@ -120,52 +120,68 @@ impl AsyncComponent for CurrentSong {
                         }
                     },
 
+                    gtk::Box {
+                        set_orientation: Orientation::Horizontal,
+                        set_halign: Align::Center,
+                        set_spacing: 3,
+
+                        append = &gtk::Label {
+                            #[watch]
+                            set_label: &*format!("{}:{:02}", (model.playback_position / 60.0) as u64, model.playback_position as u64 % 60),
+                            set_width_chars: 4
+                        },
+                        append = if let Some(duration) = song.duration {
+                            &gtk::Scale {
+                                set_orientation: Orientation::Horizontal,
+                                #[watch]
+                                set_adjustment: &gtk::Adjustment::new(model.playback_position, 0.0, duration.as_secs_f64(), 0.5, 0.0, 0.0),
+                                #[watch]
+                                set_value: model.playback_position,
+                                set_hexpand: true,
+                                set_width_request: 400,
+                                connect_change_value[sender] => move |_range, _scroll_type, val| {
+                                    sender.input(CurrentSongMsg::Seek(val));
+                                    Propagation::Proceed
+                                },
+                            }
+                        } else {
+                            &gtk::Label {}
+                        },
+                        append = if let Some(duration) = song.duration {
+                            &gtk::Label {
+                                #[watch]
+                                set_label: &*format!("{}:{:02}", duration.as_secs() / 60, duration.as_secs() % 60),
+                                set_width_chars: 4
+                            }
+                        } else {
+                            &gtk::Label {}
+                        }
+                    },
                     gtk::CenterBox {
                         set_orientation: Orientation::Horizontal,
                         set_halign: Align::Center,
+                        set_hexpand: true,
 
                         #[wrap(Some)]
-                        set_center_widget = &gtk::Box{
+                        set_start_widget = &gtk::Box{
                             set_orientation: Orientation::Horizontal,
+                            set_halign: Align::Center,
                             set_spacing: 3,
 
-                            append = &gtk::Label {
-                                #[watch]
-                                set_label: &*format!("{}:{:02}", (model.playback_position / 60.0) as u64, model.playback_position as u64 % 60),
-                                set_width_chars: 4
-                            },
-                            append = if let Some(duration) = song.duration {
-                                &gtk::Scale {
-                                    set_orientation: Orientation::Horizontal,
-                                    #[watch]
-                                    set_adjustment: &gtk::Adjustment::new(model.playback_position, 0.0, duration.as_secs_f64(), 0.5, 0.0, 0.0),
-                                    #[watch]
-                                    set_value: model.playback_position,
-                                    set_hexpand: true,
-                                    set_width_request: 400,
-                                    connect_change_value[sender] => move |_range, _scroll_type, val| {
-                                        sender.input(CurrentSongMsg::Seek(val));
-                                        Propagation::Proceed
-                                    },
-                                }
-                            } else {
-                                &gtk::Label {}
-                            },
-                            append = if let Some(duration) = song.duration {
-                                &gtk::Label {
-                                    #[watch]
-                                    set_label: &*format!("{}:{:02}", duration.as_secs() / 60, duration.as_secs() % 60),
-                                    set_width_chars: 4
-                                }
-                            } else {
-                                &gtk::Label {}
+                            gtk::Button {
+                                set_icon_name: icon_names::LIST,
+                                set_tooltip_text: Some("Show queue"),
+                                connect_clicked[sender] => move |_| {
+                                    sender.output(CurrentSongOut::ToggleSidebar)
+                                        .expect("Error when sending message out of CurrentSong component");
+                                },
                             }
                         },
-
 
                         #[wrap(Some)]
                         set_end_widget = &gtk::Box{
                             set_orientation: Orientation::Horizontal,
+                            set_halign: Align::Center,
                             set_spacing: 3,
 
                             #[name = "volume_btn"]
@@ -254,7 +270,7 @@ impl AsyncComponent for CurrentSong {
             "cover-loaded",
             false,
             closure_local!(move |cover_picture: CoverPicture| {
-                sender.input(CurrentSongMsg::CoverLoaded(cover_picture.get_palette()));
+                sender.output(CurrentSongOut::ColorSchemeChange(cover_picture.get_palette())).expect("Error when sending color scheme change event");
             }
         ));
 
@@ -349,8 +365,6 @@ impl AsyncComponent for CurrentSong {
                 .send(PlayerCommand::SetPosition(Duration::from_secs_f64(pos)))
                 .await
                 .expect("Error sending message to player"),
-            CurrentSongMsg::CoverLoaded(colors) =>
-                sender.output(CurrentSongOut::ColorSchemeChange(colors)).expect("Error sending message out of CurrentSong component"),
         }
         self.update_view(widgets, sender);
     }

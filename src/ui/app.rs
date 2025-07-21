@@ -28,6 +28,7 @@ pub struct Model {
 #[derive(Debug)]
 pub enum AppMsg {
     ColorschemeChange(Option<Vec<Color>>),
+    ToggleSidebar,
     Quit,
 }
 
@@ -54,6 +55,7 @@ impl AsyncComponent for Model {
             adw::ToolbarView {
                 #[wrap(Some)]
                 set_content = &adw::ViewStack {
+                    #[name = "split_view"]
                     add = &adw::OverlaySplitView{
                         // set_collapsed: true,
                         // set_show_sidebar: true,
@@ -80,6 +82,7 @@ impl AsyncComponent for Model {
                 .launch(init.clone())
                 .forward(sender.input_sender(), |msg| match msg {
                     CurrentSongOut::ColorSchemeChange(colors) => AppMsg::ColorschemeChange(colors),
+                    CurrentSongOut::ToggleSidebar => AppMsg::ToggleSidebar,
                 });
         let track_list_connector = TrackListWidget::builder().launch(init.clone());
         let model = Model {
@@ -103,7 +106,11 @@ impl AsyncComponent for Model {
 
         init.3.send(PlayerCommand::AppSendSender(sender)).await.expect("Error sending sender to app");
 
-        let widgets = view_output!();
+        let widgets: ModelWidgets = view_output!();
+
+        let breakpoint = adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 1000px").unwrap());
+        breakpoint.add_setter(&widgets.split_view, "collapsed", Some(&true.to_value()));
+        root.add_breakpoint(breakpoint);
 
         AsyncComponentParts { model, widgets }
     }
@@ -133,6 +140,9 @@ impl AsyncComponent for Model {
                 self.provider
                     .load_from_string(css.as_str());
                 root.action_set_enabled("win.enable-recoloring", true);
+            },
+            AppMsg::ToggleSidebar => {
+                widgets.split_view.set_show_sidebar(true);
             },
             AppMsg::Quit => {
                 if let Some(app) = root.application() {

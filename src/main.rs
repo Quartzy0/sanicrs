@@ -15,7 +15,7 @@ use async_channel::{Receiver, Sender};
 use std::time::Duration;
 use relm4::adw::{glib};
 use relm4::adw::glib::clone;
-use relm4::adw::prelude::{ApplicationExtManual, GtkApplicationExt, ObjectExt, WidgetExt};
+use relm4::adw::prelude::{ApplicationExtManual, GtkApplicationExt, WidgetExt};
 use relm4::component::{AsyncComponentBuilder, AsyncComponentController};
 use tokio::sync::{RwLock};
 use zbus::connection;

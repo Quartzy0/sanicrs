@@ -1,5 +1,4 @@
-use std::convert::Infallible;
-use crate::opensonic::types::{Extension, Extensions, InvalidResponseError, License, Search3Results, Song, SubsonicError, SupportedExtensions};
+use crate::opensonic::types::{Extensions, InvalidResponseError, License, Search3Results, Song, SubsonicError, SupportedExtensions};
 use format_url::FormatUrl;
 use rand::distr::{Alphanumeric, SampleString};
 use reqwest;
