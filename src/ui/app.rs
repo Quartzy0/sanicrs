@@ -21,6 +21,7 @@ use relm4::adw::glib::closure;
 use tokio::sync::RwLock;
 use crate::ui::browse::BrowseWidget;
 use relm4::adw::glib as glib;
+use crate::opensonic::cache::{AlbumCache, SongCache};
 
 pub struct Model {
     current_song: AsyncController<CurrentSong>,
@@ -41,6 +42,8 @@ pub type Init = (
     Arc<RwLock<TrackList>>,
     Arc<OpenSubsonicClient>,
     Arc<Sender<PlayerCommand>>,
+    SongCache,
+    AlbumCache
 );
 
 #[relm4::component(pub async)]

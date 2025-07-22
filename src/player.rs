@@ -10,6 +10,7 @@ use rodio::source::EmptyCallback;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 use zvariant::ObjectPath;
+use crate::opensonic::cache::{AlbumCache, SongCache};
 use crate::opensonic::client::OpenSubsonicClient;
 use crate::opensonic::types::{InvalidResponseError, Song};
 use crate::PlayerCommand;
@@ -74,7 +75,7 @@ impl PlayerInfo {
             sink: Sink::connect_new(stream_handle.mixer()),
             current_song_id: RwLock::new("".to_string()),
             track_list,
-            cmd_channel
+            cmd_channel,
         }
     }
 
@@ -328,7 +329,7 @@ impl TrackList {
         }
     }
 
-    pub async fn add_song_from_uri(&mut self, uri: &str, client: Arc<OpenSubsonicClient>, index: Option<usize>) -> Option<Box<dyn Error + Send + Sync>> {
+    pub async fn add_song_from_uri(&mut self, uri: &str, client: &SongCache, index: Option<usize>) -> Option<Box<dyn Error + Send + Sync>> {
         if !uri.starts_with("sanic://song/"){
             return Some(InvalidResponseError::new_boxed("Invalid URI, should be sanic://song/<song-id>"));
         }
@@ -336,7 +337,7 @@ impl TrackList {
         self.add_song_from_id(id, client, index).await
     }
     
-    pub async fn add_song_from_id(&mut self, id: &str, client: Arc<OpenSubsonicClient>, index: Option<usize>) -> Option<Box<dyn Error + Send + Sync>> {
+    pub async fn add_song_from_id(&mut self, id: &str, client: &SongCache, index: Option<usize>) -> Option<Box<dyn Error + Send + Sync>> {
         let result = client.get_song(id).await;
         if result.is_err(){
             return result.err();
@@ -431,9 +432,9 @@ impl TrackList {
         self.shuffled_order.shuffle(&mut rand::rng());
     }
 
-    pub fn add_songs(&mut self, songs: &Vec<Arc<Song>>) {
-        let mut x: Vec<SongEntry> = songs.iter().map(|song| {
-            (Uuid::new_v4(), song.clone()).into()
+    pub fn add_songs(&mut self, songs: Vec<Arc<Song>>) {
+        let mut x: Vec<SongEntry> = songs.into_iter().map(|song| {
+            (Uuid::new_v4(), song).into()
         }).collect();
         self.songs.append(&mut x);
         self.shuffled_order = (0..self.songs.len()).collect();

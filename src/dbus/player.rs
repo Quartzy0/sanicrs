@@ -16,7 +16,7 @@ pub struct MprisPlayer {
     pub client: Arc<OpenSubsonicClient>,
     pub track_list: Arc<RwLock<TrackList>>,
     pub cmd_channel: Arc<Sender<PlayerCommand>>,
-    pub player_ref: SharedReadLock<PlayerInfo>,
+    pub player_ref: Arc<SharedReadLock<PlayerInfo>>,
 }
 
 pub async fn get_song_metadata<'a>(song: Option<&SongEntry>, client: Arc<OpenSubsonicClient>) -> HashMap<&'a str, Value<'a>> {
@@ -99,13 +99,8 @@ impl MprisPlayer {
         Ok(())
     }
 
-    pub async fn open_uri(&self, uri: &str) -> Result<(), zbus::fdo::Error> {
-        let mut track_list = self.track_list.write().await;
-        let err = track_list.add_song_from_uri(uri, self.client.clone(), None).await;
-        match err {
-            None => Ok(()),
-            Some(err) => Err(zbus::fdo::Error::Failed(format!("Error when adding song: {}", err)))
-        }
+    pub async fn open_uri(&self, uri: String) {
+        self.cmd_channel.send(PlayerCommand::AddFromUri(uri, None, false)).await.expect("Error sending message to player");
     }
 
     pub async fn play(&self) {

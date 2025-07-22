@@ -1,4 +1,4 @@
-use crate::PlayerCommand;
+use crate::{icon_names, PlayerCommand};
 use crate::opensonic::client::OpenSubsonicClient;
 use crate::opensonic::types::AlbumListType;
 use crate::player::TrackList;
@@ -17,13 +17,20 @@ use relm4::gtk::{ListItem, SignalListItemFactory, Widget};
 use relm4::prelude::AsyncComponent;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use crate::opensonic::cache::{AlbumCache, SongCache};
 
 pub struct BrowseWidget {
     track_list: Arc<RwLock<TrackList>>,
     client: Arc<OpenSubsonicClient>,
     cmd_sender: Arc<Sender<PlayerCommand>>,
+    song_cache: SongCache,
+    album_cache: AlbumCache,
 
     album_factory: SignalListItemFactory,
+}
+
+enum CurrentView {
+    Browse
 }
 
 #[derive(Debug)]
@@ -120,8 +127,10 @@ impl AsyncComponent for BrowseWidget {
     ) -> AsyncComponentParts<Self> {
         let model = Self {
             track_list: init.1,
-            client: init.2,
             cmd_sender: init.3,
+            client: init.2,
+            song_cache: init.4,
+            album_cache: init.5,
             album_factory: SignalListItemFactory::new(),
         };
 
@@ -166,17 +175,12 @@ impl AsyncComponent for BrowseWidget {
             }
         ));
 
-        let map: Vec<AlbumObject> = model
-            .client
-            .get_album_list(AlbumListType::Newest, None, None, None, None, None, None)
-            .await
-            .expect("Error fetching albums")
-            .0
-            .into_iter()
-            .map(AlbumObject::new)
-            .collect();
         let list_store = ListStore::from_iter(
-            map
+            model
+                .album_cache
+                .get_album_list(AlbumListType::Newest, None, None, None, None, None, None)
+                .await
+                .expect("Error fetching albums")
         );
 
         widgets

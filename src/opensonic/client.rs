@@ -7,7 +7,7 @@ use std::error::Error;
 use std::path::Path;
 use std::sync::Arc;
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct OpenSubsonicClient {
     host: String,
     username: String,
@@ -397,7 +397,7 @@ impl OpenSubsonicClient {
         Ok(Arc::new(resp))
     }
 
-    pub async fn get_album_list(
+    pub(super) async fn get_album_list(
         &self,
         list_type: AlbumListType,
         size: Option<u32>,
@@ -448,7 +448,7 @@ impl OpenSubsonicClient {
     pub async fn get_album(
         &self,
         id: &str
-    ) ->  Result<Album, Box<dyn Error + Send + Sync>> {
+    ) ->  Result<(Album, Vec<Song>), Box<dyn Error + Send + Sync>> {
         let body = self
             .get_action_request("getAlbum.view", vec![("id", id)])
             .await?
@@ -460,7 +460,10 @@ impl OpenSubsonicClient {
         }
 
         let resp: Album =
-            serde_json::from_value(response["subsonic-response"]["album"].take())?;
-        Ok(resp)
+            serde_json::from_value(response["subsonic-response"]["album"].clone())?;
+
+        let resp_songs: Vec<Song> =
+            serde_json::from_value(response["subsonic-response"]["album"]["song"].take())?;
+        Ok((resp, resp_songs))
     }
 }

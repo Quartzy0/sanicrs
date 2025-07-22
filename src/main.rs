@@ -21,7 +21,7 @@ use tokio::sync::{RwLock};
 use zbus::connection;
 use zbus::object_server::InterfaceRef;
 use zvariant::ObjectPath;
-use crate::opensonic::types::Song;
+use crate::opensonic::cache::{AlbumCache, SongCache};
 
 mod dbus;
 mod opensonic;
@@ -108,6 +108,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let (command_send, command_recv) = async_channel::unbounded::<PlayerCommand>();
     let command_send = Arc::new(command_send);
 
+    let song_cache = SongCache::new(client.clone());
+    let album_cache = AlbumCache::new(client.clone(), song_cache.clone());
+
     let player = Shared::new(PlayerInfo::new(
         client.clone(),
         &stream,
@@ -119,7 +122,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         player_read,
         track_list.clone(),
         client.clone(),
-        command_send.clone()
+        command_send.clone(),
+        song_cache.clone(),
+        album_cache.clone(),
     );
 
     glib::spawn_future_local(clone!(
@@ -131,8 +136,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         command_send,
         #[strong]
         payload,
+        #[strong]
+        song_cache,
+        #[strong]
+        album_cache,
         async move {
-            app_main(command_recv, command_send.clone(), client.clone(), track_list.clone(), player, payload).await.expect("Error");
+            app_main(command_recv, command_send.clone(), client.clone(), track_list.clone(), player, song_cache, album_cache, payload).await.expect("Error");
         }
     ));
 
@@ -147,6 +156,8 @@ async fn app_main(
     client: Arc<OpenSubsonicClient>,
     track_list: Arc<RwLock<TrackList>>,
     player: Shared<PlayerInfo>,
+    song_cache: SongCache,
+    album_cache: AlbumCache,
     payload: Init
 ) -> Result<(), Box<dyn Error>> {
     let connection = Arc::new(
@@ -164,7 +175,7 @@ async fn app_main(
                     client: client.clone(),
                     track_list: track_list.clone(),
                     cmd_channel: command_send.clone(),
-                    player_ref: Shared::<PlayerInfo>::get_read_lock(&player),
+                    player_ref: Arc::new(Shared::<PlayerInfo>::get_read_lock(&player)),
                 },
             )?
             .serve_at(
@@ -270,7 +281,7 @@ async fn app_main(
             PlayerCommand::AddFromUri(uri, index, set_as_current) => {
                 let mut track_list_guard = track_list.write().await;
                 match track_list_guard
-                    .add_song_from_uri(&*uri, client.clone(), index)
+                    .add_song_from_uri(&*uri, &song_cache, index)
                     .await
                 {
                     None => {
@@ -328,12 +339,12 @@ async fn app_main(
                 player_ref.get().await.shuffle_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
             }
             PlayerCommand::PlayAlbum(id) => {
-                let album = client.get_album(id.as_str()).await.expect("Error getting album"); // TODO: this shouldn't panic
-                if let Some(songs) = album.songs {
+                let album = album_cache.get_album(id.as_str()).await.expect("Error getting album"); // TODO: this shouldn't panic
+                if let Some(songs) = album.get_songs() {
                     {
                         let mut guard = track_list.write().await;
                         guard.clear();
-                        guard.add_songs(&songs.into_iter().map(Arc::new).collect::<Vec<Arc<Song>>>());
+                        guard.add_songs(songs);
                     }
                     let song = player.start_current().await.expect("Error playing current song");
                     send_cs_msg(&mut cs_sender, CurrentSongMsg::SongUpdate(song));
