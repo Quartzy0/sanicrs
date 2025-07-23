@@ -17,10 +17,11 @@ use relm4::{
 };
 use std::sync::Arc;
 use async_channel::Sender;
-use relm4::adw::glib::closure;
+use relm4::adw::glib::{clone, closure, Value};
 use tokio::sync::RwLock;
 use crate::ui::browse::BrowseWidget;
 use relm4::adw::glib as glib;
+use relm4::gtk::Widget;
 use crate::opensonic::cache::{AlbumCache, SongCache};
 
 pub struct Model {
@@ -72,6 +73,7 @@ impl AsyncComponent for Model {
                         add = model.browse_connector.widget(),
                     },
 
+                    #[name = "header_bar"]
                     add_top_bar = &adw::HeaderBar {
                         #[name = "view_switcher"]
                         #[wrap(Some)]
@@ -79,6 +81,11 @@ impl AsyncComponent for Model {
                             set_policy: ViewSwitcherPolicy::Wide,
                         }
                     },
+
+                    #[name = "view_switcher_bar"]
+                    add_bottom_bar = &adw::ViewSwitcherBar {
+
+                    }
                 },
 
                 #[wrap(Some)]
@@ -125,8 +132,40 @@ impl AsyncComponent for Model {
 
         let widgets: ModelWidgets = view_output!();
 
-        let breakpoint = adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 1000px").unwrap());
-        breakpoint.add_setter(&widgets.split_view, "collapsed", Some(&true.to_value()));
+        let condition = adw::BreakpointCondition::parse("max-width: 1000px").unwrap();
+        let breakpoint = adw::Breakpoint::new(condition.clone());
+        breakpoint.add_setter(&widgets.view_switcher_bar, "reveal", Some(&true.to_value()));
+        breakpoint.add_setter(&widgets.header_bar, "title-widget", Some(&None::<Widget>.to_value()));
+        breakpoint.connect_apply(clone!(
+            #[weak(rename_to = view_stack)]
+            widgets.view_stack,
+            #[weak(rename_to = split_view)]
+            widgets.split_view,
+            #[weak(rename_to = view_switcher_bar)]
+            widgets.view_switcher_bar,
+            move |_| {
+                if let Some(name) = view_stack.visible_child_name() {
+                    if name == "Song" {
+                        split_view.set_collapsed(true);
+                    }
+                }
+            }
+        ));
+        breakpoint.connect_unapply(clone!(
+            #[weak(rename_to = view_stack)]
+            widgets.view_stack,
+            #[weak(rename_to = split_view)]
+            widgets.split_view,
+            #[weak(rename_to = view_switcher_bar)]
+            widgets.view_switcher_bar,
+            move |_| {
+                if let Some(name) = view_stack.visible_child_name() {
+                    if name == "Song" {
+                        split_view.set_collapsed(false);
+                    }
+                }
+            }
+        ));
         root.add_breakpoint(breakpoint);
 
         let song_page = widgets.view_stack.page(model.current_song.widget());
@@ -138,6 +177,7 @@ impl AsyncComponent for Model {
         browse_page.set_name(Some("Browse"));
         browse_page.set_icon_name(Some(icon_names::EXPLORE2));
         widgets.view_switcher.set_stack(Some(&widgets.view_stack));
+        widgets.view_switcher_bar.set_stack(Some(&widgets.view_stack));
 
         widgets.view_stack
             .property_expression("visible-child-name")
