@@ -52,7 +52,7 @@ pub enum PlayerCommand {
     Raise,
     SetLoopStatus(LoopStatus),
     SetShuffle(bool),
-    PlayAlbum(String),
+    PlayAlbum(String, Option<usize>),
 }
 
 fn send_app_msg(sender_opt: &mut Option<AsyncComponentSender<Model>>, msg: AppMsg) {
@@ -338,13 +338,16 @@ async fn app_main(
                 send_cs_msg(&mut cs_sender, CurrentSongMsg::SetShuffle(shuffle));
                 player_ref.get().await.shuffle_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
             }
-            PlayerCommand::PlayAlbum(id) => {
+            PlayerCommand::PlayAlbum(id, index) => {
                 let album = album_cache.get_album(id.as_str()).await.expect("Error getting album"); // TODO: this shouldn't panic
                 if let Some(songs) = album.get_songs() {
                     {
                         let mut guard = track_list.write().await;
                         guard.clear();
                         guard.add_songs(songs);
+                        if let Some(index) = index {
+                            guard.set_current(index);
+                        }
                     }
                     let song = player.start_current().await.expect("Error playing current song");
                     send_cs_msg(&mut cs_sender, CurrentSongMsg::SongUpdate(song));

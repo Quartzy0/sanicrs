@@ -118,8 +118,7 @@ impl AsyncComponent for TrackListWidget {
             artist.set_halign(Align::Start);
             vbox.append(&artist);
 
-            let picture = CoverPicture::new(client.clone());
-            picture.set_cover_size(CoverSize::Small);
+            let picture = CoverPicture::new(client.clone(), CoverSize::Small);
             hbox.append(&picture);
             hbox.append(&vbox);
 

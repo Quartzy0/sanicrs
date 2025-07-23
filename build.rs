@@ -29,7 +29,8 @@ fn main() {
             "playlist-consecutive",
             "playlist-repeat",
             "playlist-repeat-song",
-            "playlist-shuffle"
+            "playlist-shuffle",
+            "arrow1-left"
         ],
     );
 }

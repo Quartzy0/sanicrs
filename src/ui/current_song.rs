@@ -83,6 +83,7 @@ impl AsyncComponent for CurrentSong {
                     #[name = "cover_image"]
                     &CoverPicture {
                         set_cover_size: CoverSize::Huge,
+                        set_client: model.client.clone(),
                     }
                 } else {
                     &adw::Bin {}
@@ -149,7 +150,7 @@ impl AsyncComponent for CurrentSong {
                         #[watch]
                         set_adjustment: &gtk::Adjustment::new(model.playback_position, 0.0, model.song_info.as_ref()
                             .and_then(|x| x.duration)
-                            .unwrap_or(Duration::from_secs(0))
+                            .unwrap_or(Duration::from_secs(1))
                             .as_secs_f64(), 0.5, 0.0, 0.0),
                         #[watch]
                         set_value: model.playback_position,
@@ -353,9 +354,8 @@ impl AsyncComponent for CurrentSong {
                     self.player_ref.lock().await.deref(),
                 ) as u64)
                 .as_secs_f64();
-                widgets.cover_image.set_cover_from_id(
-                    info.as_ref().and_then(|t| t.1.cover_art.clone()),
-                    self.client.clone(),
+                widgets.cover_image.set_cover_id(
+                    info.as_ref().and_then(|t| t.1.cover_art.clone())
                 );
                 self.song_info = match info {
                     None => None,

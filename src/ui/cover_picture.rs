@@ -121,11 +121,10 @@ mod imp {
                 "cover-size" => self
                     .obj()
                     .set_cover_size(value.get::<CoverSize>().expect("Required CoverSize")),
-                "cover-id" => self.obj().set_cover_from_id(
+                "cover-id" => self.obj().set_cover_id(
                     value
                         .get::<Option<String>>()
-                        .expect("Requited Option<String>"),
-                    self.client.borrow().clone(),
+                        .expect("Requited Option<String>")
                 ),
                 _ => unimplemented!(),
             };
@@ -291,10 +290,15 @@ impl Default for CoverPicture {
 }
 
 impl CoverPicture {
-    pub fn new(client: Arc<OpenSubsonicClient>) -> Self {
+    pub fn new(client: Arc<OpenSubsonicClient>, cover_size: CoverSize) -> Self {
         let obj = Self::default();
-        obj.imp().client.replace(client);
+        obj.set_client(client);
+        obj.set_cover_size(cover_size);
         obj
+    }
+    
+    pub fn set_client(&self, client: Arc<OpenSubsonicClient>) {
+        self.imp().client.replace(client);
     }
 
     pub fn cover(&self) -> Option<gdk::Texture> {
@@ -316,7 +320,7 @@ impl CoverPicture {
         self.notify("cover");
     }
 
-    pub fn set_cover_from_id(&self, cover_id: Option<String>, client: Arc<OpenSubsonicClient>) {
+    pub fn set_cover_id(&self, cover_id: Option<String>) {
         let old = self.imp().cover_id.replace(cover_id.clone());
         if old == cover_id {
             return;
@@ -333,6 +337,8 @@ impl CoverPicture {
                     cover_id,
                     #[weak(rename_to = cover_widget)]
                     self,
+                    #[strong(rename_to = client)]
+                    self.imp().client.borrow(),
                     async move {
                         match client.get_cover_image(cover_id.as_str(), Some("512")).await {
                             Ok(resp) => {

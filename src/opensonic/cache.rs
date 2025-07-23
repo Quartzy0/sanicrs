@@ -96,7 +96,7 @@ impl AlbumCache {
                 ret.push(cached.clone());
             } else {
                 let object = AlbumObject::new(album);
-                cache_w.insert(object.id().unwrap(), object.clone());
+                cache_w.insert(object.id(), object.clone());
                 ret.push(object);
             }
         }
@@ -119,7 +119,7 @@ impl AlbumCache {
                 let album = AlbumObject::new(resp);
                 album.set_songs(self.song_cache.add_songs(songs).await);
                 let mut cache_w = self.cache.write().await;
-                cache_w.insert(album.id().unwrap(), album.clone());
+                cache_w.insert(album.id(), album.clone());
                 Ok(album)
             }
         }

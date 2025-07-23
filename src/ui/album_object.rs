@@ -37,7 +37,19 @@ impl AlbumObject {
         self.imp().songs.borrow().is_some()
     }
 
-    pub fn id(&self) -> Option<String> {
+    pub fn name(&self) -> String {
+        self.property("name")
+    }
+
+    pub fn artist(&self) -> String {
+        self.property("artist")
+    }
+
+    pub fn song_count(&self) -> u32 {
+        self.property("song-count")
+    }
+
+    pub fn id(&self) -> String {
         self.property("id")
     }
 }
@@ -74,6 +86,7 @@ mod imp {
                     ParamSpecString::builder("id").build(),
                     ParamSpecString::builder("name").build(),
                     ParamSpecString::builder("artist").build(),
+                    ParamSpecString::builder("song-count").build(),
                     ParamSpecString::builder("cover-art-id").build(),
                 ]
             });
@@ -95,6 +108,7 @@ mod imp {
                     "name" => album.name.to_value(),
                     "artist" => album.artists().to_value(),
                     "cover-art-id" => album.cover_art.to_value(),
+                    "song-count" => album.song_count.to_value(),
                     _ => unimplemented!(),
                 }
             } else {
@@ -103,6 +117,7 @@ mod imp {
                     "name" => None::<String>.to_value(),
                     "artist" => None::<String>.to_value(),
                     "cover-art-id" => None::<String>.to_value(),
+                    "song-count" => None::<String>.to_value(),
                     _ => unimplemented!(),
                 }
             }

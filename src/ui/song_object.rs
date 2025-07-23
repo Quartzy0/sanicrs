@@ -48,12 +48,16 @@ impl SongObject {
     pub fn cover_art_id(&self) -> Option<String> {
         self.property("cover-art-id")
     }
+    
+    pub fn duration(&self) -> u64 {
+        self.property("duration")
+    }
 }
 
 mod imp {
     use crate::player::SongEntry;
     use crate::ui::song_object::PositionState;
-    use relm4::adw::glib::{ParamSpec, ParamSpecEnum, ParamSpecString, Value};
+    use relm4::adw::glib::{ParamSpec, ParamSpecEnum, ParamSpecString, ParamSpecUInt64, Value};
     use relm4::adw::gtk::glib;
     use relm4::adw::gtk::prelude::*;
     use relm4::adw::gtk::subclass::prelude::*;
@@ -90,6 +94,7 @@ mod imp {
                     ParamSpecString::builder("artist").build(),
                     ParamSpecString::builder("album").build(),
                     ParamSpecString::builder("cover-art-id").build(),
+                    ParamSpecUInt64::builder("duration").build(),
                     ParamSpecEnum::builder::<PositionState>("position-state").build(),
                 ]
             });
@@ -116,6 +121,7 @@ mod imp {
                     "album" => song.1.album.to_value(),
                     "cover-art-id" => song.1.cover_art.to_value(),
                     "position-state" => self.position_state.get().to_value(),
+                    "duration" => song.1.duration.and_then(|a| Some(a.as_secs())).unwrap_or(0).to_value(),
                     _ => unimplemented!(),
                 }
             } else {
