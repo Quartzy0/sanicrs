@@ -53,6 +53,7 @@ pub enum PlayerCommand {
     SetLoopStatus(LoopStatus),
     SetShuffle(bool),
     PlayAlbum(String, Option<usize>),
+    QueueAlbum(String),
 }
 
 fn send_app_msg(sender_opt: &mut Option<AsyncComponentSender<Model>>, msg: AppMsg) {
@@ -215,12 +216,14 @@ async fn app_main(
                 send_cs_msg(&mut cs_sender, CurrentSongMsg::SongUpdate(s));
                 send_tl_msg(&mut tl_sender, TrackListMsg::TrackChanged(None));
                 player_ref.get().await.metadata_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
+                player_ref.get().await.playback_status_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
             },
             PlayerCommand::Previous => {
                 let s = player.previous().await;
                 send_cs_msg(&mut cs_sender, CurrentSongMsg::SongUpdate(s));
                 send_tl_msg(&mut tl_sender, TrackListMsg::TrackChanged(None));
                 player_ref.get().await.metadata_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
+                player_ref.get().await.playback_status_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
             },
             PlayerCommand::Play => {
                 player.play().await;
@@ -247,6 +250,7 @@ async fn app_main(
                 .await.expect("Error sending DBus signal");
                 send_cs_msg(&mut cs_sender, CurrentSongMsg::SetLoopStatus(LoopStatus::None));
                 player_ref.get().await.loop_status_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
+                player_ref.get().await.playback_status_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
             },
             PlayerCommand::SetRate(r) => {
                 player.set_rate(r);
@@ -268,6 +272,7 @@ async fn app_main(
                 send_tl_msg(&mut tl_sender, TrackListMsg::TrackChanged(Some(i)));
                 send_cs_msg(&mut cs_sender, CurrentSongMsg::SongUpdate(song));
                 player_ref.get().await.metadata_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
+                player_ref.get().await.playback_status_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
             },
             PlayerCommand::Remove(i) => {
                 let e = player.remove_song(i).await.expect("Error removing track");
@@ -303,6 +308,7 @@ async fn app_main(
                             send_cs_msg(&mut cs_sender, CurrentSongMsg::SongUpdate(song));
                             player_ref.get().await
                                 .metadata_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
+                            player_ref.get().await.playback_status_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
                         }
                         send_tl_msg(&mut tl_sender, TrackListMsg::ReloadList);
                     }
@@ -334,7 +340,7 @@ async fn app_main(
             PlayerCommand::SetShuffle(shuffle) => {
                 {
                     let mut guard = track_list.write().await;
-                    guard.shuffled = shuffle;
+                    guard.set_shuffle(shuffle);
                 }
                 send_cs_msg(&mut cs_sender, CurrentSongMsg::SetShuffle(shuffle));
                 player_ref.get().await.shuffle_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
@@ -354,6 +360,26 @@ async fn app_main(
                     send_cs_msg(&mut cs_sender, CurrentSongMsg::SongUpdate(song));
                     player_ref.get().await
                         .metadata_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
+                    send_tl_msg(&mut tl_sender, TrackListMsg::ReloadList);
+                    player_ref.get().await.playback_status_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
+                }
+            },
+            PlayerCommand::QueueAlbum(id) => {
+                let album = album_cache.get_album(id.as_str()).await.expect("Error getting album"); // TODO: this shouldn't panic
+                if let Some(songs) = album.get_songs() {
+                    let was_empty;
+                    {
+                        let mut guard = track_list.write().await;
+                        was_empty = guard.empty();
+                        guard.add_songs(songs);
+                    }
+                    if was_empty {
+                        let song = player.start_current().await.expect("Error playing current song");
+                        send_cs_msg(&mut cs_sender, CurrentSongMsg::SongUpdate(song));
+                        player_ref.get().await
+                            .metadata_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
+                        player_ref.get().await.playback_status_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
+                    }
                     send_tl_msg(&mut tl_sender, TrackListMsg::ReloadList);
                 }
             }

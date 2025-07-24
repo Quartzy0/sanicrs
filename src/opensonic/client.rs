@@ -59,7 +59,7 @@ impl OpenSubsonicClient {
             ("t", hash.as_str()),
         ];
         let url = FormatUrl::new(&self.host)
-            .with_path_template("/rest/getOpenSubsonicExtensions.view");
+            .with_path_template("/rest/getOpenSubsonicExtensions");
         println!("Initializing OpenSusonicClient. Getting extensions. (params: {:?})", params);
         let resp = reqwest::blocking::get(url.with_query_params(params).format_url())?;
         let mut response: serde_json::Value = serde_json::from_str(&resp.text()?)?;
@@ -175,7 +175,7 @@ impl OpenSubsonicClient {
 
     pub async fn get_license(&self) -> Result<License, Box<dyn Error>> {
         let body = self
-            .get_action_request("getLicense.view", vec![])
+            .get_action_request("getLicense", vec![])
             .await?
             .text()
             .await?;
@@ -191,7 +191,7 @@ impl OpenSubsonicClient {
 
     pub async fn get_extensions(&self) -> Result<Extensions, Box<dyn Error>> {
         let body = self
-            .get_action_request("getOpenSubsonicExtensions.view", vec![])
+            .get_action_request("getOpenSubsonicExtensions", vec![])
             .await?
             .text()
             .await?;
@@ -239,7 +239,7 @@ impl OpenSubsonicClient {
         }
 
         let body = self
-            .get_action_request("search3.view", params)
+            .get_action_request("search3", params)
             .await?
             .text()
             .await?;
@@ -295,7 +295,7 @@ impl OpenSubsonicClient {
         }
 
         let response = self
-            .get_action_request("stream.view", params)
+            .get_action_request("stream", params)
             .await?;
         if response.headers()["Content-Type"] == "text/xml" {
             return Err(InvalidResponseError::new_boxed(
@@ -329,7 +329,7 @@ impl OpenSubsonicClient {
         }
 
         let response = self
-            .get_action_request("getCoverArt.view", params)
+            .get_action_request("getCoverArt", params)
             .await?;
         if response.headers()["Content-Type"] == "text/xml" {
             return Err(InvalidResponseError::new_boxed(
@@ -377,12 +377,12 @@ impl OpenSubsonicClient {
                 }
             }
         } // Caching either didn't work or is not enabled
-        Some(self.get_action_request_get_url("getCoverArt.view", vec![("id", id)]))
+        Some(self.get_action_request_get_url("getCoverArt", vec![("id", id)]))
     }
 
     pub async fn get_song(&self, id: &str) -> Result<Arc<Song>, Box<dyn Error + Send + Sync>> {
         let body = self
-            .get_action_request("getSong.view", vec![("id", id)])
+            .get_action_request("getSong", vec![("id", id)])
             .await?
             .text()
             .await?;
@@ -431,7 +431,7 @@ impl OpenSubsonicClient {
         }
 
         let body = self
-            .get_action_request("getAlbumList2.view", params)
+            .get_action_request("getAlbumList2", params)
             .await?
             .text()
             .await?;
@@ -450,7 +450,7 @@ impl OpenSubsonicClient {
         id: &str
     ) ->  Result<(Album, Vec<Song>), Box<dyn Error + Send + Sync>> {
         let body = self
-            .get_action_request("getAlbum.view", vec![("id", id)])
+            .get_action_request("getAlbum", vec![("id", id)])
             .await?
             .text()
             .await?;

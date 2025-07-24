@@ -1,4 +1,3 @@
-use crate::opensonic::client::OpenSubsonicClient;
 use crate::player::TrackList;
 use crate::ui::app::Init;
 use crate::ui::cover_picture::{CoverPicture, CoverSize};
@@ -13,7 +12,6 @@ use std::sync::Arc;
 use async_channel::Sender;
 use relm4::gtk::pango::EllipsizeMode;
 use tokio::sync::RwLock;
-use crate::opensonic::cache::CoverCache;
 use crate::PlayerCommand;
 
 pub struct TrackListWidget {

@@ -23,7 +23,8 @@ pub struct ViewAlbumWidget {
 #[derive(Debug)]
 pub enum ViewAlbumMsg {
     PlayAlbum(Option<usize>),
-    SetAlbum(AlbumObject)
+    SetAlbum(AlbumObject),
+    QueueAlbum,
 }
 
 type ViewAlbumInit = (
@@ -101,10 +102,20 @@ impl AsyncComponent for ViewAlbumWidget {
                             set_valign: Align::Center,
                             set_vexpand: false,
                             set_vexpand_set: false,
+                            set_spacing: 10,
 
                             gtk::Button{
+                                set_valign: Align::Center,
+                                set_halign: Align::Center,
                                 set_icon_name: icon_names::PLAY,
                                 connect_clicked => ViewAlbumMsg::PlayAlbum(None),
+                                add_css_class: "album-play-btn"
+                            },
+                            gtk::Button {
+                                set_valign: Align::Center,
+                                set_halign: Align::Center,
+                                set_icon_name: icon_names::ADD_REGULAR,
+                                connect_clicked => ViewAlbumMsg::QueueAlbum,
                                 add_css_class: "album-play-btn"
                             }
                         }
@@ -262,6 +273,12 @@ impl AsyncComponent for ViewAlbumWidget {
                     .expect("Song list model should be NoSelection");
                 let store = selection.model().unwrap().downcast::<ListStore>().expect("Should be ListStore");
                 store.splice(0, store.n_items(), &songs);
+            },
+            ViewAlbumMsg::QueueAlbum => {
+                self.cmd_sender
+                    .send(PlayerCommand::QueueAlbum(self.album.id()))
+                    .await
+                    .expect("Error sending command to Player");
             }
         };
         self.update_view(widgets, sender);

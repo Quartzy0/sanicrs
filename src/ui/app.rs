@@ -1,4 +1,3 @@
-use crate::opensonic::client::OpenSubsonicClient;
 use crate::player::{PlayerInfo, TrackList};
 use crate::ui::current_song::{CurrentSong, CurrentSongOut};
 use crate::ui::track_list::TrackListWidget;

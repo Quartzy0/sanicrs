@@ -86,7 +86,7 @@ impl MprisPlayer {
 
     #[zbus(signal)]
     pub async fn seeked(emitter: &SignalEmitter<'_>, position: i64) -> Result<(), zbus::Error>;
-    
+
     #[zbus(property)]
     pub async fn loop_status(&self) -> String {
         self.track_list.read().await.loop_status.clone().into()
@@ -138,7 +138,7 @@ impl MprisPlayer {
                 Some(t) => t,
                 None => return Ok(())
             };
-            if song.dbus_path() != track_id { 
+            if song.dbus_path() != track_id {
                 return Ok(());
             }
             if let Some(duration) = song.1.duration && position > duration {
@@ -240,13 +240,12 @@ impl MprisPlayer {
     #[zbus(property)]
     pub async fn shuffle(&self) -> bool {
         let track_list = self.track_list.read().await;
-        track_list.shuffled
+        track_list.is_suffled()
     }
 
     #[zbus(property)]
     pub async fn set_shuffle(&self, shuffle: bool) {
-        let mut track_list = self.track_list.write().await;
-        track_list.shuffled = shuffle;
+        self.cmd_channel.send(PlayerCommand::SetShuffle(shuffle)).await.expect("Error sending message to player");
     }
 
     #[zbus(property)]
@@ -279,5 +278,3 @@ impl MprisPlayer {
         true
     }
 }
-
-

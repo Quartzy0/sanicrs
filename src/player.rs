@@ -10,7 +10,7 @@ use rodio::source::EmptyCallback;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 use zvariant::ObjectPath;
-use crate::opensonic::cache::{AlbumCache, SongCache};
+use crate::opensonic::cache::SongCache;
 use crate::opensonic::client::OpenSubsonicClient;
 use crate::opensonic::types::{InvalidResponseError, Song};
 use crate::PlayerCommand;
@@ -314,7 +314,7 @@ pub struct TrackList {
     current: usize,
     shuffled_order: Vec<usize>,
 
-    pub shuffled: bool,
+    shuffled: bool,
     pub loop_status: LoopStatus,
 }
 
@@ -329,6 +329,25 @@ impl TrackList {
         }
     }
 
+    pub fn is_suffled(&self) -> bool {
+        self.shuffled
+    }
+
+    pub fn set_shuffle(&mut self, shuffle: bool) {
+        if shuffle {
+            let start = if self.current + 1 >= self.songs.len() {
+                0
+            } else {
+                self.current + 1
+            };
+            let mut shuffled_order: Vec<usize> = (start..self.songs.len()).collect();
+            shuffled_order.shuffle(&mut rand::rng());
+            self.shuffled_order = (0..start).collect();
+            self.shuffled_order.append(&mut shuffled_order);
+        }
+        self.shuffled = shuffle;
+    }
+
     pub async fn add_song_from_uri(&mut self, uri: &str, client: &SongCache, index: Option<usize>) -> Option<Box<dyn Error + Send + Sync>> {
         if !uri.starts_with("sanic://song/"){
             return Some(InvalidResponseError::new_boxed("Invalid URI, should be sanic://song/<song-id>"));
@@ -336,7 +355,7 @@ impl TrackList {
         let id = &uri[13..]; // 13 is length of "sanic://song/"
         self.add_song_from_id(id, client, index).await
     }
-    
+
     pub async fn add_song_from_id(&mut self, id: &str, client: &SongCache, index: Option<usize>) -> Option<Box<dyn Error + Send + Sync>> {
         let result = client.get_song(id).await;
         if result.is_err(){
@@ -346,7 +365,7 @@ impl TrackList {
         self.add_song(song, index);
         None
     }
-    
+
     pub fn set_current(&mut self, index: usize) {
         if !self.shuffled {
             self.current = index;
@@ -428,8 +447,6 @@ impl TrackList {
                 self.songs.insert(i, (Uuid::new_v4(), song).into());
             }
         }
-        self.shuffled_order = (0..self.songs.len()).collect();
-        self.shuffled_order.shuffle(&mut rand::rng());
     }
 
     pub fn add_songs(&mut self, songs: Vec<Arc<Song>>) {

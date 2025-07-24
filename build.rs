@@ -30,7 +30,7 @@ fn main() {
             "playlist-repeat",
             "playlist-repeat-song",
             "playlist-shuffle",
-            "arrow1-left"
+            "add-regular"
         ],
     );
 }
