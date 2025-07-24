@@ -317,7 +317,7 @@ impl OpenSubsonicClient {
         &self,
         id: &str,
         size: Option<&str>,
-    ) -> Result<Vec<u8>, Box<dyn Error>> {
+    ) -> Result<Vec<u8>, Box<dyn Error + Send + Sync>> {
         if let Some(cached) = self.get_cache_resource(id).await {
             return Ok(cached);
         }

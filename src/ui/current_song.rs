@@ -1,4 +1,3 @@
-use crate::opensonic::client::OpenSubsonicClient;
 use crate::opensonic::types::Song;
 use crate::player::{LoopStatus, PlaybackStatus, PlayerInfo, SongEntry};
 use crate::ui::app::Init;
@@ -22,7 +21,6 @@ use uuid::Uuid;
 
 pub struct CurrentSong {
     player_ref: SharedReadLock<PlayerInfo>,
-    client: Arc<OpenSubsonicClient>,
     cmd_sender: Arc<Sender<PlayerCommand>>,
 
     // UI data
@@ -83,7 +81,7 @@ impl AsyncComponent for CurrentSong {
                     #[name = "cover_image"]
                     &CoverPicture {
                         set_cover_size: CoverSize::Huge,
-                        set_client: model.client.clone(),
+                        set_cache: init.2,
                     }
                 } else {
                     &adw::Bin {}
@@ -271,7 +269,6 @@ impl AsyncComponent for CurrentSong {
         }
         let model = CurrentSong {
             player_ref: init.0,
-            client: init.2,
             playback_state_icon: icon_names::PLAY,
             loop_status_icon: icon_names::PLAYLIST_CONSECUTIVE,
             song_info: Default::default(),

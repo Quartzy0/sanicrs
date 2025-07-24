@@ -5,14 +5,13 @@
 // SPDX-FileCopyrightText: 2022  Emmanuele Bassi
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use crate::opensonic::client::OpenSubsonicClient;
 use relm4::adw::glib::clone;
 use relm4::adw::gtk;
 use relm4::adw::gtk::{gdk, gio, glib, gsk, prelude::*, subclass::prelude::*};
 use std::cell::{Cell, RefCell};
-use std::sync::Arc;
 use color_thief::{Color, ColorFormat};
 use relm4::adw::gdk::{MemoryFormat, TextureDownloader};
+use crate::opensonic::cache::CoverCache;
 
 #[derive(Clone, Copy, Debug, glib::Enum, PartialEq, Default)]
 #[enum_type(name = "SanicCoverSize")]
@@ -44,18 +43,31 @@ mod imp {
     use relm4::gtk::graphene::{Point, Rect};
     use relm4::once_cell::sync::Lazy;
     use zbus::export::futures_core::FusedFuture;
+    use zvariant::NoneValue;
+    use crate::opensonic::cache::CoverCache;
 
     const HUGE_SIZE: i32 = 512;
     const LARGE_SIZE: i32 = 192;
     const SMALL_SIZE: i32 = 64;
 
-    #[derive(Default)]
     pub struct CoverPicture {
         pub cover: RefCell<Option<gdk::Texture>>,
         pub cover_id: RefCell<Option<String>>,
         pub handle: Cell<Option<JoinHandle<()>>>,
         pub cover_size: Cell<CoverSize>,
-        pub client: RefCell<Arc<OpenSubsonicClient>>,
+        pub cache: RefCell<CoverCache>,
+    }
+
+    impl Default for CoverPicture {
+        fn default() -> Self {
+            Self {
+                cover: RefCell::new(None),
+                cover_id: RefCell::new(None),
+                handle: Cell::new(None),
+                cover_size: Cell::new(CoverSize::default()),
+                cache: RefCell::null_value(),
+            }
+        }
     }
 
     #[glib::object_subclass]
@@ -290,15 +302,19 @@ impl Default for CoverPicture {
 }
 
 impl CoverPicture {
-    pub fn new(client: Arc<OpenSubsonicClient>, cover_size: CoverSize) -> Self {
+    pub fn new(cache: CoverCache, cover_size: CoverSize) -> Self {
         let obj = Self::default();
-        obj.set_client(client);
+        obj.set_cache(cache);
         obj.set_cover_size(cover_size);
         obj
     }
+
+    pub fn new_uninit() -> Self {
+        Self::default()
+    }
     
-    pub fn set_client(&self, client: Arc<OpenSubsonicClient>) {
-        self.imp().client.replace(client);
+    pub fn set_cache(&self, cache: CoverCache) {
+        self.imp().cache.replace(cache);
     }
 
     pub fn cover(&self) -> Option<gdk::Texture> {
@@ -337,15 +353,12 @@ impl CoverPicture {
                     cover_id,
                     #[weak(rename_to = cover_widget)]
                     self,
-                    #[strong(rename_to = client)]
-                    self.imp().client.borrow(),
+                    #[strong(rename_to = cache)]
+                    self.imp().cache.borrow(),
                     async move {
-                        match client.get_cover_image(cover_id.as_str(), Some("512")).await {
+                        match cache.get_cover_texture(cover_id.as_str()).await {
                             Ok(resp) => {
-                                let bytes = glib::Bytes::from(&resp);
-                                let texture =
-                                    gdk::Texture::from_bytes(&bytes).expect("Error loading textre");
-                                cover_widget.set_cover(Some(&texture));
+                                cover_widget.set_cover(Some(&resp));
                             }
                             Err(e) => {
                                 println!("Error getting cover image: {}", e);

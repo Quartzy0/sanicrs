@@ -17,12 +17,12 @@ use relm4::{
 };
 use std::sync::Arc;
 use async_channel::Sender;
-use relm4::adw::glib::{clone, closure, Value};
+use relm4::adw::glib::{clone, closure};
 use tokio::sync::RwLock;
 use crate::ui::browse::BrowseWidget;
 use relm4::adw::glib as glib;
 use relm4::gtk::Widget;
-use crate::opensonic::cache::{AlbumCache, SongCache};
+use crate::opensonic::cache::{AlbumCache, CoverCache, SongCache};
 
 pub struct Model {
     current_song: AsyncController<CurrentSong>,
@@ -41,7 +41,7 @@ pub enum AppMsg {
 pub type Init = (
     SharedReadLock<PlayerInfo>,
     Arc<RwLock<TrackList>>,
-    Arc<OpenSubsonicClient>,
+    CoverCache,
     Arc<Sender<PlayerCommand>>,
     SongCache,
     AlbumCache

@@ -4,6 +4,8 @@ use crate::ui::album_object::AlbumObject;
 use std::collections::HashMap;
 use std::error::Error;
 use std::sync::Arc;
+use relm4::adw::gdk::Texture;
+use relm4::adw::glib;
 use tokio::sync::RwLock;
 
 #[derive(Clone, Debug)]
@@ -123,5 +125,36 @@ impl AlbumCache {
                 Ok(album)
             }
         }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct CoverCache {
+    cache: Arc<RwLock<HashMap<String, Texture>>>,
+    client: Arc<OpenSubsonicClient>,
+}
+
+impl CoverCache {
+    pub fn new(client: Arc<OpenSubsonicClient>) -> Self {
+        Self {
+            client,
+            cache: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    pub async fn get_cover_texture(&self, id: &str) -> Result<Texture, Box<dyn Error + Send + Sync>> {
+        {
+            let cache_r = self.cache.read().await;
+            if let Some(texture) = cache_r.get(id) {
+                return Ok(texture.clone());
+            }
+        }
+        let resp = self.client.get_cover_image(id, Some("512")).await?;
+        let bytes = glib::Bytes::from(&resp);
+        let texture =
+            Texture::from_bytes(&bytes).expect("Error loading textre");
+        let mut cache_w = self.cache.write().await;
+        cache_w.insert(id.to_string(), texture.clone());
+        Ok(texture)
     }
 }

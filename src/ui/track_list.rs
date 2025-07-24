@@ -11,12 +11,13 @@ use relm4::adw::{glib, gtk};
 use relm4::prelude::*;
 use std::sync::Arc;
 use async_channel::Sender;
+use relm4::gtk::pango::EllipsizeMode;
 use tokio::sync::RwLock;
+use crate::opensonic::cache::CoverCache;
 use crate::PlayerCommand;
 
 pub struct TrackListWidget {
     track_list: Arc<RwLock<TrackList>>,
-    client: Arc<OpenSubsonicClient>,
     cmd_sender: Arc<Sender<PlayerCommand>>,
 
     factory: SignalListItemFactory,
@@ -84,7 +85,6 @@ impl AsyncComponent for TrackListWidget {
     ) -> AsyncComponentParts<Self> {
         let model = TrackListWidget {
             track_list: init.1,
-            client: init.2,
             factory: SignalListItemFactory::new(),
             cmd_sender: init.3,
         };
@@ -92,8 +92,8 @@ impl AsyncComponent for TrackListWidget {
         let widgets: Self::Widgets = view_output!();
 
         model.factory.connect_setup(clone!(
-            #[strong(rename_to = client)]
-            model.client,
+            #[strong(rename_to = cover_cache)]
+            init.2,
             move |_, list_item| {
             let hbox = gtk::Box::builder()
                 .orientation(Orientation::Horizontal)
@@ -113,12 +113,16 @@ impl AsyncComponent for TrackListWidget {
             let title = gtk::Label::new(None);
             title.set_halign(Align::Start);
             title.add_css_class("bold");
+            title.set_max_width_chars(30);
+            title.set_ellipsize(EllipsizeMode::End);
             vbox.append(&title);
             let artist = gtk::Label::new(None);
             artist.set_halign(Align::Start);
+            artist.set_max_width_chars(30);
+            artist.set_ellipsize(EllipsizeMode::End);
             vbox.append(&artist);
 
-            let picture = CoverPicture::new(client.clone(), CoverSize::Small);
+            let picture = CoverPicture::new(cover_cache.clone(), CoverSize::Small);
             hbox.append(&picture);
             hbox.append(&vbox);
 
