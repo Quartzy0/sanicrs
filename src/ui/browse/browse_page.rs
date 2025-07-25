@@ -38,12 +38,12 @@ impl AsyncComponent for BrowsePageWidget {
     type Input = BrowsePageMsg;
     type Output = BrowsePageOut;
     type Init = Init;
-    
+
     view! {
         adw::NavigationPage {
             set_tag: Some("browse"),
             set_title: "Browse",
-            
+
             gtk::Box {
                 set_orientation: Orientation::Vertical,
                 add_css_class: "padded",
@@ -186,7 +186,7 @@ impl AsyncComponent for BrowsePageWidget {
         widgets: &mut Self::Widgets,
         message: Self::Input,
         sender: AsyncComponentSender<Self>,
-        root: &Self::Root,
+        _root: &Self::Root,
     ) {
         match message {
             BrowsePageMsg::ScrollNewest(s) => {

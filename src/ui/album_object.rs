@@ -55,7 +55,7 @@ impl AlbumObject {
 }
 
 mod imp {
-    use relm4::adw::glib::{ParamSpec, ParamSpecString, ParamSpecValueArray, Value};
+    use relm4::adw::glib::{ParamSpec, ParamSpecString, Value};
     use relm4::adw::gtk::glib;
     use relm4::adw::gtk::prelude::*;
     use relm4::adw::gtk::subclass::prelude::*;

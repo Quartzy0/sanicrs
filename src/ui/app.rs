@@ -140,8 +140,6 @@ impl AsyncComponent for Model {
             widgets.view_stack,
             #[weak(rename_to = split_view)]
             widgets.split_view,
-            #[weak(rename_to = view_switcher_bar)]
-            widgets.view_switcher_bar,
             move |_| {
                 if let Some(name) = view_stack.visible_child_name() {
                     if name == "Song" {
@@ -155,8 +153,6 @@ impl AsyncComponent for Model {
             widgets.view_stack,
             #[weak(rename_to = split_view)]
             widgets.split_view,
-            #[weak(rename_to = view_switcher_bar)]
-            widgets.view_switcher_bar,
             move |_| {
                 if let Some(name) = view_stack.visible_child_name() {
                     if name == "Song" {
@@ -193,7 +189,7 @@ impl AsyncComponent for Model {
         widgets: &mut Self::Widgets,
         message: Self::Input,
         sender: AsyncComponentSender<Self>,
-        root: &Self::Root,
+        root: &adw::ApplicationWindow,
     ) {
         match message {
             AppMsg::ColorschemeChange(colors) => {

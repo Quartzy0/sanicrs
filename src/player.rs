@@ -3,6 +3,7 @@ use std::error::Error;
 use std::io::Cursor;
 use std::sync::Arc;
 use async_channel::Sender;
+use rand::Rng;
 use std::time::Duration;
 use rand::prelude::SliceRandom;
 use rodio::{Decoder, OutputStream, Sink};
@@ -438,14 +439,14 @@ impl TrackList {
     }
 
     pub fn add_song(&mut self, song: Arc<Song>, index: Option<usize>) {
-        match index {
-            None => self.songs.push((Uuid::new_v4(), song).into()),
-            Some(i) => {
-                if i <= self.current {
-                    self.current += 1;
-                }
-                self.songs.insert(i, (Uuid::new_v4(), song).into());
-            }
+        let index = index.unwrap_or(self.songs.len());
+        if index <= self.current {
+            self.current += 1;
+        }
+        self.songs.insert(index, (Uuid::new_v4(), song).into());
+        if self.shuffled {
+            let mut rng = rand::rng();
+            self.shuffled_order.insert(rng.random_range(self.current..=self.songs.len()), index);
         }
     }
 
@@ -453,9 +454,15 @@ impl TrackList {
         let mut x: Vec<SongEntry> = songs.into_iter().map(|song| {
             (Uuid::new_v4(), song).into()
         }).collect();
+        if self.shuffled {
+            let prev_songs_n = self.songs.len();
+            let songs_n = x.len() + prev_songs_n;
+            let mut rng = rand::rng();
+            for i in prev_songs_n..songs_n {
+                self.shuffled_order.insert(rng.random_range(self.current..=self.shuffled_order.len()), i);
+            }
+        }
         self.songs.append(&mut x);
-        self.shuffled_order = (0..self.songs.len()).collect();
-        self.shuffled_order.shuffle(&mut rand::rng());
     }
 
     pub fn get_songs(&self) -> &Vec<SongEntry> {

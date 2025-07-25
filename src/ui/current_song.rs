@@ -2,6 +2,7 @@ use crate::opensonic::types::Song;
 use crate::player::{LoopStatus, PlaybackStatus, PlayerInfo, SongEntry};
 use crate::ui::app::Init;
 use crate::ui::cover_picture::{CoverPicture, CoverSize};
+use crate::ui::random_songs_dialog::RandomSongsDialog;
 use crate::{PlayerCommand, icon_names};
 use async_channel::Sender;
 use color_thief::Color;
@@ -13,6 +14,7 @@ use relm4::adw::gtk::prelude::OrientableExt;
 use relm4::adw::gtk::{Align, Orientation};
 use relm4::adw::prelude::*;
 use relm4::component::{AsyncComponent, AsyncComponentParts, AsyncComponentSender};
+use relm4::gtk::glib::clone;
 use relm4::prelude::*;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -191,6 +193,11 @@ impl AsyncComponent for CurrentSong {
                                 sender.output(CurrentSongOut::ToggleSidebar)
                                     .expect("Error when sending message out of CurrentSong component");
                             },
+                        },
+                        #[name = "random_btn"]
+                        gtk::Button {
+                            set_icon_name: icon_names::ADD_REGULAR,
+                            set_tooltip_text: Some("Add random songs"),
                         }
                     },
 
@@ -286,7 +293,7 @@ impl AsyncComponent for CurrentSong {
             .expect("Error sending sender to player");
 
         let s1 = sender.clone();
-        sender.command(|out, shutdown| {
+        sender.command(|_out, shutdown| {
             shutdown
                 .register(async move {
                     let mut n = 0;
@@ -314,6 +321,15 @@ impl AsyncComponent for CurrentSong {
                 .expect("Error when sending color scheme change event");
             }),
         );
+
+        widgets.random_btn.connect_clicked(clone!(
+            #[strong(rename_to = sndr)]
+            model.cmd_sender,
+            move |this| {
+                let dialog = RandomSongsDialog::builder().launch(sndr.clone());
+                dialog.widget().present(Some(this));
+            }
+        ));
 
         AsyncComponentParts { model, widgets }
     }

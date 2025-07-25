@@ -54,6 +54,7 @@ pub enum PlayerCommand {
     SetShuffle(bool),
     PlayAlbum(String, Option<usize>),
     QueueAlbum(String),
+    QueueRandom{size: u32, genre: Option<String>, from_year: Option<u32>, to_year: Option<u32>}
 }
 
 fn send_app_msg(sender_opt: &mut Option<AsyncComponentSender<Model>>, msg: AppMsg) {
@@ -382,6 +383,23 @@ async fn app_main(
                     }
                     send_tl_msg(&mut tl_sender, TrackListMsg::ReloadList);
                 }
+            }
+            PlayerCommand::QueueRandom { size, genre, from_year, to_year } => {
+                let songs = song_cache.get_random_songs(Some(size), genre.as_deref(), from_year, to_year, None).await.expect("Error getting random songs");
+                let was_empty;
+                {
+                    let mut guard = track_list.write().await;
+                    was_empty = guard.empty();
+                    guard.add_songs(songs);
+                }
+                if was_empty {
+                    let song = player.start_current().await.expect("Error playing current song");
+                    send_cs_msg(&mut cs_sender, CurrentSongMsg::SongUpdate(song));
+                    player_ref.get().await
+                        .metadata_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
+                    player_ref.get().await.playback_status_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
+                }
+                send_tl_msg(&mut tl_sender, TrackListMsg::ReloadList);
             }
         }
     }

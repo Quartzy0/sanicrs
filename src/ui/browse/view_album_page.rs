@@ -240,7 +240,7 @@ impl AsyncComponent for ViewAlbumWidget {
         widgets: &mut Self::Widgets,
         message: Self::Input,
         sender: AsyncComponentSender<Self>,
-        root: &Self::Root,
+        _root: &Self::Root,
     ) {
         match message {
             ViewAlbumMsg::PlayAlbum(index) => {

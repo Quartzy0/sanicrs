@@ -466,4 +466,75 @@ impl OpenSubsonicClient {
             serde_json::from_value(response["subsonic-response"]["album"]["song"].take())?;
         Ok((resp, resp_songs))
     }
+
+    pub async fn get_similar_songs(
+        &self,
+        id: &str,
+        count: Option<u32>
+    ) -> Result<Vec<Song>, Box<dyn Error + Send + Sync>> {
+        let count = count.and_then(|o| Some(o.to_string()));
+
+        let mut params = vec![("id", id)];
+        if count.is_some() {
+            params.push(("count", count.as_ref().unwrap()));
+        }
+
+        let body = self
+            .get_action_request("getSimilarSongs2", params)
+            .await?
+            .text()
+            .await?;
+        let mut response: serde_json::Value = serde_json::from_str(&body)?;
+        if response["subsonic-response"]["status"] != "ok" {
+            return Err(SubsonicError::from_response(response));
+        }
+
+        let resp_songs: Vec<Song> =
+            serde_json::from_value(response["subsonic-response"]["similarSongs2"]["song"].take())?;
+        Ok(resp_songs)
+    }
+
+    pub async fn get_random_songs(
+        &self,
+        size: Option<u32>,
+        genre: Option<&str>,
+        from_year: Option<u32>,
+        to_year: Option<u32>,
+        music_folder_id: Option<&str>
+    ) -> Result<Vec<Song>, Box<dyn Error + Send + Sync>> {
+        let size = size.and_then(|o| Some(o.to_string()));
+        let from_year = from_year.and_then(|o| Some(o.to_string()));
+        let to_year = to_year.and_then(|o| Some(o.to_string()));
+
+        let mut params: Vec<(&str, &str)> = Vec::with_capacity(5);
+        if size.is_some() {
+            params.push(("count", size.as_ref().unwrap()));
+        }
+        if let Some(genre) = genre {
+            params.push(("genre", genre));
+        }
+        if from_year.is_some() {
+            params.push(("fromYear", from_year.as_ref().unwrap()));
+        }
+        if to_year.is_some() {
+            params.push(("toYear", to_year.as_ref().unwrap()));
+        }
+        if let Some(music_folder_id) = music_folder_id {
+            params.push(("musicFolderId", music_folder_id));
+        }
+
+        let body = self
+            .get_action_request("getRandomSongs", params)
+            .await?
+            .text()
+            .await?;
+        let mut response: serde_json::Value = serde_json::from_str(&body)?;
+        if response["subsonic-response"]["status"] != "ok" {
+            return Err(SubsonicError::from_response(response));
+        }
+
+        let resp_songs: Vec<Song> =
+            serde_json::from_value(response["subsonic-response"]["randomSongs"]["song"].take())?;
+        Ok(resp_songs)
+    }
 }

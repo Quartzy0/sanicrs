@@ -49,6 +49,23 @@ impl SongCache {
             })
             .collect()
     }
+
+    pub async fn get_similar_songs(&self, id: &str, count: Option<u32>) -> Result<Vec<Arc<Song>>, Box<dyn Error + Send + Sync>> {
+        let songs = self.client.get_similar_songs(id, count).await?;
+        Ok(self.add_songs(songs).await)
+    }
+
+    pub async fn get_random_songs(
+        &self,
+        size: Option<u32>,
+        genre: Option<&str>,
+        from_year: Option<u32>,
+        to_year: Option<u32>,
+        music_folder_id: Option<&str>
+    ) -> Result<Vec<Arc<Song>>, Box<dyn Error + Send + Sync>> {
+        let songs = self.client.get_random_songs(size, genre, from_year, to_year, music_folder_id).await?;
+        Ok(self.add_songs(songs).await)
+    }
 }
 
 #[derive(Clone, Debug)]

@@ -81,7 +81,7 @@ impl AsyncComponent for BrowseWidget {
         widgets: &mut Self::Widgets,
         message: Self::Input,
         sender: AsyncComponentSender<Self>,
-        root: &Self::Root,
+        _root: &Self::Root,
     ) {
         match message {
             BrowseMsg::ViewAlbum(album) => {
