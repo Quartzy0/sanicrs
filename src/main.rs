@@ -5,11 +5,18 @@ use crate::opensonic::client::OpenSubsonicClient;
 use crate::player::{LoopStatus, PlayerInfo, TrackList};
 use crate::ui::app::{AppMsg, Init, Model};
 use crate::ui::current_song::{CurrentSong, CurrentSongMsg};
+use crate::ui::setup::{SetupMsg, SetupOut, SetupWidget};
 use crate::ui::track_list::{TrackListMsg, TrackListWidget};
+use libsecret::{password_lookup_sync, Schema, SchemaAttributeType, SchemaFlags};
 use readlock_tokio::{Shared};
-use relm4::{AsyncComponentSender, RelmApp};
+use relm4::gtk::gio::prelude::{ApplicationExt, SettingsExt};
+use relm4::gtk::gio::{ApplicationFlags, Cancellable, Settings, SettingsBackend, SettingsSchemaSource};
+use relm4::{adw, AsyncComponentSender, RelmApp};
 use rodio::OutputStreamBuilder;
+use std::collections::HashMap;
+use std::env;
 use std::error::Error;
+use std::path::Path;
 use std::sync::Arc;
 use async_channel::{Receiver, Sender};
 use std::time::Duration;
@@ -20,6 +27,7 @@ use relm4::component::{AsyncComponentBuilder, AsyncComponentController};
 use tokio::sync::{RwLock};
 use zbus::connection;
 use zbus::object_server::InterfaceRef;
+use zbus::blocking;
 use zvariant::ObjectPath;
 use crate::opensonic::cache::{AlbumCache, CoverCache, SongCache};
 
@@ -27,6 +35,9 @@ mod dbus;
 mod opensonic;
 mod player;
 mod ui;
+
+const APP_ID: &'static str = "me.quartzy.sanicrs";
+const DBUS_NAME: &'static str = "org.mpris.MediaPlayer2.sanicrs";
 
 mod icon_names {
     include!(concat!(env!("OUT_DIR"), "/icon_names.rs"));
@@ -84,20 +95,82 @@ fn send_tl_msg(sender_opt: &mut Option<AsyncComponentSender<TrackListWidget>>, m
     }
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
-    let app: RelmApp<AppMsg> = RelmApp::new("me.quarty.sanicrs");
+fn do_setup(settings: Settings, secret_schema: Schema) -> Arc<OpenSubsonicClient> {
+    let setup_app: RelmApp<SetupMsg> = RelmApp::new(APP_ID);
+    let (setup_send, setup_recv) = async_channel::unbounded::<SetupOut>();
     relm4_icons::initialize_icons(icon_names::GRESOURCE_BYTES, icon_names::RESOURCE_PREFIX);
 
-    let client = Arc::new(
+    let gtk_app = relm4::main_adw_application();
+    setup_app.run_async::<SetupWidget>((settings, setup_send, secret_schema));
+    let client = setup_recv.try_recv().expect("Error receiving message from setup");
+    gtk_app.quit();
+    client
+}
+
+fn make_client_from_saved(settings: &Settings, secret_schema: &Schema) -> Result<Arc<OpenSubsonicClient>, String> {
+    let host: String = settings.value("server-url").as_maybe().ok_or("Server-url not set".to_string())?.get().ok_or("Should be string".to_string())?;
+    let username: String = settings.value("username").as_maybe().ok_or("Username not set".to_string())?.get().ok_or("Should be string".to_string())?;
+    let mut pass_attributes = HashMap::new();
+    pass_attributes.insert("username", username.as_str());
+    pass_attributes.insert("host", host.as_str());
+    Ok(Arc::new(
         OpenSubsonicClient::new(
-            "https://music.quartzy.me",
-            "quartzy",
-            "xqFs@4GX0x}W-Sdx!~C\"\\T^)z",
+            host.as_str(),
+            username.as_str(),
+            password_lookup_sync(Some(&secret_schema), pass_attributes, Cancellable::NONE)
+                .map_err(|e| format!("{:?}", e))?
+                .ok_or("No password found in secret store")?.as_str(),
             "Sanic-rs",
-            Some("cache"),
+            settings.value("cache-dir").as_maybe().and_then(|v| v.str().and_then(|s| Some(s.to_string()))),
             // None
-        )
-    );
+        ).map_err(|e| format!("{:?}", e))?
+    ))
+}
+
+fn main() -> Result<(), Box<dyn Error>> {
+    // First check if app is already running
+    {
+        let session = blocking::Connection::session()?;
+
+        let reply = session
+            .call_method(Some(DBUS_NAME), "/org/mpris/MediaPlayer2", Some("org.mpris.MediaPlayer2"), "Raise", &());
+        if reply.is_ok() {
+            println!("An instance is already running. Raised.");
+            return Ok(());
+        }
+    }
+
+
+    // let settings = Settings::new(APP_ID);
+    let path = env::var("XDG_DATA_HOME");
+    let settings_schema = match path {
+        Ok(path) => SettingsSchemaSource::from_directory(Path::new(path.as_str()).join("glib-2.0/schemas").as_path(), SettingsSchemaSource::default().as_ref(), false).expect("Error getting settings scheme source"),
+        Err(_) => SettingsSchemaSource::default().expect("No default settings scheme source")
+    };
+    let schema = settings_schema.lookup(APP_ID, false).expect(format!("No settings schema found for '{}'", APP_ID).as_str());
+    let settings = Settings::new_full(&schema, None::<&SettingsBackend>, None);
+
+    let mut pass_attributes = HashMap::new();
+    pass_attributes.insert("username", SchemaAttributeType::String);
+    pass_attributes.insert("host", SchemaAttributeType::String);
+    let secret_schema = Schema::new(APP_ID, SchemaFlags::NONE, pass_attributes);
+
+    // let app: RelmApp<AppMsg>;
+    let client: Arc<OpenSubsonicClient>;
+    if settings.value("server-url").as_maybe().is_none() {
+        client = do_setup(settings, secret_schema);
+    } else {
+        match make_client_from_saved(&settings, &secret_schema) {
+            Ok(c) => client = c,
+            Err(e) => {
+                eprintln!("Error when trying to make client: {}", e);
+                client = do_setup(settings, secret_schema);
+            }
+        }
+        relm4_icons::initialize_icons(icon_names::GRESOURCE_BYTES, icon_names::RESOURCE_PREFIX);
+    }
+    let adw_app = adw::Application::new(Some(APP_ID), ApplicationFlags::empty());
+    let app: RelmApp<AppMsg> = RelmApp::from_app(adw_app);
 
     let stream = OutputStreamBuilder::from_default_device()
         .expect("Error building output stream")
@@ -165,7 +238,7 @@ async fn app_main(
 ) -> Result<(), Box<dyn Error>> {
     let connection = Arc::new(
         connection::Builder::session()?
-            .name("org.mpris.MediaPlayer2.sanicrs")?
+            .name(DBUS_NAME)?
             .serve_at(
                 "/org/mpris/MediaPlayer2",
                 MprisBase {
@@ -386,6 +459,7 @@ async fn app_main(
             }
             PlayerCommand::QueueRandom { size, genre, from_year, to_year } => {
                 let songs = song_cache.get_random_songs(Some(size), genre.as_deref(), from_year, to_year, None).await.expect("Error getting random songs");
+                println!("Added {} random songs", songs.len());
                 let was_empty;
                 {
                     let mut guard = track_list.write().await;

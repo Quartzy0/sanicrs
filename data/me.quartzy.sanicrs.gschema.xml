@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<schemalist>
+  <schema id="me.quartzy.sanicrs" path="/me/quartzy/sanicrs/">
+    <key name="should-cache-covers" type="b">
+        <default>true</default>
+        <summary>Whether song/album covers should be cached.</summary>
+    </key>
+    <key name="cache-dir" type="ms">
+      <default>nothing</default>
+      <summary>Directory where the album covers should be cached.</summary>
+    </key>
+    <key name="username" type="ms">
+        <default>nothing</default>
+        <summary>Username to use with authentication with the OpenSubsonic server</summary>
+    </key>
+    <key name="server-url" type="ms">
+        <default>nothing</default>
+        <summary>Base URL of the OpenSubsonic server.</summary>
+    </key>
+  </schema>
+</schemalist>

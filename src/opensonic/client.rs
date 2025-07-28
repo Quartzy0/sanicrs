@@ -27,8 +27,8 @@ impl OpenSubsonicClient {
         username: &str,
         password: &str,
         client_name: &str,
-        cover_cache: Option<&str>,
-    ) -> Self {
+        cover_cache: Option<String>,
+    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let mut client: Self =
             OpenSubsonicClient {
                 host: String::from(host),
@@ -37,14 +37,14 @@ impl OpenSubsonicClient {
                 client_name: String::from(client_name),
                 client: ClientBuilder::new().build().unwrap(),
                 version: String::from("1.15"),
-                cover_cache: cover_cache.and_then(|t| Some(String::from(t))),
+                cover_cache: cover_cache,
                 extensions: Vec::new(),
             };
-        client.init().expect("Error when initializing");
-        client
+        client.init()?;
+        Ok(client)
     }
 
-    pub fn init(&mut self) -> Result<(), Box<dyn Error>> {
+    pub fn init(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
         // Perform request building and parsing manually because it needs to be done blocking here
         // since initialization happens before event loop start up. Everything else uses async.
         let salt = Alphanumeric.sample_string(&mut rand::rng(), 16);
@@ -94,6 +94,8 @@ impl OpenSubsonicClient {
                 println!("Cache dir not found: {}", cover_cache);
                 self.cover_cache = None;
             }
+        } else {
+            println!("No cache dir set.");
         }
 
         Ok(())
@@ -508,7 +510,7 @@ impl OpenSubsonicClient {
 
         let mut params: Vec<(&str, &str)> = Vec::with_capacity(5);
         if size.is_some() {
-            params.push(("count", size.as_ref().unwrap()));
+            params.push(("size", size.as_ref().unwrap()));
         }
         if let Some(genre) = genre {
             params.push(("genre", genre));
