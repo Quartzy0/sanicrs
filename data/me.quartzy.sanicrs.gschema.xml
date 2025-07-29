@@ -5,10 +5,6 @@
         <default>true</default>
         <summary>Whether song/album covers should be cached.</summary>
     </key>
-    <key name="cache-dir" type="ms">
-      <default>nothing</default>
-      <summary>Directory where the album covers should be cached.</summary>
-    </key>
     <key name="username" type="ms">
         <default>nothing</default>
         <summary>Username to use with authentication with the OpenSubsonic server</summary>

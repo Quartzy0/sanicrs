@@ -96,6 +96,7 @@ impl AsyncComponent for Model {
                         },
                         set_show_end_title_buttons: true,
                         pack_end = &gtk::MenuButton {
+                            set_icon_name: icon_names::MENU,
 
                             #[wrap(Some)]
                             set_menu_model = &gio::Menu {

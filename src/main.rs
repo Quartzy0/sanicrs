@@ -1,7 +1,7 @@
 use crate::dbus::base::MprisBase;
 use crate::dbus::player::{MprisPlayer, MprisPlayerSignals};
 use crate::dbus::track_list::{MprisTrackList, MprisTrackListSignals};
-use crate::opensonic::client::OpenSubsonicClient;
+use crate::opensonic::client::{self, OpenSubsonicClient};
 use crate::player::{LoopStatus, PlayerInfo, TrackList};
 use crate::ui::app::{AppMsg, Init, Model};
 use crate::ui::current_song::{CurrentSong, CurrentSongMsg};
@@ -121,8 +121,7 @@ fn make_client_from_saved(settings: &Settings, secret_schema: &Schema) -> Result
                 .map_err(|e| format!("{:?}", e))?
                 .ok_or("No password found in secret store")?.as_str(),
             "Sanic-rs",
-            settings.value("cache-dir").as_maybe().and_then(|v| v.str().and_then(|s| Some(s.to_string()))),
-            // None
+            if settings.boolean("should-cache-covers") {client::get_default_cache_dir()} else {None},
         ).map_err(|e| format!("{:?}", e))?
     ))
 }

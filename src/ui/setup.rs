@@ -11,6 +11,7 @@ use relm4::prelude::*;
 use relm4::adw;
 use relm4::adw::gtk::prelude::*;
 
+use crate::opensonic::client;
 use crate::opensonic::client::OpenSubsonicClient;
 
 
@@ -127,8 +128,13 @@ impl AsyncComponent for SetupWidget {
                 let host = widgets.server_url.text();
                 let username = widgets.username.text();
                 let password = widgets.password.text();
-                let client = OpenSubsonicClient::new(host.as_str(),
-                    username.as_str(), password.as_str(), "Sanic-rs", None);
+                let client = OpenSubsonicClient::new(
+                    host.as_str(),
+                    username.as_str(),
+                    password.as_str(),
+                    "Sanic-rs",
+                    if self.settings.boolean("should-cache-covers") {client::get_default_cache_dir()} else {None}
+                );
                 if client.is_err() {
                     widgets.status.set_label(format!("Error while creating client: {:?}", client.err().unwrap()).as_str());
                     widgets.status.set_css_classes(&["error"]);

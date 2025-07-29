@@ -74,7 +74,7 @@ fn main() {
             "playlist-repeat-song",
             "playlist-shuffle",
             "add-regular",
-            // "open-menu"
+            "menu"
         ],
     );
     compile_schemas(

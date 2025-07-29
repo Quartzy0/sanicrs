@@ -3,6 +3,7 @@ use format_url::FormatUrl;
 use rand::distr::{Alphanumeric, SampleString};
 use reqwest;
 use reqwest::{Client, ClientBuilder, Response};
+use std::env;
 use std::error::Error;
 use std::path::Path;
 use std::sync::Arc;
@@ -18,6 +19,18 @@ pub struct OpenSubsonicClient {
     cover_cache: Option<String>,
 
     extensions: Vec<SupportedExtensions>
+}
+
+pub fn get_default_cache_dir() -> Option<String> {
+    match env::var("XDG_CACHE_HOME") {
+        Ok(p) => Path::new(p.as_str()).join("sanicrs").to_str().and_then(|s| Some(s.to_string())),
+        Err(_) => {
+            match env::var("HOME") {
+                Ok(p) => Path::new(p.as_str()).join(".cache/sanicrs").to_str().and_then(|s| Some(s.to_string())),
+                Err(_) => None,
+            }
+        },
+    }
 }
 
 impl OpenSubsonicClient {
@@ -82,16 +95,22 @@ impl OpenSubsonicClient {
         // Validate cache dir
         if let Some(cover_cache) = &self.cover_cache {
             let path = Path::new(cover_cache);
-            let result = std::fs::exists(path);
-            if result.is_err() {
-                println!(
-                    "Can't read cache dir/ ({}): {}",
-                    cover_cache,
-                    result.err().unwrap()
-                );
-                self.cover_cache = None;
-            } else if !result.ok().unwrap() {
-                println!("Cache dir not found: {}", cover_cache);
+            let result = std::fs::create_dir_all(path);
+            if result.is_ok() {
+                let result = std::fs::exists(path);
+                if result.is_err() {
+                    eprintln!(
+                        "Can't read cache dir/ ({}): {}",
+                        cover_cache,
+                        result.err().unwrap()
+                    );
+                    self.cover_cache = None;
+                } else if !result.ok().unwrap() {
+                    println!("Cache dir not found: {}", cover_cache);
+                    self.cover_cache = None;
+                }
+            } else {
+                eprintln!("Error creating cache directory '{}': {:?}", cover_cache, result.err().unwrap());
                 self.cover_cache = None;
             }
         } else {
