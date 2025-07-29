@@ -7,16 +7,18 @@ use crate::ui::app::{AppMsg, Init, Model};
 use crate::ui::current_song::{CurrentSong, CurrentSongMsg};
 use crate::ui::setup::{SetupMsg, SetupOut, SetupWidget};
 use crate::ui::track_list::{TrackListMsg, TrackListWidget};
-use libsecret::{password_lookup_sync, Schema, SchemaAttributeType, SchemaFlags};
+use libsecret::{password_lookup_sync, Schema, SchemaFlags};
 use readlock_tokio::{Shared};
 use relm4::gtk::gio::prelude::{ApplicationExt, SettingsExt};
 use relm4::gtk::gio::{ApplicationFlags, Cancellable, Settings, SettingsBackend, SettingsSchemaSource};
 use relm4::{adw, AsyncComponentSender, RelmApp};
 use rodio::OutputStreamBuilder;
 use std::collections::HashMap;
-use std::env;
+use std::{env, io};
 use std::error::Error;
+use std::os::unix::process::CommandExt;
 use std::path::Path;
+use std::process::Command;
 use std::sync::Arc;
 use async_channel::{Receiver, Sender};
 use std::time::Duration;
@@ -65,7 +67,8 @@ pub enum PlayerCommand {
     SetShuffle(bool),
     PlayAlbum(String, Option<usize>),
     QueueAlbum(String),
-    QueueRandom{size: u32, genre: Option<String>, from_year: Option<u32>, to_year: Option<u32>}
+    QueueRandom{size: u32, genre: Option<String>, from_year: Option<u32>, to_year: Option<u32>},
+    Restart,
 }
 
 fn send_app_msg(sender_opt: &mut Option<AsyncComponentSender<Model>>, msg: AppMsg) {
@@ -95,13 +98,13 @@ fn send_tl_msg(sender_opt: &mut Option<AsyncComponentSender<TrackListWidget>>, m
     }
 }
 
-fn do_setup(settings: Settings, secret_schema: Schema) -> Arc<OpenSubsonicClient> {
+fn do_setup(settings: &Settings, secret_schema: &Schema) -> Arc<OpenSubsonicClient> {
     let setup_app: RelmApp<SetupMsg> = RelmApp::new(APP_ID);
-    let (setup_send, setup_recv) = async_channel::unbounded::<SetupOut>();
+    let (setup_send, setup_recv) = async_channel::bounded::<SetupOut>(1);
     relm4_icons::initialize_icons(icon_names::GRESOURCE_BYTES, icon_names::RESOURCE_PREFIX);
 
     let gtk_app = relm4::main_adw_application();
-    setup_app.run_async::<SetupWidget>((settings, setup_send, secret_schema));
+    setup_app.run_async::<SetupWidget>((settings.clone(), setup_send, secret_schema.clone()));
     let client = setup_recv.try_recv().expect("Error receiving message from setup");
     gtk_app.quit();
     client
@@ -110,14 +113,11 @@ fn do_setup(settings: Settings, secret_schema: Schema) -> Arc<OpenSubsonicClient
 fn make_client_from_saved(settings: &Settings, secret_schema: &Schema) -> Result<Arc<OpenSubsonicClient>, String> {
     let host: String = settings.value("server-url").as_maybe().ok_or("Server-url not set".to_string())?.get().ok_or("Should be string".to_string())?;
     let username: String = settings.value("username").as_maybe().ok_or("Username not set".to_string())?.get().ok_or("Should be string".to_string())?;
-    let mut pass_attributes = HashMap::new();
-    pass_attributes.insert("username", username.as_str());
-    pass_attributes.insert("host", host.as_str());
     Ok(Arc::new(
         OpenSubsonicClient::new(
             host.as_str(),
             username.as_str(),
-            password_lookup_sync(Some(&secret_schema), pass_attributes, Cancellable::NONE)
+            password_lookup_sync(Some(&secret_schema), HashMap::new(), Cancellable::NONE)
                 .map_err(|e| format!("{:?}", e))?
                 .ok_or("No password found in secret store")?.as_str(),
             "Sanic-rs",
@@ -140,88 +140,102 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
+    let should_restart;
+    {
+        let path = env::var("XDG_DATA_HOME");
+        let settings_schema = match path {
+            Ok(path) => SettingsSchemaSource::from_directory(Path::new(path.as_str()).join("glib-2.0/schemas").as_path(), SettingsSchemaSource::default().as_ref(), false).expect("Error getting settings scheme source"),
+            Err(_) => SettingsSchemaSource::default().expect("No default settings scheme source")
+        };
+        let schema = settings_schema.lookup(APP_ID, false).expect(format!("No settings schema found for '{}'", APP_ID).as_str());
+        let settings = Settings::new_full(&schema, None::<&SettingsBackend>, None);
 
-    // let settings = Settings::new(APP_ID);
-    let path = env::var("XDG_DATA_HOME");
-    let settings_schema = match path {
-        Ok(path) => SettingsSchemaSource::from_directory(Path::new(path.as_str()).join("glib-2.0/schemas").as_path(), SettingsSchemaSource::default().as_ref(), false).expect("Error getting settings scheme source"),
-        Err(_) => SettingsSchemaSource::default().expect("No default settings scheme source")
-    };
-    let schema = settings_schema.lookup(APP_ID, false).expect(format!("No settings schema found for '{}'", APP_ID).as_str());
-    let settings = Settings::new_full(&schema, None::<&SettingsBackend>, None);
+        let secret_schema = Schema::new(APP_ID, SchemaFlags::NONE, HashMap::new());
 
-    let mut pass_attributes = HashMap::new();
-    pass_attributes.insert("username", SchemaAttributeType::String);
-    pass_attributes.insert("host", SchemaAttributeType::String);
-    let secret_schema = Schema::new(APP_ID, SchemaFlags::NONE, pass_attributes);
-
-    // let app: RelmApp<AppMsg>;
-    let client: Arc<OpenSubsonicClient>;
-    if settings.value("server-url").as_maybe().is_none() {
-        client = do_setup(settings, secret_schema);
-    } else {
-        match make_client_from_saved(&settings, &secret_schema) {
-            Ok(c) => client = c,
-            Err(e) => {
-                eprintln!("Error when trying to make client: {}", e);
-                client = do_setup(settings, secret_schema);
+        let client: Arc<OpenSubsonicClient>;
+        if settings.value("server-url").as_maybe().is_none() {
+            client = do_setup(&settings, &secret_schema);
+        } else {
+            match make_client_from_saved(&settings, &secret_schema) {
+                Ok(c) => client = c,
+                Err(e) => {
+                    eprintln!("Error when trying to make client: {}", e);
+                    client = do_setup(&settings, &secret_schema);
+                }
             }
+            relm4_icons::initialize_icons(icon_names::GRESOURCE_BYTES, icon_names::RESOURCE_PREFIX);
         }
-        relm4_icons::initialize_icons(icon_names::GRESOURCE_BYTES, icon_names::RESOURCE_PREFIX);
+        let adw_app = adw::Application::new(Some(APP_ID), ApplicationFlags::empty());
+        let app: RelmApp<AppMsg> = RelmApp::from_app(adw_app);
+
+        let stream = OutputStreamBuilder::from_default_device()
+            .expect("Error building output stream")
+            .open_stream()
+            .expect("Error opening output stream");
+
+        let track_list = TrackList::new();
+        let track_list = Arc::new(RwLock::new(track_list));
+
+        let (command_send, command_recv) = async_channel::unbounded::<PlayerCommand>();
+        let (restart_send, restart_recv) = async_channel::bounded::<bool>(1);
+        let command_send = Arc::new(command_send);
+
+        let song_cache = SongCache::new(client.clone());
+        let album_cache = AlbumCache::new(client.clone(), song_cache.clone());
+        let cover_cache = CoverCache::new(client.clone());
+
+        let player = Shared::new(PlayerInfo::new(
+            client.clone(),
+            &stream,
+            track_list.clone(),
+            command_send.clone(),
+        ));
+        let player_read = Shared::<PlayerInfo>::get_read_lock(&player);
+        let payload: Init = (
+            player_read,
+            track_list.clone(),
+            cover_cache.clone(),
+            command_send.clone(),
+            song_cache.clone(),
+            album_cache.clone(),
+            settings,
+            secret_schema
+        );
+
+        glib::spawn_future_local(clone!(
+            #[strong]
+            track_list,
+            #[strong]
+            client,
+            #[strong]
+            command_send,
+            #[strong]
+            payload,
+            #[strong]
+            song_cache,
+            #[strong]
+            album_cache,
+            async move {
+                let restart = app_main(command_recv,
+                   command_send,
+                   client,
+                   track_list,
+                   player,
+                   song_cache,
+                   album_cache,
+                   payload
+                ).await.expect("Error");
+                restart_send.send(restart).await.expect("Error sending restart status");
+            }
+        ));
+
+        app.run_async::<Model>(payload);
+
+        should_restart = restart_recv.try_recv().unwrap_or(false);
     }
-    let adw_app = adw::Application::new(Some(APP_ID), ApplicationFlags::empty());
-    let app: RelmApp<AppMsg> = RelmApp::from_app(adw_app);
-
-    let stream = OutputStreamBuilder::from_default_device()
-        .expect("Error building output stream")
-        .open_stream()
-        .expect("Error opening output stream");
-
-    let track_list = TrackList::new();
-    let track_list = Arc::new(RwLock::new(track_list));
-
-    let (command_send, command_recv) = async_channel::unbounded::<PlayerCommand>();
-    let command_send = Arc::new(command_send);
-
-    let song_cache = SongCache::new(client.clone());
-    let album_cache = AlbumCache::new(client.clone(), song_cache.clone());
-    let cover_cache = CoverCache::new(client.clone());
-
-    let player = Shared::new(PlayerInfo::new(
-        client.clone(),
-        &stream,
-        track_list.clone(),
-        command_send.clone(),
-    ));
-    let player_read = Shared::<PlayerInfo>::get_read_lock(&player);
-    let payload: Init = (
-        player_read,
-        track_list.clone(),
-        cover_cache.clone(),
-        command_send.clone(),
-        song_cache.clone(),
-        album_cache.clone(),
-    );
-
-    glib::spawn_future_local(clone!(
-        #[strong]
-        track_list,
-        #[strong]
-        client,
-        #[strong]
-        command_send,
-        #[strong]
-        payload,
-        #[strong]
-        song_cache,
-        #[strong]
-        album_cache,
-        async move {
-            app_main(command_recv, command_send.clone(), client.clone(), track_list.clone(), player, song_cache, album_cache, payload).await.expect("Error");
-        }
-    ));
-
-    app.run_async::<Model>(payload);
+    if should_restart {
+        Err::<(), io::Error>(Command::new("/proc/self/exe").exec()).expect("Failed trying to restart process");
+    }
 
     Ok(())
 }
@@ -235,7 +249,7 @@ async fn app_main(
     song_cache: SongCache,
     album_cache: AlbumCache,
     payload: Init
-) -> Result<(), Box<dyn Error>> {
+) -> Result<bool, Box<dyn Error>> {
     let connection = Arc::new(
         connection::Builder::session()?
             .name(DBUS_NAME)?
@@ -281,10 +295,15 @@ async fn app_main(
     let mut cs_sender: Option<AsyncComponentSender<CurrentSong>> = None;
 
     let _h = relm4::main_application().hold();
+    let mut should_restart = false;
 
     loop {
         match command_recv.recv().await.expect("Error when receiving message") {
             PlayerCommand::Quit => break,
+            PlayerCommand::Restart => {
+                should_restart = true;
+                break;
+            },
             PlayerCommand::Next => {
                 let s = player.next().await;
                 send_cs_msg(&mut cs_sender, CurrentSongMsg::SongUpdate(s));
@@ -479,5 +498,5 @@ async fn app_main(
     }
     send_app_msg(&mut app_sender, AppMsg::Quit);
 
-    Ok(())
+    Ok(should_restart)
 }

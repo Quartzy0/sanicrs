@@ -138,12 +138,9 @@ impl AsyncComponent for SetupWidget {
 
                     self.settings.set_value("server-url", &Variant::from_some(&Variant::from(host.as_str()))).expect("Error setting server url setting");
                     self.settings.set_value("username", &Variant::from_some(&Variant::from(username.as_str()))).expect("Error setting username setting");
-                    let mut pass_attributes = HashMap::new();
-                    pass_attributes.insert("username", username.as_str());
-                    pass_attributes.insert("host", host.as_str());
                     password_store_future(
                         Some(&self.schema),
-                       pass_attributes,
+                       HashMap::new(),
                        Some(&libsecret::COLLECTION_DEFAULT),
                        "OpenSubsoncic password",
                        password.as_str())

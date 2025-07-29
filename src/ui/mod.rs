@@ -8,3 +8,4 @@ pub mod album_object;
 pub mod album_cache;
 mod random_songs_dialog;
 pub mod setup;
+pub mod preferences_view;

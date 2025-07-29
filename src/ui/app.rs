@@ -1,14 +1,18 @@
 use crate::player::{PlayerInfo, TrackList};
 use crate::ui::current_song::{CurrentSong, CurrentSongOut};
+use crate::ui::preferences_view::{PreferencesOut, PreferencesWidget};
 use crate::ui::track_list::TrackListWidget;
 use crate::{icon_names, PlayerCommand};
 use color_thief::Color;
 use gtk::prelude::GtkWindowExt;
+use libsecret::Schema;
 use readlock_tokio::SharedReadLock;
+use relm4::actions::{RelmAction, RelmActionGroup};
 use relm4::adw::{gdk, ViewSwitcherPolicy};
 use relm4::adw::prelude::*;
 use relm4::component::AsyncConnector;
 use relm4::adw::gtk::CssProvider;
+use relm4::gtk::gio::{self, Settings};
 use relm4::prelude::*;
 use relm4::{
     adw,
@@ -28,6 +32,10 @@ pub struct Model {
     track_list_connector: AsyncConnector<TrackListWidget>,
     browse_connector: AsyncConnector<BrowseWidget>,
     provider: CssProvider,
+    settings: Settings,
+    schema: Schema,
+    cmd_sender: Arc<Sender<PlayerCommand>>,
+    preferences_view: Option<AsyncController<PreferencesWidget>>,
 }
 
 #[derive(Debug)]
@@ -35,6 +43,8 @@ pub enum AppMsg {
     ColorschemeChange(Option<Vec<Color>>),
     ToggleSidebar,
     Quit,
+    ShowPreferences,
+    Restart(String),
 }
 
 pub type Init = (
@@ -43,8 +53,13 @@ pub type Init = (
     CoverCache,
     Arc<Sender<PlayerCommand>>,
     SongCache,
-    AlbumCache
+    AlbumCache,
+    Settings,
+    Schema,
 );
+
+relm4::new_action_group!(WindowActionGroup, "win");
+relm4::new_stateless_action!(PreferencesAction, WindowActionGroup, "preferences");
 
 #[relm4::component(pub async)]
 impl AsyncComponent for Model {
@@ -78,6 +93,14 @@ impl AsyncComponent for Model {
                         #[wrap(Some)]
                         set_title_widget = &adw::ViewSwitcher {
                             set_policy: ViewSwitcherPolicy::Wide,
+                        },
+                        set_show_end_title_buttons: true,
+                        pack_end = &gtk::MenuButton {
+
+                            #[wrap(Some)]
+                            set_menu_model = &gio::Menu {
+                                append_item = &gio::MenuItem::new(Some("Preferences"), Some("win.preferences")),
+                            }
                         }
                     },
 
@@ -112,6 +135,10 @@ impl AsyncComponent for Model {
             track_list_connector,
             browse_connector,
             provider: CssProvider::new(),
+            settings: init.6,
+            schema: init.7,
+            cmd_sender: init.3,
+            preferences_view: None
         };
         let base_provider = CssProvider::new();
         let display = gdk::Display::default().expect("Unable to create Display object");
@@ -127,7 +154,7 @@ impl AsyncComponent for Model {
             gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
         );
 
-        init.3.send(PlayerCommand::AppSendSender(sender)).await.expect("Error sending sender to app");
+        model.cmd_sender.send(PlayerCommand::AppSendSender(sender.clone())).await.expect("Error sending sender to app");
 
         let widgets: ModelWidgets = view_output!();
 
@@ -181,6 +208,14 @@ impl AsyncComponent for Model {
             }))
             .bind(&widgets.split_view, "show-sidebar", Some(&widgets.split_view));
 
+        let action: RelmAction<PreferencesAction> = RelmAction::new_stateless(move |_| {
+            sender.input(AppMsg::ShowPreferences);
+        });
+
+        let mut group = RelmActionGroup::<WindowActionGroup>::new();
+        group.add_action(action);
+        group.register_for_widget(&root);
+
         AsyncComponentParts { model, widgets }
     }
 
@@ -218,6 +253,37 @@ impl AsyncComponent for Model {
                     app.quit();
                 }
             },
+            AppMsg::ShowPreferences => {
+                if self.preferences_view.is_none() {
+                    let view = PreferencesWidget::builder()
+                        .launch((self.settings.clone(), self.schema.clone()))
+                        .forward(sender.input_sender(), move |msg| {
+                            match msg {
+                                PreferencesOut::Restart => AppMsg::Restart(
+                                    "In order for the changes to take effect, the app needs to be restarted.".to_string()
+                                ),
+                            }
+                        });
+                    self.preferences_view = Some(view);
+                }
+                self.preferences_view.as_ref().unwrap().widget().present(Some(root));
+            },
+            AppMsg::Restart(reason) => {
+                let dialog = adw::AlertDialog::new(Some("Restart required"), Some(reason.as_str()));
+                dialog.add_responses(&[("now", "Restart"), ("later", "Later")]);
+                dialog.set_default_response(Some("now"));
+                dialog.set_response_appearance("now", adw::ResponseAppearance::Destructive);
+                dialog.set_close_response("later");
+                dialog.choose(root, None::<&gio::Cancellable>, clone!(
+                    #[strong(rename_to = sndr)]
+                    self.cmd_sender,
+                    move |response| {
+                        if response == "now" {
+                            sndr.send_blocking(PlayerCommand::Restart).expect("Error sending restart message to main");
+                        }
+                    }
+                ));
+            }
         };
         self.update_view(widgets, sender);
     }
