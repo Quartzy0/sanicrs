@@ -303,188 +303,227 @@ async fn app_main(
     let mut should_restart = false;
 
     loop {
-        match command_recv.recv().await.expect("Error when receiving message") {
-            PlayerCommand::Quit => break,
-            PlayerCommand::Restart => {
-                should_restart = true;
-                break;
-            },
-            PlayerCommand::Next => {
-                let s = player.next().await;
-                send_cs_msg(&mut cs_sender, CurrentSongMsg::SongUpdate(s));
-                send_tl_msg(&mut tl_sender, TrackListMsg::TrackChanged(None));
-                player_ref.get().await.metadata_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
-                player_ref.get().await.playback_status_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
-            },
-            PlayerCommand::Previous => {
-                let s = player.previous().await;
-                send_cs_msg(&mut cs_sender, CurrentSongMsg::SongUpdate(s));
-                send_tl_msg(&mut tl_sender, TrackListMsg::TrackChanged(None));
-                player_ref.get().await.metadata_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
-                player_ref.get().await.playback_status_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
-            },
-            PlayerCommand::Play => {
-                player.play().await;
-                send_cs_msg(&mut cs_sender, CurrentSongMsg::PlaybackStateChange(player.playback_status()));
-                player_ref.get().await.playback_status_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
-            },
-            PlayerCommand::Pause => {
-                player.pause();
-                send_cs_msg(&mut cs_sender, CurrentSongMsg::PlaybackStateChange(player.playback_status()));
-                player_ref.get().await.playback_status_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
-            },
-            PlayerCommand::PlayPause => {
-                player.playpause().await;
-                send_cs_msg(&mut cs_sender, CurrentSongMsg::PlaybackStateChange(player.playback_status()));
-                player_ref.get().await.playback_status_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
-            },
-            PlayerCommand::Stop => {
-                player.stop().await;
-                send_cs_msg(&mut cs_sender, CurrentSongMsg::PlaybackStateChange(player.playback_status()));
-                send_cs_msg(&mut cs_sender, CurrentSongMsg::SongUpdate(None));
-                player_ref.get().await.playback_status_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
-                track_list_ref.track_list_replaced(Vec::new(),
-                    ObjectPath::from_static_str_unchecked("/org/mpris/MediaPlayer2/TrackList/NoTrack"))
-                .await.expect("Error sending DBus signal");
-                send_cs_msg(&mut cs_sender, CurrentSongMsg::SetLoopStatus(LoopStatus::None));
-                player_ref.get().await.loop_status_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
-                player_ref.get().await.playback_status_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
-            },
-            PlayerCommand::SetRate(r) => {
-                player.set_rate(r);
-                send_cs_msg(&mut cs_sender, CurrentSongMsg::RateChange(r));
-                player_ref.get().await.rate_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
-            },
-            PlayerCommand::SetVolume(v) => {
-                player.set_volume(v).await;
-                settings.set_double("volume", v).expect("Error setting volume setting");
-                send_cs_msg(&mut cs_sender, CurrentSongMsg::VolumeChangedExternal(v));
-                player_ref.get().await.volume_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
-            },
-            PlayerCommand::SetPosition(p) => {
-                player.set_position(p).await.expect("Error when seeking");
-                send_cs_msg(&mut cs_sender, CurrentSongMsg::ProgressUpdateSync(Some(p.as_secs_f64())));
-                player_ref.seeked(p.as_secs() as i64).await.expect("Error sending DBus seeked signal");
-            },
-            PlayerCommand::GoTo(i) => {
-                let song = player.goto(i).await.expect("Error performing goto");
-                send_tl_msg(&mut tl_sender, TrackListMsg::TrackChanged(Some(i)));
-                send_cs_msg(&mut cs_sender, CurrentSongMsg::SongUpdate(song));
-                player_ref.get().await.metadata_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
-                player_ref.get().await.playback_status_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
-            },
-            PlayerCommand::Remove(i) => {
-                let e = player.remove_song(i).await.expect("Error removing track");
-                track_list_ref.track_removed(e.dbus_obj()).await.expect("Error sending DBus signal");
-                send_tl_msg(&mut tl_sender, TrackListMsg::ReloadList);
-                send_cs_msg(&mut cs_sender, CurrentSongMsg::SongUpdate(Some(e)));
-                player_ref.get().await.metadata_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
-            },
-            PlayerCommand::TrackListSendSender(s) => tl_sender = Some(s),
-            PlayerCommand::CurrentSongSendSender(s) => cs_sender = Some(s),
-            PlayerCommand::AppSendSender(s) => app_sender = Some(s),
-            PlayerCommand::AddFromUri(uri, index, set_as_current) => {
-                let mut track_list_guard = track_list.write().await;
-                match track_list_guard
-                    .add_song_from_uri(&*uri, &song_cache, index)
-                    .await
-                {
-                    None => {
-                        let songs = track_list_guard.get_songs();
-                        let new_i = index.unwrap_or(songs.len() - 1);
-                        track_list_ref.track_added(
-                            dbus::player::get_song_metadata(Some(&songs[new_i]), client.clone()).await,
-                            if new_i == 0 {
-                                ObjectPath::from_static_str_unchecked("/org/mpris/MediaPlayer2/TrackList/NoTrack")
-                            } else {
-                                songs[new_i-1].dbus_obj()
-                            }
-                        ).await.expect("Error sending DBus signal");
-                        if set_as_current {
-                            track_list_guard.set_current(new_i);
-                            drop(track_list_guard);
-                            let song = player.start_current().await.expect("Error when starting current track");
-                            send_cs_msg(&mut cs_sender, CurrentSongMsg::SongUpdate(song));
-                            player_ref.get().await
-                                .metadata_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
-                            player_ref.get().await.playback_status_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
-                        }
-                        send_tl_msg(&mut tl_sender, TrackListMsg::ReloadList);
-                    }
-                    Some(err) => println!("Error when adding song from URI: {}", err),
-                };
-            },
-            PlayerCommand::Raise => {
-                if relm4::main_application().windows().len() == 0 { // Only allow 1 window
-                    let builder = AsyncComponentBuilder::<Model>::default();
+        let res: Result<Status, Box<dyn Error>> = process_command(
+            command_recv.recv().await.expect("Error when receiving message"),
+            &player,
+            &mut app_sender,
+            &mut tl_sender,
+            &mut cs_sender,
+            &player_ref,
+            &track_list_ref,
+            &track_list,
+            &song_cache,
+            &album_cache,
+            &settings,
+            &client,
+            &payload).await;
 
-                    let connector = builder.launch(payload.clone());
-
-                    let mut controller = connector.detach();
-                    let window = controller.widget();
-                    window.set_visible(true);
-                    relm4::main_application().add_window(window);
-
-                    controller.detach_runtime();
+        match res {
+            Ok(status) => {
+                match status {
+                    Status::Ok => {},
+                    Status::Quit => break,
+                    Status::Restart => {
+                        should_restart = true;
+                        break;
+                    },
                 }
-            },
-            PlayerCommand::SetLoopStatus(loop_status) => {
-                {
-                    let mut guard = track_list.write().await;
-                    guard.loop_status = loop_status;
-                }
-                send_cs_msg(&mut cs_sender, CurrentSongMsg::SetLoopStatus(loop_status));
-                player_ref.get().await.loop_status_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
-            },
-            PlayerCommand::SetShuffle(shuffle) => {
-                {
-                    let mut guard = track_list.write().await;
-                    guard.set_shuffle(shuffle);
-                }
-                send_cs_msg(&mut cs_sender, CurrentSongMsg::SetShuffle(shuffle));
-                player_ref.get().await.shuffle_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
             }
-            PlayerCommand::PlayAlbum(id, index) => {
-                let album = album_cache.get_album(id.as_str()).await.expect("Error getting album"); // TODO: this shouldn't panic
-                if let Some(songs) = album.get_songs() {
-                    {
-                        let mut guard = track_list.write().await;
-                        guard.clear();
-                        guard.add_songs(songs);
-                        if let Some(index) = index {
-                            guard.set_current(index);
-                        }
-                    }
-                    let song = player.start_current().await.expect("Error playing current song");
-                    send_cs_msg(&mut cs_sender, CurrentSongMsg::SongUpdate(song));
-                    player_ref.get().await
-                        .metadata_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
-                    send_tl_msg(&mut tl_sender, TrackListMsg::ReloadList);
-                    player_ref.get().await.playback_status_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
-                }
+            Err(e) => {
+                let summary = format!("{}", e);
+                let description = format!("{:?}", e);
+                send_app_msg(&mut app_sender, AppMsg::ShowError(summary, description));
             },
-            PlayerCommand::QueueAlbum(id) => {
-                let album = album_cache.get_album(id.as_str()).await.expect("Error getting album"); // TODO: this shouldn't panic
-                if let Some(songs) = album.get_songs() {
-                    let was_empty;
-                    {
-                        let mut guard = track_list.write().await;
-                        was_empty = guard.empty();
-                        guard.add_songs(songs);
-                    }
-                    if was_empty {
-                        let song = player.start_current().await.expect("Error playing current song");
-                        send_cs_msg(&mut cs_sender, CurrentSongMsg::SongUpdate(song));
+        }
+    }
+    send_app_msg(&mut app_sender, AppMsg::Quit);
+
+    Ok(should_restart)
+}
+
+enum Status {
+    Ok,
+    Quit,
+    Restart
+}
+
+async fn process_command(
+    command: PlayerCommand,
+    player: &Shared<PlayerInfo>,
+    app_sender: &mut Option<AsyncComponentSender<Model>>,
+    tl_sender: &mut Option<AsyncComponentSender<TrackListWidget>>,
+    cs_sender: &mut Option<AsyncComponentSender<CurrentSong>>,
+    player_ref: &InterfaceRef<MprisPlayer>,
+    track_list_ref: &InterfaceRef<MprisTrackList>,
+    track_list: &Arc<RwLock<TrackList>>,
+    song_cache: &SongCache,
+    album_cache: &AlbumCache,
+    settings: &Settings,
+    client: &Arc<OpenSubsonicClient>,
+    payload: &Init,
+) -> Result<Status, Box<dyn Error>> {
+    match command {
+        PlayerCommand::Quit => return Ok(Status::Quit),
+        PlayerCommand::Restart => {
+            return Ok(Status::Restart);
+        },
+        PlayerCommand::Next => {
+            let s = player.next().await;
+            send_cs_msg(cs_sender, CurrentSongMsg::SongUpdate(s));
+            send_tl_msg(tl_sender, TrackListMsg::TrackChanged(None));
+            player_ref.get().await.metadata_changed(player_ref.signal_emitter()).await?;
+            player_ref.get().await.playback_status_changed(player_ref.signal_emitter()).await?;
+        },
+        PlayerCommand::Previous => {
+            let s = player.previous().await;
+            send_cs_msg(cs_sender, CurrentSongMsg::SongUpdate(s));
+            send_tl_msg(tl_sender, TrackListMsg::TrackChanged(None));
+            player_ref.get().await.metadata_changed(player_ref.signal_emitter()).await?;
+            player_ref.get().await.playback_status_changed(player_ref.signal_emitter()).await?;
+        },
+        PlayerCommand::Play => {
+            player.play().await;
+            send_cs_msg(cs_sender, CurrentSongMsg::PlaybackStateChange(player.playback_status()));
+            player_ref.get().await.playback_status_changed(player_ref.signal_emitter()).await?;
+        },
+        PlayerCommand::Pause => {
+            player.pause();
+            send_cs_msg(cs_sender, CurrentSongMsg::PlaybackStateChange(player.playback_status()));
+            player_ref.get().await.playback_status_changed(player_ref.signal_emitter()).await?;
+        },
+        PlayerCommand::PlayPause => {
+            player.playpause().await;
+            send_cs_msg(cs_sender, CurrentSongMsg::PlaybackStateChange(player.playback_status()));
+            player_ref.get().await.playback_status_changed(player_ref.signal_emitter()).await?;
+        },
+        PlayerCommand::Stop => {
+            player.stop().await;
+            send_cs_msg(cs_sender, CurrentSongMsg::PlaybackStateChange(player.playback_status()));
+            send_cs_msg(cs_sender, CurrentSongMsg::SongUpdate(None));
+            player_ref.get().await.playback_status_changed(player_ref.signal_emitter()).await?;
+            track_list_ref.track_list_replaced(Vec::new(),
+                ObjectPath::from_static_str_unchecked("/org/mpris/MediaPlayer2/TrackList/NoTrack"))
+            .await?;
+            send_cs_msg(cs_sender, CurrentSongMsg::SetLoopStatus(LoopStatus::None));
+            player_ref.get().await.loop_status_changed(player_ref.signal_emitter()).await?;
+            player_ref.get().await.playback_status_changed(player_ref.signal_emitter()).await?;
+        },
+        PlayerCommand::SetRate(r) => {
+            player.set_rate(r);
+            send_cs_msg(cs_sender, CurrentSongMsg::RateChange(r));
+            player_ref.get().await.rate_changed(player_ref.signal_emitter()).await?;
+        },
+        PlayerCommand::SetVolume(v) => {
+            player.set_volume(v).await;
+            settings.set_double("volume", v)?;
+            send_cs_msg(cs_sender, CurrentSongMsg::VolumeChangedExternal(v));
+            player_ref.get().await.volume_changed(player_ref.signal_emitter()).await?;
+        },
+        PlayerCommand::SetPosition(p) => {
+            player.set_position(p).await?;
+            send_cs_msg(cs_sender, CurrentSongMsg::ProgressUpdateSync(Some(p.as_secs_f64())));
+            player_ref.seeked(p.as_secs() as i64).await?;
+        },
+        PlayerCommand::GoTo(i) => {
+            let song = player.goto(i).await?;
+            send_tl_msg(tl_sender, TrackListMsg::TrackChanged(Some(i)));
+            send_cs_msg(cs_sender, CurrentSongMsg::SongUpdate(song));
+            player_ref.get().await.metadata_changed(player_ref.signal_emitter()).await?;
+            player_ref.get().await.playback_status_changed(player_ref.signal_emitter()).await?;
+        },
+        PlayerCommand::Remove(i) => {
+            let e = player.remove_song(i).await?;
+            track_list_ref.track_removed(e.dbus_obj()).await?;
+            send_tl_msg(tl_sender, TrackListMsg::ReloadList);
+            send_cs_msg(cs_sender, CurrentSongMsg::SongUpdate(Some(e)));
+            player_ref.get().await.metadata_changed(player_ref.signal_emitter()).await?;
+        },
+        PlayerCommand::TrackListSendSender(s) => *tl_sender = Some(s),
+        PlayerCommand::CurrentSongSendSender(s) => *cs_sender = Some(s),
+        PlayerCommand::AppSendSender(s) => *app_sender = Some(s),
+        PlayerCommand::AddFromUri(uri, index, set_as_current) => {
+            let mut track_list_guard = track_list.write().await;
+            match track_list_guard
+                .add_song_from_uri(&*uri, &song_cache, index)
+                .await
+            {
+                None => {
+                    let songs = track_list_guard.get_songs();
+                    let new_i = index.unwrap_or(songs.len() - 1);
+                    track_list_ref.track_added(
+                        dbus::player::get_song_metadata(Some(&songs[new_i]), client.clone()).await,
+                        if new_i == 0 {
+                            ObjectPath::from_static_str_unchecked("/org/mpris/MediaPlayer2/TrackList/NoTrack")
+                        } else {
+                            songs[new_i-1].dbus_obj()
+                        }
+                    ).await?;
+                    if set_as_current {
+                        track_list_guard.set_current(new_i);
+                        drop(track_list_guard);
+                        let song = player.start_current().await?;
+                        send_cs_msg(cs_sender, CurrentSongMsg::SongUpdate(song));
                         player_ref.get().await
-                            .metadata_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
-                        player_ref.get().await.playback_status_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
+                            .metadata_changed(player_ref.signal_emitter()).await?;
+                        player_ref.get().await.playback_status_changed(player_ref.signal_emitter()).await?;
                     }
-                    send_tl_msg(&mut tl_sender, TrackListMsg::ReloadList);
+                    send_tl_msg(tl_sender, TrackListMsg::ReloadList);
                 }
+                Some(err) => println!("Error when adding song from URI: {}", err),
+            };
+        },
+        PlayerCommand::Raise => {
+            if relm4::main_application().windows().len() == 0 { // Only allow 1 window
+                let builder = AsyncComponentBuilder::<Model>::default();
+
+                let connector = builder.launch(payload.clone());
+
+                let mut controller = connector.detach();
+                let window = controller.widget();
+                window.set_visible(true);
+                relm4::main_application().add_window(window);
+
+                controller.detach_runtime();
             }
-            PlayerCommand::QueueRandom { size, genre, from_year, to_year } => {
-                let songs = song_cache.get_random_songs(Some(size), genre.as_deref(), from_year, to_year, None).await.expect("Error getting random songs");
-                println!("Added {} random songs", songs.len());
+        },
+        PlayerCommand::SetLoopStatus(loop_status) => {
+            {
+                let mut guard = track_list.write().await;
+                guard.loop_status = loop_status;
+            }
+            send_cs_msg(cs_sender, CurrentSongMsg::SetLoopStatus(loop_status));
+            player_ref.get().await.loop_status_changed(player_ref.signal_emitter()).await?;
+        },
+        PlayerCommand::SetShuffle(shuffle) => {
+            {
+                let mut guard = track_list.write().await;
+                guard.set_shuffle(shuffle);
+            }
+            send_cs_msg(cs_sender, CurrentSongMsg::SetShuffle(shuffle));
+            player_ref.get().await.shuffle_changed(player_ref.signal_emitter()).await?;
+        }
+        PlayerCommand::PlayAlbum(id, index) => {
+            let album = album_cache.get_album(id.as_str()).await?; // TODO: this shouldn't panic
+            if let Some(songs) = album.get_songs() {
+                {
+                    let mut guard = track_list.write().await;
+                    guard.clear();
+                    guard.add_songs(songs);
+                    if let Some(index) = index {
+                        guard.set_current(index);
+                    }
+                }
+                let song = player.start_current().await?;
+                send_cs_msg(cs_sender, CurrentSongMsg::SongUpdate(song));
+                player_ref.get().await
+                    .metadata_changed(player_ref.signal_emitter()).await?;
+                send_tl_msg(tl_sender, TrackListMsg::ReloadList);
+                player_ref.get().await.playback_status_changed(player_ref.signal_emitter()).await?;
+            }
+        },
+        PlayerCommand::QueueAlbum(id) => {
+            let album = album_cache.get_album(id.as_str()).await?; // TODO: this shouldn't panic
+            if let Some(songs) = album.get_songs() {
                 let was_empty;
                 {
                     let mut guard = track_list.write().await;
@@ -492,20 +531,37 @@ async fn app_main(
                     guard.add_songs(songs);
                 }
                 if was_empty {
-                    let song = player.start_current().await.expect("Error playing current song");
-                    send_cs_msg(&mut cs_sender, CurrentSongMsg::SongUpdate(song));
+                    let song = player.start_current().await?;
+                    send_cs_msg(cs_sender, CurrentSongMsg::SongUpdate(song));
                     player_ref.get().await
-                        .metadata_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
-                    player_ref.get().await.playback_status_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
+                        .metadata_changed(player_ref.signal_emitter()).await?;
+                    player_ref.get().await.playback_status_changed(player_ref.signal_emitter()).await?;
                 }
-                send_tl_msg(&mut tl_sender, TrackListMsg::ReloadList);
-            },
-            PlayerCommand::ReloadPlayerSettings => {
-                player.load_settings(&settings).await.expect("Error loading player settings");
+                send_tl_msg(tl_sender, TrackListMsg::ReloadList);
             }
         }
-    }
-    send_app_msg(&mut app_sender, AppMsg::Quit);
+        PlayerCommand::QueueRandom { size, genre, from_year, to_year } => {
+            let songs = song_cache.get_random_songs(Some(size), genre.as_deref(), from_year, to_year, None).await?;
+            println!("Added {} random songs", songs.len());
+            let was_empty;
+            {
+                let mut guard = track_list.write().await;
+                was_empty = guard.empty();
+                guard.add_songs(songs);
+            }
+            if was_empty {
+                let song = player.start_current().await?;
+                send_cs_msg(cs_sender, CurrentSongMsg::SongUpdate(song));
+                player_ref.get().await
+                    .metadata_changed(player_ref.signal_emitter()).await?;
+                player_ref.get().await.playback_status_changed(player_ref.signal_emitter()).await?;
+            }
+            send_tl_msg(tl_sender, TrackListMsg::ReloadList);
+        },
+        PlayerCommand::ReloadPlayerSettings => {
+            player.load_settings(&settings).await?;
+        }
+    };
 
-    Ok(should_restart)
+    Ok(Status::Ok)
 }

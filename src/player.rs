@@ -80,7 +80,7 @@ impl Default for PlayerSettings {
 }
 
 impl PlayerSettings {
-    pub fn load_settings(&mut self, settings: &Settings) -> Result<(), Box<dyn Error + Send + Sync>>{
+    pub fn load_settings(&mut self, settings: &Settings) -> Result<(), Box<dyn Error>>{
         let mode: u8 = settings.value("replay-gain-mode").try_get()?;
         self.replay_gain_mode = match mode {
             0 => ReplayGainMode::None,
@@ -122,12 +122,12 @@ impl PlayerInfo {
         }
     }
 
-    pub fn load_settings_blocking(&self, settings: &Settings) -> Result<(), Box<dyn Error + Send + Sync>>{
+    pub fn load_settings_blocking(&self, settings: &Settings) -> Result<(), Box<dyn Error>>{
         let mut s = self.settings.blocking_write();
         s.load_settings(settings)
     }
 
-    pub async fn load_settings(&self, settings: &Settings) -> Result<(), Box<dyn Error + Send + Sync>>{
+    pub async fn load_settings(&self, settings: &Settings) -> Result<(), Box<dyn Error>>{
         let mut s = self.settings.write().await;
         s.load_settings(settings)
     }
@@ -136,12 +136,12 @@ impl PlayerInfo {
         self.track_list.read().await.loop_status
     }
 
-    pub async fn goto(&self, index: usize) -> Result<Option<SongEntry>, Box<dyn Error + Send + Sync>> {
+    pub async fn goto(&self, index: usize) -> Result<Option<SongEntry>, Box<dyn Error>> {
         self.track_list.write().await.set_current(index);
         self.start_current().await
     }
 
-    pub async fn remove_song(&self, index: usize) -> Result<SongEntry, Box<dyn Error + Send + Sync>> {
+    pub async fn remove_song(&self, index: usize) -> Result<SongEntry, Box<dyn Error>> {
         let mut guard = self.track_list.write().await;
         let c = guard.current_index();
         let e = guard.remove_song(index);
@@ -171,7 +171,7 @@ impl PlayerInfo {
         }
     }
 
-    pub async fn start_current(&self) -> Result<Option<SongEntry>, Box<dyn Error + Send + Sync>> {
+    pub async fn start_current(&self) -> Result<Option<SongEntry>, Box<dyn Error>> {
         let track_list = self.track_list.read().await;
         let song = match track_list.current() {
             None => {return Ok(None)}
@@ -189,8 +189,7 @@ impl PlayerInfo {
             .stream(&*song.1.id, None, None, None, None, Some(true), None);
 
         let response = stream
-            .await
-            .expect("Error when reading bytes");
+            .await?;
         let len = response.headers().get("Content-Length").and_then(|t| match t.to_str() {
             Ok(v) => match v.parse::<u64>() {
                 Ok(v) => Some(v),
@@ -429,7 +428,7 @@ impl TrackList {
         self.shuffled = shuffle;
     }
 
-    pub async fn add_song_from_uri(&mut self, uri: &str, client: &SongCache, index: Option<usize>) -> Option<Box<dyn Error + Send + Sync>> {
+    pub async fn add_song_from_uri(&mut self, uri: &str, client: &SongCache, index: Option<usize>) -> Option<Box<dyn Error>> {
         if !uri.starts_with("sanic://song/"){
             return Some(InvalidResponseError::new_boxed("Invalid URI, should be sanic://song/<song-id>"));
         }
@@ -437,7 +436,7 @@ impl TrackList {
         self.add_song_from_id(id, client, index).await
     }
 
-    pub async fn add_song_from_id(&mut self, id: &str, client: &SongCache, index: Option<usize>) -> Option<Box<dyn Error + Send + Sync>> {
+    pub async fn add_song_from_id(&mut self, id: &str, client: &SongCache, index: Option<usize>) -> Option<Box<dyn Error>> {
         let result = client.get_song(id).await;
         if result.is_err(){
             return result.err();

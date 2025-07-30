@@ -7,6 +7,7 @@ use color_thief::Color;
 use gtk::prelude::GtkWindowExt;
 use libsecret::Schema;
 use readlock_tokio::SharedReadLock;
+use relm4::abstractions::Toaster;
 use relm4::actions::{AccelsPlus, RelmAction, RelmActionGroup};
 use relm4::adw::{gdk, ViewSwitcherPolicy};
 use relm4::adw::prelude::*;
@@ -36,6 +37,7 @@ pub struct Model {
     schema: Schema,
     cmd_sender: Arc<Sender<PlayerCommand>>,
     preferences_view: Option<AsyncController<PreferencesWidget>>,
+    toaster: Toaster,
 }
 
 #[derive(Debug)]
@@ -45,7 +47,8 @@ pub enum AppMsg {
     Quit,
     ShowPreferences,
     Restart(String),
-    ReloadPlayer
+    ReloadPlayer,
+    ShowError(String, String)
 }
 
 pub type Init = (
@@ -71,6 +74,7 @@ impl AsyncComponent for Model {
     type Init = Init;
 
     view! {
+        #[name = "window"]
         adw::ApplicationWindow {
             set_title: Some("Sanic-rs"),
             set_default_width: 400,
@@ -82,11 +86,16 @@ impl AsyncComponent for Model {
 
                 #[wrap(Some)]
                 set_content = &adw::ToolbarView {
-                    #[name = "view_stack"]
+                    #[local_ref]
                     #[wrap(Some)]
-                    set_content = &adw::ViewStack {
-                        add = model.current_song.widget(),
-                        add = model.browse_connector.widget(),
+                    set_content = toast_overlay -> adw::ToastOverlay {
+                        set_vexpand: true,
+
+                        #[name = "view_stack"]
+                        adw::ViewStack {
+                            add = model.current_song.widget(),
+                            add = model.browse_connector.widget(),
+                        }
                     },
 
                     #[name = "header_bar"]
@@ -141,7 +150,8 @@ impl AsyncComponent for Model {
             settings: init.6,
             schema: init.7,
             cmd_sender: init.3,
-            preferences_view: None
+            preferences_view: None,
+            toaster: Toaster::default()
         };
         let base_provider = CssProvider::new();
         let display = gdk::Display::default().expect("Unable to create Display object");
@@ -158,6 +168,8 @@ impl AsyncComponent for Model {
         );
 
         model.cmd_sender.send(PlayerCommand::AppSendSender(sender.clone())).await.expect("Error sending sender to app");
+
+        let toast_overlay = model.toaster.overlay_widget();
 
         let widgets: ModelWidgets = view_output!();
 
@@ -296,6 +308,25 @@ impl AsyncComponent for Model {
             },
             AppMsg::ReloadPlayer => {
                 self.cmd_sender.send(PlayerCommand::ReloadPlayerSettings).await.expect("Error sending message to main");
+            },
+            AppMsg::ShowError(summary, description) => {
+                let toast = adw::Toast::builder()
+                    .title(format!("Error occured: {}", summary))
+                    .button_label("Details")
+                    .timeout(8)
+                    .build();
+                toast.connect_button_clicked(clone!(
+                    #[strong]
+                    root,
+                    move |_this| {
+                        let dialog = adw::AlertDialog::new(Some("Error details"), Some(description.as_str()));
+                        dialog.add_responses(&[("ok", "Ok")]);
+                        dialog.set_default_response(Some("ok"));
+                        dialog.set_close_response("ok");
+                        dialog.choose(&root, None::<&gio::Cancellable>, move |_| {});
+                    }
+                ));
+                self.toaster.add_toast(toast);
             }
         };
         self.update_view(widgets, sender);

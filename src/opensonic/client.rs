@@ -41,7 +41,7 @@ impl OpenSubsonicClient {
         password: &str,
         client_name: &str,
         cover_cache: Option<String>,
-    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
+    ) -> Result<Self, Box<dyn Error>> {
         let mut client: Self =
             OpenSubsonicClient {
                 host: String::from(host),
@@ -57,7 +57,7 @@ impl OpenSubsonicClient {
         Ok(client)
     }
 
-    pub fn init(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    pub fn init(&mut self) -> Result<(), Box<dyn Error>> {
         // Perform request building and parsing manually because it needs to be done blocking here
         // since initialization happens before event loop start up. Everything else uses async.
         let salt = Alphanumeric.sample_string(&mut rand::rng(), 16);
@@ -318,11 +318,12 @@ impl OpenSubsonicClient {
         let response = self
             .get_action_request("stream", params)
             .await?;
-        if response.headers()["Content-Type"] == "text/xml" {
+        let content_type = response.headers()["Content-Type"].to_str()?;
+        if content_type == "text/xml" {
             return Err(InvalidResponseError::new_boxed(
                 response.text().await?.as_str(),
             ));
-        } else if response.headers()["Content-Type"] == "application/json" {
+        } else if content_type == "application/json" {
             let s1 = response.text().await?;
             let response: serde_json::Value = serde_json::from_str(&*s1)?;
             if response["subsonic-response"]["status"] != "ok" {
@@ -338,7 +339,7 @@ impl OpenSubsonicClient {
         &self,
         id: &str,
         size: Option<&str>,
-    ) -> Result<Vec<u8>, Box<dyn Error + Send + Sync>> {
+    ) -> Result<Vec<u8>, Box<dyn Error>> {
         if let Some(cached) = self.get_cache_resource(id).await {
             return Ok(cached);
         }
@@ -401,7 +402,7 @@ impl OpenSubsonicClient {
         Some(self.get_action_request_get_url("getCoverArt", vec![("id", id)]))
     }
 
-    pub async fn get_song(&self, id: &str) -> Result<Arc<Song>, Box<dyn Error + Send + Sync>> {
+    pub async fn get_song(&self, id: &str) -> Result<Arc<Song>, Box<dyn Error>> {
         let body = self
             .get_action_request("getSong", vec![("id", id)])
             .await?
@@ -427,7 +428,7 @@ impl OpenSubsonicClient {
         to_year: Option<u32>,
         genre: Option<String>,
         music_folder_id: Option<String>
-    ) -> Result<Albums, Box<dyn Error + Send + Sync>> {
+    ) -> Result<Albums, Box<dyn Error>> {
         let size = size.unwrap_or(10).to_string();
         let offset = offset.unwrap_or(10).to_string();
         let from_year = from_year.and_then(|x| Some(x.to_string()));
@@ -469,7 +470,7 @@ impl OpenSubsonicClient {
     pub async fn get_album(
         &self,
         id: &str
-    ) ->  Result<(Album, Vec<Song>), Box<dyn Error + Send + Sync>> {
+    ) ->  Result<(Album, Vec<Song>), Box<dyn Error>> {
         let body = self
             .get_action_request("getAlbum", vec![("id", id)])
             .await?
@@ -492,7 +493,7 @@ impl OpenSubsonicClient {
         &self,
         id: &str,
         count: Option<u32>
-    ) -> Result<Vec<Song>, Box<dyn Error + Send + Sync>> {
+    ) -> Result<Vec<Song>, Box<dyn Error>> {
         let count = count.and_then(|o| Some(o.to_string()));
 
         let mut params = vec![("id", id)];
@@ -522,7 +523,7 @@ impl OpenSubsonicClient {
         from_year: Option<u32>,
         to_year: Option<u32>,
         music_folder_id: Option<&str>
-    ) -> Result<Vec<Song>, Box<dyn Error + Send + Sync>> {
+    ) -> Result<Vec<Song>, Box<dyn Error>> {
         let size = size.and_then(|o| Some(o.to_string()));
         let from_year = from_year.and_then(|o| Some(o.to_string()));
         let to_year = to_year.and_then(|o| Some(o.to_string()));

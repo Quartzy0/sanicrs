@@ -22,7 +22,7 @@ impl SongCache {
         }
     }
 
-    pub async fn get_song(&self, id: &str) -> Result<Arc<Song>, Box<dyn Error + Send + Sync>> {
+    pub async fn get_song(&self, id: &str) -> Result<Arc<Song>, Box<dyn Error>> {
         {
             let cahce_r = self.cache.read().await;
             if let Some(song) = cahce_r.get(id) {
@@ -50,7 +50,7 @@ impl SongCache {
             .collect()
     }
 
-    pub async fn get_similar_songs(&self, id: &str, count: Option<u32>) -> Result<Vec<Arc<Song>>, Box<dyn Error + Send + Sync>> {
+    pub async fn get_similar_songs(&self, id: &str, count: Option<u32>) -> Result<Vec<Arc<Song>>, Box<dyn Error>> {
         let songs = self.client.get_similar_songs(id, count).await?;
         Ok(self.add_songs(songs).await)
     }
@@ -62,7 +62,7 @@ impl SongCache {
         from_year: Option<u32>,
         to_year: Option<u32>,
         music_folder_id: Option<&str>
-    ) -> Result<Vec<Arc<Song>>, Box<dyn Error + Send + Sync>> {
+    ) -> Result<Vec<Arc<Song>>, Box<dyn Error>> {
         let songs = self.client.get_random_songs(size, genre, from_year, to_year, music_folder_id).await?;
         Ok(self.add_songs(songs).await)
     }
@@ -93,7 +93,7 @@ impl AlbumCache {
         to_year: Option<u32>,
         genre: Option<String>,
         music_folder_id: Option<String>,
-    ) -> Result<Vec<AlbumObject>, Box<dyn Error + Send + Sync>> {
+    ) -> Result<Vec<AlbumObject>, Box<dyn Error>> {
         let resp = self
             .client
             .get_album_list(
@@ -123,7 +123,7 @@ impl AlbumCache {
         Ok(ret)
     }
 
-    pub async fn get_album(&self, id: &str) -> Result<AlbumObject, Box<dyn Error + Send + Sync>> {
+    pub async fn get_album(&self, id: &str) -> Result<AlbumObject, Box<dyn Error>> {
         {
             let cache_r = self.cache.read().await;
             if let Some(cached) = cache_r.get(id) {
@@ -159,7 +159,7 @@ impl CoverCache {
         }
     }
 
-    pub async fn get_cover_texture(&self, id: &str) -> Result<Texture, Box<dyn Error + Send + Sync>> {
+    pub async fn get_cover_texture(&self, id: &str) -> Result<Texture, Box<dyn Error>> {
         {
             let cache_r = self.cache.read().await;
             if let Some(texture) = cache_r.get(id) {
