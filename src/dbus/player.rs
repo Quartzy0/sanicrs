@@ -184,7 +184,7 @@ impl MprisPlayer {
 
     #[zbus(property)]
     pub async fn volume(&self) -> f64 {
-        self.player_ref.lock().await.volume()
+        self.player_ref.lock().await.volume().await
     }
 
     #[zbus(property)]

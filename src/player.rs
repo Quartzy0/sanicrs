@@ -4,6 +4,8 @@ use std::io::Cursor;
 use std::sync::Arc;
 use async_channel::Sender;
 use rand::Rng;
+use relm4::gtk::gio::prelude::SettingsExt;
+use relm4::gtk::gio::Settings;
 use std::time::Duration;
 use rand::prelude::SliceRandom;
 use rodio::{Decoder, OutputStream, Sink};
@@ -56,12 +58,52 @@ impl TryFrom<String> for LoopStatus {
     }
 }
 
+#[derive(Debug, Default)]
+#[repr(u8)]
+pub enum ReplayGainMode {
+    #[default]
+    None = 0,
+    Track = 1,
+    Album = 2
+}
+
+#[derive(Debug)]
+pub struct PlayerSettings {
+    replay_gain_mode: ReplayGainMode,
+    volume: f64
+}
+
+impl Default for PlayerSettings {
+    fn default() -> Self {
+        Self { replay_gain_mode: Default::default(), volume: 1.0 }
+    }
+}
+
+impl PlayerSettings {
+    pub fn load_settings(&mut self, settings: &Settings) -> Result<(), Box<dyn Error + Send + Sync>>{
+        let mode: u8 = settings.value("replay-gain-mode").try_get()?;
+        self.replay_gain_mode = match mode {
+            0 => ReplayGainMode::None,
+            1 => ReplayGainMode::Track,
+            2 => ReplayGainMode::Album,
+            v => {
+                eprintln!("Unknown replay-gain-mode setting: {}", v);
+                ReplayGainMode::None
+            }
+        };
+        self.volume = settings.value("volume").try_get()?;
+
+        Ok(())
+    }
+}
+
 pub struct PlayerInfo {
     client: Arc<OpenSubsonicClient>,
     sink: Sink,
-    current_song_id: RwLock<String>,
     track_list: Arc<RwLock<TrackList>>,
     cmd_channel: Arc<Sender<PlayerCommand>>,
+
+    settings: RwLock<PlayerSettings>,
 }
 
 impl PlayerInfo {
@@ -74,10 +116,20 @@ impl PlayerInfo {
         PlayerInfo {
             client,
             sink: Sink::connect_new(stream_handle.mixer()),
-            current_song_id: RwLock::new("".to_string()),
             track_list,
             cmd_channel,
+            settings: RwLock::new(Default::default())
         }
+    }
+
+    pub fn load_settings_blocking(&self, settings: &Settings) -> Result<(), Box<dyn Error + Send + Sync>>{
+        let mut s = self.settings.blocking_write();
+        s.load_settings(settings)
+    }
+
+    pub async fn load_settings(&self, settings: &Settings) -> Result<(), Box<dyn Error + Send + Sync>>{
+        let mut s = self.settings.write().await;
+        s.load_settings(settings)
     }
 
     pub async fn loop_status(&self) -> LoopStatus {
@@ -180,10 +232,10 @@ impl PlayerInfo {
         }));
         self.sink.append(callback_source);
         self.sink.play();
-        {
-            let mut x = self.current_song_id.write().await;
-            *x = song.1.id.clone();
-        }
+
+        let v = self.settings.read().await.volume;
+        let mul = v * 10.0_f64.powf(self.gain_from_track(Some(song)).await/20.0);
+        self.sink.set_volume(mul as f32);
 
         Ok(Some(song.clone()))
     }
@@ -236,12 +288,40 @@ impl PlayerInfo {
         Ok(())
     }
 
-    pub fn volume(&self) -> f64 {
-        self.sink.volume() as f64
+    pub async fn gain_from_track(&self, song: Option<&SongEntry>) -> f64 {
+        match self.settings.read().await.replay_gain_mode {
+            ReplayGainMode::None => 0.0,
+            ReplayGainMode::Track => match song {
+                Some(entry) => entry.1.replay_gain.as_ref().and_then(|x| x.track_gain).unwrap_or(0.0) as f64,
+                None => 0.0,
+            },
+            ReplayGainMode::Album => match song {
+                Some(entry) => entry.1.replay_gain.as_ref().and_then(|x| x.album_gain).unwrap_or(0.0) as f64,
+                None => 0.0,
+            },
+        }
     }
 
-    pub fn set_volume(&self, volume: f64) {
-        self.sink.set_volume(volume as f32);
+    pub async fn gain(&self) -> f64 {
+        self.gain_from_track(self.track_list.read().await.current()).await
+    }
+
+    async fn set_set_volume(&self) {
+        let v = self.settings.read().await.volume;
+        let mul = v * 10.0_f64.powf(self.gain().await/20.0);
+        self.sink.set_volume(mul as f32);
+    }
+
+    pub async fn volume(&self) -> f64 {
+        self.settings.read().await.volume
+    }
+
+    pub async fn set_volume(&self, volume: f64) {
+        {
+            let mut settings = self.settings.write().await;
+            settings.volume = volume;
+        }
+        self.set_set_volume().await;
     }
 
     pub fn playback_status(&self) -> PlaybackStatus {

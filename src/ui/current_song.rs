@@ -309,6 +309,8 @@ impl AsyncComponent for CurrentSong {
                 })
                 .drop_on_shutdown()
         });
+        let v = model.player_ref.lock().await.volume().await;
+        sender.input(CurrentSongMsg::VolumeChangedExternal(v));
 
         let s2 = sender.clone();
         widgets.cover_image.connect_closure(

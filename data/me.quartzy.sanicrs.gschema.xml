@@ -5,6 +5,14 @@
         <default>true</default>
         <summary>Whether song/album covers should be cached.</summary>
     </key>
+    <key name="replay-gain-mode" type="y">
+        <default>0</default>
+        <summary>Replay gain mode to use. (0 - None, 1 - Track, 2 - Album)</summary>
+    </key>
+    <key name="volume" type="d">
+        <default>1.0</default>
+        <summary>Volume multiplier (100% => 1, 50% => 0.5, etc.)</summary>
+    </key>
     <key name="username" type="ms">
         <default>nothing</default>
         <summary>Username to use with authentication with the OpenSubsonic server</summary>

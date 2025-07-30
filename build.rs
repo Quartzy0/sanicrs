@@ -74,7 +74,9 @@ fn main() {
             "playlist-repeat-song",
             "playlist-shuffle",
             "add-regular",
-            "menu"
+            "menu",
+            "network-server",
+            "music-note-single"
         ],
     );
     compile_schemas(

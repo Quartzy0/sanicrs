@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::u32;
 
 use libsecret::{password_store_future, Schema};
 use relm4::adw::prelude::PreferencesPageExt;
@@ -7,7 +8,10 @@ use relm4::adw::prelude::*;
 use relm4::gtk::gio::Settings;
 use relm4::gtk::glib::Variant;
 use relm4::gtk::Editable;
+use relm4::adw::gtk;
 use relm4::prelude::*;
+
+use crate::icon_names;
 
 pub struct PreferencesWidget {
     settings: Settings,
@@ -18,12 +22,13 @@ pub struct PreferencesWidget {
 #[derive(Debug)]
 pub enum PreferencesMsg {
     AuthChanged{pass: bool},
-    SendRestart,
+    Closed,
 }
 
 #[derive(Debug)]
 pub enum PreferencesOut {
-    Restart
+    Restart,
+    ReloadPlayer
 }
 
 #[relm4::component(pub async)]
@@ -35,18 +40,25 @@ impl AsyncComponent for PreferencesWidget {
 
     view! {
         adw::PreferencesDialog {
-            set_follows_content_size: true,
-            connect_closed => PreferencesMsg::SendRestart,
+            connect_closed => PreferencesMsg::Closed,
 
             add = &adw::PreferencesPage {
                 set_title: "Player",
+                set_icon_name: Some(icon_names::MUSIC_NOTE_SINGLE),
 
                 adw::PreferencesGroup {
 
+                    #[name = "replay_gain"]
+                    adw::ComboRow {
+                        #[wrap(Some)]
+                        set_model = &gtk::StringList::new(&["None", "Track", "Album"]),
+                        set_title: "Replay gain mode"
+                    },
                 }
             },
             add = &adw::PreferencesPage {
                 set_title: "Server",
+                set_icon_name: Some(icon_names::NETWORK_SERVER),
 
                 adw::PreferencesGroup {
                     set_title: "Authenticaion",
@@ -98,6 +110,7 @@ impl AsyncComponent for PreferencesWidget {
         set_text_from_setting(&widgets.username, "username", &model.settings);
 
         model.settings.bind("should-cache-covers", &widgets.cache_albums, "active").build();
+        widgets.replay_gain.set_selected(model.settings.value("replay-gain-mode").get::<u8>().unwrap() as u32);
 
         AsyncComponentParts { model, widgets }
     }
@@ -140,7 +153,10 @@ impl AsyncComponent for PreferencesWidget {
                 }
                 self.requires_restart = true;
             },
-            PreferencesMsg::SendRestart => {
+            PreferencesMsg::Closed => {
+                self.settings.set("replay-gain-mode", Variant::from(widgets.replay_gain.selected() as u8)).expect("Error setting replay gain");
+
+                sender.output(PreferencesOut::ReloadPlayer).expect("Error sending message out");
                 if self.requires_restart {
                     sender.output(PreferencesOut::Restart).expect("Error sending message out");
                 }

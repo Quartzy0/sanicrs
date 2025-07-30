@@ -69,6 +69,7 @@ pub enum PlayerCommand {
     QueueAlbum(String),
     QueueRandom{size: u32, genre: Option<String>, from_year: Option<u32>, to_year: Option<u32>},
     Restart,
+    ReloadPlayerSettings,
 }
 
 fn send_app_msg(sender_opt: &mut Option<AsyncComponentSender<Model>>, msg: AppMsg) {
@@ -189,6 +190,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             track_list.clone(),
             command_send.clone(),
         ));
+        player.load_settings_blocking(&settings).expect("Error loading player settings");
         let player_read = Shared::<PlayerInfo>::get_read_lock(&player);
         let payload: Init = (
             player_read,
@@ -197,7 +199,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             command_send.clone(),
             song_cache.clone(),
             album_cache.clone(),
-            settings,
+            settings.clone(),
             secret_schema
         );
 
@@ -214,6 +216,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             song_cache,
             #[strong]
             album_cache,
+            #[strong]
+            settings,
             async move {
                 let restart = app_main(command_recv,
                    command_send,
@@ -222,6 +226,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                    player,
                    song_cache,
                    album_cache,
+                   settings,
                    payload
                 ).await.expect("Error");
                 restart_send.send(restart).await.expect("Error sending restart status");
@@ -247,6 +252,7 @@ async fn app_main(
     player: Shared<PlayerInfo>,
     song_cache: SongCache,
     album_cache: AlbumCache,
+    settings: Settings,
     payload: Init
 ) -> Result<bool, Box<dyn Error>> {
     let connection = Arc::new(
@@ -350,7 +356,8 @@ async fn app_main(
                 player_ref.get().await.rate_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
             },
             PlayerCommand::SetVolume(v) => {
-                player.set_volume(v);
+                player.set_volume(v).await;
+                settings.set_double("volume", v).expect("Error setting volume setting");
                 send_cs_msg(&mut cs_sender, CurrentSongMsg::VolumeChangedExternal(v));
                 player_ref.get().await.volume_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
             },
@@ -492,6 +499,9 @@ async fn app_main(
                     player_ref.get().await.playback_status_changed(player_ref.signal_emitter()).await.expect("Error sending DBus signal");
                 }
                 send_tl_msg(&mut tl_sender, TrackListMsg::ReloadList);
+            },
+            PlayerCommand::ReloadPlayerSettings => {
+                player.load_settings(&settings).await.expect("Error loading player settings");
             }
         }
     }

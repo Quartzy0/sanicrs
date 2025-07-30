@@ -7,7 +7,7 @@ use color_thief::Color;
 use gtk::prelude::GtkWindowExt;
 use libsecret::Schema;
 use readlock_tokio::SharedReadLock;
-use relm4::actions::{RelmAction, RelmActionGroup};
+use relm4::actions::{AccelsPlus, RelmAction, RelmActionGroup};
 use relm4::adw::{gdk, ViewSwitcherPolicy};
 use relm4::adw::prelude::*;
 use relm4::component::AsyncConnector;
@@ -45,6 +45,7 @@ pub enum AppMsg {
     Quit,
     ShowPreferences,
     Restart(String),
+    ReloadPlayer
 }
 
 pub type Init = (
@@ -60,6 +61,7 @@ pub type Init = (
 
 relm4::new_action_group!(WindowActionGroup, "win");
 relm4::new_stateless_action!(PreferencesAction, WindowActionGroup, "preferences");
+relm4::new_stateless_action!(PlayPauseAction, WindowActionGroup, "playpause");
 
 #[relm4::component(pub async)]
 impl AsyncComponent for Model {
@@ -212,9 +214,15 @@ impl AsyncComponent for Model {
         let action: RelmAction<PreferencesAction> = RelmAction::new_stateless(move |_| {
             sender.input(AppMsg::ShowPreferences);
         });
+        let sndr = model.cmd_sender.clone();
+        let playpause_action: RelmAction<PlayPauseAction> = RelmAction::new_stateless(move |_| {
+            sndr.send_blocking(PlayerCommand::PlayPause).expect("Error sending message to main");
+        });
+        relm4::main_application().set_accelerators_for_action::<PlayPauseAction>(&["space"]);
 
         let mut group = RelmActionGroup::<WindowActionGroup>::new();
         group.add_action(action);
+        group.add_action(playpause_action);
         group.register_for_widget(&root);
 
         AsyncComponentParts { model, widgets }
@@ -263,6 +271,7 @@ impl AsyncComponent for Model {
                                 PreferencesOut::Restart => AppMsg::Restart(
                                     "In order for the changes to take effect, the app needs to be restarted.".to_string()
                                 ),
+                                PreferencesOut::ReloadPlayer => AppMsg::ReloadPlayer
                             }
                         });
                     self.preferences_view = Some(view);
@@ -284,6 +293,9 @@ impl AsyncComponent for Model {
                         }
                     }
                 ));
+            },
+            AppMsg::ReloadPlayer => {
+                self.cmd_sender.send(PlayerCommand::ReloadPlayerSettings).await.expect("Error sending message to main");
             }
         };
         self.update_view(widgets, sender);
