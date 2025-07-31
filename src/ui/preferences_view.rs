@@ -7,7 +7,7 @@ use relm4::adw;
 use relm4::adw::prelude::*;
 use relm4::gtk::gio::Settings;
 use relm4::gtk::glib::Variant;
-use relm4::gtk::Editable;
+use relm4::gtk::{Editable};
 use relm4::adw::gtk;
 use relm4::prelude::*;
 
@@ -41,6 +41,7 @@ impl AsyncComponent for PreferencesWidget {
     view! {
         adw::PreferencesDialog {
             connect_closed => PreferencesMsg::Closed,
+            set_content_height: 512,
 
             add = &adw::PreferencesPage {
                 set_title: "Player",
@@ -53,6 +54,10 @@ impl AsyncComponent for PreferencesWidget {
                         #[wrap(Some)]
                         set_model = &gtk::StringList::new(&["None", "Track", "Album"]),
                         set_title: "Replay gain mode"
+                    },
+                    #[name = "open_in_bg"]
+                    adw::SwitchRow {
+                        set_title: "Remain open in background"
                     },
                 }
             },
@@ -111,6 +116,7 @@ impl AsyncComponent for PreferencesWidget {
 
         model.settings.bind("should-cache-covers", &widgets.cache_albums, "active").build();
         widgets.replay_gain.set_selected(model.settings.value("replay-gain-mode").get::<u8>().unwrap() as u32);
+        model.settings.bind("stay-in-background", &widgets.open_in_bg, "active").build();
 
         AsyncComponentParts { model, widgets }
     }

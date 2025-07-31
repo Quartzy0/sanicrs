@@ -223,6 +223,21 @@ impl AsyncComponent for Model {
             }))
             .bind(&widgets.split_view, "show-sidebar", Some(&widgets.split_view));
 
+        root.connect_close_request(clone!(
+            #[strong(rename_to = sndr)]
+            model.cmd_sender,
+            #[strong(rename_to = settings)]
+            model.settings,
+            move |_| {
+                if !settings.boolean("stay-in-background") {
+                    sndr.send_blocking(PlayerCommand::Quit).expect("Error when sending message to main");
+                }
+                glib::Propagation::Proceed
+
+                // glib::Propagation::Proceed
+            }
+        ));
+
         let action: RelmAction<PreferencesAction> = RelmAction::new_stateless(move |_| {
             sender.input(AppMsg::ShowPreferences);
         });

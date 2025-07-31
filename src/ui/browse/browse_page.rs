@@ -9,7 +9,7 @@ use relm4::gtk::{ListItem, SignalListItemFactory, Widget};
 use relm4::prelude::*;
 use crate::opensonic::cache::AlbumCache;
 use crate::opensonic::types::AlbumListType;
-use crate::PlayerCommand;
+use crate::{send_error, PlayerCommand};
 use crate::ui::album_object::AlbumObject;
 use crate::ui::app::Init;
 use crate::ui::browse::album_list::AlbumList;
@@ -153,30 +153,37 @@ impl AsyncComponent for BrowsePageWidget {
             }
         ));
 
-        let newest_store = ListStore::from_iter(
-            model
-                .album_cache
-                .get_album_list(AlbumListType::Newest, None, None, None, None, None, None)
-                .await
-                .expect("Error fetching albums"),
-        );
+        let newest = model
+            .album_cache
+            .get_album_list(AlbumListType::Newest, None, None, None, None, None, None)
+            .await;
+        match newest {
+            Ok(newest) => {
+                let newest_store = ListStore::from_iter(newest);
+                widgets
+                    .newest_list
+                    .list
+                    .set_model(Some(&gtk::NoSelection::new(Some(newest_store))));
+            },
+            Err(err) => send_error(&model.cmd_sender, err).await,
+        };
 
-        let highest_store = ListStore::from_iter(
-            model
-                .album_cache
-                .get_album_list(AlbumListType::Frequent, None, None, None, None, None, None)
-                .await
-                .expect("Error fetching albums"),
-        );
+        let highest = model
+            .album_cache
+            .get_album_list(AlbumListType::Frequent, None, None, None, None, None, None)
+            .await;
+        match highest {
+            Ok(highest) => {
+                let highest_store = ListStore::from_iter(highest);
+                widgets
+                    .highest_list
+                    .list
+                    .set_model(Some(&gtk::NoSelection::new(Some(highest_store))));
+            },
+            Err(err) => send_error(&model.cmd_sender, err).await,
+        }
 
-        widgets
-            .newest_list
-            .list
-            .set_model(Some(&gtk::NoSelection::new(Some(newest_store))));
-        widgets
-            .highest_list
-            .list
-            .set_model(Some(&gtk::NoSelection::new(Some(highest_store))));
+
 
         AsyncComponentParts { model, widgets }
     }

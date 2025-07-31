@@ -70,6 +70,12 @@ pub enum PlayerCommand {
     QueueRandom{size: u32, genre: Option<String>, from_year: Option<u32>, to_year: Option<u32>},
     Restart,
     ReloadPlayerSettings,
+    ReportError(String, String)
+}
+
+pub async fn send_error(sender: &Sender<PlayerCommand>, error: Box<dyn Error>) {
+    sender.send(PlayerCommand::ReportError(format!("{}", error), format!("{:?}", error)))
+        .await.expect("Error sending error info to main thread");
 }
 
 fn send_app_msg(sender_opt: &mut Option<AsyncComponentSender<Model>>, msg: AppMsg) {
@@ -560,7 +566,8 @@ async fn process_command(
         },
         PlayerCommand::ReloadPlayerSettings => {
             player.load_settings(&settings).await?;
-        }
+        },
+        PlayerCommand::ReportError(summary, description) => send_app_msg(app_sender, AppMsg::ShowError(summary, description)),
     };
 
     Ok(Status::Ok)

@@ -461,9 +461,10 @@ impl OpenSubsonicClient {
         if response["subsonic-response"]["status"] != "ok" {
             return Err(SubsonicError::from_response(response));
         }
-
-        let resp: Albums =
-            serde_json::from_value(response["subsonic-response"]["albumList2"]["album"].take())?;
+        let resp: Albums = match response["subsonic-response"]["albumList2"].get_mut("album") {
+            Some(albums) => serde_json::from_value(albums.take())?,
+            None => Albums(Vec::new()),
+        };
         Ok(resp)
     }
 
