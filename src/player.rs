@@ -1,11 +1,15 @@
 use std::cmp::PartialEq;
 use std::error::Error;
-use std::io::Cursor;
 use std::sync::Arc;
 use async_channel::Sender;
+use futures_util::TryStreamExt;
 use rand::Rng;
 use relm4::gtk::gio::prelude::SettingsExt;
 use relm4::gtk::gio::Settings;
+use stream_download::async_read::AsyncReadStreamParams;
+use stream_download::storage::memory::MemoryStorageProvider;
+use stream_download::StreamDownload;
+use tokio_util::io::StreamReader;
 use std::time::Duration;
 use rand::prelude::SliceRandom;
 use rodio::{Decoder, OutputStream, Sink};
@@ -177,12 +181,7 @@ impl PlayerInfo {
             None => {return Ok(None)}
             Some(s) => s
         };
-        /*{
-            let x = self.current_song_id.read().await;
-            if song.1.id == x.as_str() {
-                return Ok(Some(song.clone()));
-            }
-        }*/
+
         println!("Playing: {}", song.1.title);
         let stream = self
             .client
@@ -197,11 +196,7 @@ impl PlayerInfo {
             },
             Err(_) => None
         });
-        let x1 = response
-            .bytes()
-            .await?; // TODO: Figure this out without downloading entire file first
-        let reader = Cursor::new(x1);
-        /*let x = stream.await.expect("Error reading stream").bytes_stream();
+        let x = response.bytes_stream();
         let reader =
             StreamReader::new(x.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)));
 
@@ -209,8 +204,8 @@ impl PlayerInfo {
         let reader = StreamDownload::new_async_read(
             AsyncReadStreamParams::new(reader),
             MemoryStorageProvider::default(),
-            Settings::default(),
-        ).await?;*/
+            stream_download::Settings::default(),
+        ).await?;
 
         let mut decoder = Decoder::builder().with_data(reader).with_seekable(true);
         if let Some(len) = len {

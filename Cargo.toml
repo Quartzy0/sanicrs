@@ -16,9 +16,11 @@ serde = { version = "1.0.219", features = ["derive"] }
 md5 = "0.8.0"
 rand = "0.9.1"
 rodio = { version = "0.21.1" }
-#futures-util = {version = "0.3.31"}
-#tokio-util = "0.7.15"
-#stream-download = { version = "0.22.1", features = ["async-read"] }
+futures-util = { version = "0.3.31", default-features = false, features = [
+    "std",
+] }
+tokio-util = "0.7.15"
+stream-download = { version = "0.22.1", features = ["async-read"] }
 async-channel = { version = "2.5.0" }
 zbus = { version = "5.9.0", default-features = false, features = [
     "async-io",
