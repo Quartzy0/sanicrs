@@ -17,10 +17,10 @@ impl WidgetTemplate for AlbumList {
                 set_hexpand_set: true,
 
                 #[wrap(Some)]
+                #[name = "top_label"]
                 set_start_widget = &gtk::Label {
                     add_css_class: "t0",
                     add_css_class: "bold",
-                    set_label: "Newest"
                 },
 
                 #[wrap(Some)]

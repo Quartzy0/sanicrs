@@ -25,6 +25,8 @@ pub struct BrowsePageWidget {
 #[derive(Debug)]
 pub enum BrowsePageMsg {
     ScrollNewest(i32),
+    ScrollHighest(i32),
+    ScrollExplore(i32),
 }
 
 #[derive(Debug)]
@@ -52,6 +54,10 @@ impl AsyncComponent for BrowsePageWidget {
                 #[name = "newest_list"]
                 AlbumList {
                     #[template_child]
+                    top_label {
+                        set_label: "Newest"
+                    },
+                    #[template_child]
                     back_btn {
                         connect_clicked => BrowsePageMsg::ScrollNewest(-100)
                     },
@@ -77,12 +83,45 @@ impl AsyncComponent for BrowsePageWidget {
                 #[name = "highest_list"]
                 AlbumList {
                     #[template_child]
+                    top_label {
+                        set_label: "Most played"
+                    },
+                    #[template_child]
                     back_btn {
-                        connect_clicked => BrowsePageMsg::ScrollNewest(-100)
+                        connect_clicked => BrowsePageMsg::ScrollHighest(-100)
                     },
                     #[template_child]
                     forward_btn {
-                        connect_clicked => BrowsePageMsg::ScrollNewest(100)
+                        connect_clicked => BrowsePageMsg::ScrollHighest(100)
+                    },
+                    #[template_child]
+                    list {
+                        set_factory: Some(&model.album_factory),
+                        connect_activate[sender] => move |view, index| {
+                            if let Some(model) = view.model() {
+                                let album: AlbumObject = model.item(index)
+                                    .expect("Item at index clicked expected to exist")
+                                    .downcast::<AlbumObject>()
+                                    .expect("Item expected to be AlbumObject");
+                                sender.output(BrowsePageOut::ViewAlbum(album)).expect("Error sending output");
+                            }
+                        }
+                    }
+                },
+                #[template]
+                #[name = "explore_list"]
+                AlbumList {
+                    #[template_child]
+                    top_label {
+                        set_label: "Explore"
+                    },
+                    #[template_child]
+                    back_btn {
+                        connect_clicked => BrowsePageMsg::ScrollExplore(-100)
+                    },
+                    #[template_child]
+                    forward_btn {
+                        connect_clicked => BrowsePageMsg::ScrollExplore(100)
                     },
                     #[template_child]
                     list {
@@ -183,7 +222,20 @@ impl AsyncComponent for BrowsePageWidget {
             Err(err) => send_error(&model.cmd_sender, err).await,
         }
 
-
+        let explore = model
+            .album_cache
+            .get_album_list(AlbumListType::Random, None, None, None, None, None, None)
+            .await;
+        match explore {
+            Ok(explore) => {
+                let explore_store = ListStore::from_iter(explore);
+                widgets
+                    .explore_list
+                    .list
+                    .set_model(Some(&gtk::NoSelection::new(Some(explore_store))));
+            },
+            Err(err) => send_error(&model.cmd_sender, err).await,
+        }
 
         AsyncComponentParts { model, widgets }
     }
@@ -199,6 +251,20 @@ impl AsyncComponent for BrowsePageWidget {
             BrowsePageMsg::ScrollNewest(s) => {
                 widgets
                     .newest_list
+                    .scroll
+                    .hadjustment()
+                    .set_value(widgets.newest_list.scroll.hadjustment().value() + s as f64);
+            },
+            BrowsePageMsg::ScrollHighest(s) => {
+                widgets
+                    .highest_list
+                    .scroll
+                    .hadjustment()
+                    .set_value(widgets.newest_list.scroll.hadjustment().value() + s as f64);
+            },
+            BrowsePageMsg::ScrollExplore(s) => {
+                widgets
+                    .explore_list
                     .scroll
                     .hadjustment()
                     .set_value(widgets.newest_list.scroll.hadjustment().value() + s as f64);
