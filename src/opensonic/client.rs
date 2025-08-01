@@ -1,8 +1,9 @@
-use crate::opensonic::types::{Album, AlbumListType, Albums, Extensions, InvalidResponseError, License, Search3Results, Song, SubsonicError, SupportedExtensions};
+use crate::opensonic::types::{Album, AlbumListType, Albums, Extensions, InvalidResponseError, License, LyricsLine, LyricsLines, LyricsList, Search3Results, Song, SubsonicError, SupportedExtensions};
 use format_url::FormatUrl;
 use rand::distr::{Alphanumeric, SampleString};
 use reqwest;
 use reqwest::{Client, ClientBuilder, Response};
+use serde_json::Value;
 use std::env;
 use std::error::Error;
 use std::path::Path;
@@ -559,5 +560,68 @@ impl OpenSubsonicClient {
         let resp_songs: Vec<Song> =
             serde_json::from_value(response["subsonic-response"]["randomSongs"]["song"].take())?;
         Ok(resp_songs)
+    }
+
+    pub async fn get_lyrics(
+        &self,
+        id: &str
+    ) -> Result<Vec<LyricsList>, Box<dyn Error>> {
+        if !self.extensions.contains(&SupportedExtensions::SongLyrics) {
+            return Ok(Vec::new());
+        }
+
+        let params = vec![("id", id)];
+
+        let body = self
+            .get_action_request("getLyricsBySongId", params)
+            .await?
+            .text()
+            .await?;
+        let mut response: serde_json::Value = serde_json::from_str(&body)?;
+        if response["subsonic-response"]["status"] != "ok" {
+            return Err(SubsonicError::from_response(response));
+        }
+        let mut response = response["subsonic-response"]["lyricsList"].take();
+        let response = response.as_object_mut().ok_or(InvalidResponseError::new_boxed("'lyricsList' wasn't object"))?;
+        if !response.contains_key("structuredLyrics") {
+            return Ok(Vec::new());
+        }
+        let response = response["structuredLyrics"]
+            .as_array_mut().ok_or(InvalidResponseError::new_boxed("'structuredLyrics' wasn't an array"))?;
+        let resp: Vec<LyricsList> = response.iter_mut().map(|v: &mut Value| {
+            let synced = v["synced"].as_bool().unwrap_or(false);
+            let lines: Result<LyricsLines, Box<dyn Error>> = if synced{
+                serde_json::from_value::<Vec<LyricsLine>>(v["line"].take())
+                    .and_then(|v| Ok(LyricsLines::Synced(v)))
+                    .map_err(|e| e.into())
+            } else {
+                v["line"].take().as_array().and_then(
+                    |a|
+                    Some(a.iter().map(|v: &Value| v["start"].as_str().unwrap().to_string()).collect())
+                ).and_then(|v| Some(LyricsLines::NotSynced(v)))
+                .ok_or(InvalidResponseError::new_boxed("Error parsing lyrics lines"))
+            };
+            lines.and_then(|l| {
+                serde_json::from_value::<LyricsList>(v.take())
+                    .and_then(|info: LyricsList| {
+                        let mut info = info;
+                        info.lines = l;
+                        Ok(info)
+                    })
+                    .map_err(|e| e.into())
+            })
+        })
+        .filter_map(|r| {
+            match r {
+                Ok(v) => Some(v),
+                Err(e) => {
+                    eprintln!("Error when parsing lyrics: {}", e);
+                    None
+                },
+            }
+        })
+        .collect();
+
+        Ok(resp)
     }
 }

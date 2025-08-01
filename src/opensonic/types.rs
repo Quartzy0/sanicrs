@@ -1,3 +1,4 @@
+use serde::de::Visitor;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_with::DurationSeconds;
@@ -54,6 +55,33 @@ impl TryFrom<&String> for SupportedExtensions {
             _ => Err(InvalidResponseError::new("Unsupported extension type (non fatal)"))
         }
     }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct LyricsLine {
+    pub start: u32,
+    pub value: String,
+}
+
+#[derive(Debug, Default)]
+pub enum LyricsLines {
+    Synced(Vec<LyricsLine>),
+    NotSynced(Vec<String>),
+    #[default]
+    None
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct LyricsList {
+    pub display_artist: Option<String>,
+    pub display_title: Option<String>,
+    pub lang: String,
+    pub offset: Option<i64>,
+    pub synced: bool,
+    #[serde(skip)]
+    pub lines: LyricsLines
 }
 
 #[derive(Serialize, Deserialize, Debug)]
