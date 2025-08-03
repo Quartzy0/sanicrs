@@ -76,7 +76,8 @@ fn main() {
             "add-regular",
             "menu",
             "network-server",
-            "music-note-single"
+            "music-note-single",
+            "subtitles2"
         ],
     );
     compile_schemas(

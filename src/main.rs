@@ -31,7 +31,7 @@ use zbus::connection;
 use zbus::object_server::InterfaceRef;
 use zbus::blocking;
 use zvariant::ObjectPath;
-use crate::opensonic::cache::{AlbumCache, CoverCache, SongCache};
+use crate::opensonic::cache::{AlbumCache, CoverCache, LyricsCache, SongCache};
 
 mod dbus;
 mod opensonic;
@@ -189,6 +189,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         let song_cache = SongCache::new(client.clone());
         let album_cache = AlbumCache::new(client.clone(), song_cache.clone());
         let cover_cache = CoverCache::new(client.clone());
+        let lyrics_cache = LyricsCache::new(client.clone());
 
         let player = Shared::new(PlayerInfo::new(
             client.clone(),
@@ -206,7 +207,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             song_cache.clone(),
             album_cache.clone(),
             settings.clone(),
-            secret_schema
+            secret_schema,
+            lyrics_cache
         );
 
         glib::spawn_future_local(clone!(

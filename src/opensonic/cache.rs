@@ -1,5 +1,5 @@
 use crate::opensonic::client::OpenSubsonicClient;
-use crate::opensonic::types::{AlbumListType, Song};
+use crate::opensonic::types::{AlbumListType, LyricsList, Song};
 use crate::ui::album_object::AlbumObject;
 use std::collections::HashMap;
 use std::error::Error;
@@ -173,5 +173,33 @@ impl CoverCache {
         let mut cache_w = self.cache.write().await;
         cache_w.insert(id.to_string(), texture.clone());
         Ok(texture)
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct LyricsCache {
+    cache: Arc<RwLock<HashMap<String, Arc<Vec<LyricsList>>>>>,
+    client: Arc<OpenSubsonicClient>,
+}
+
+impl LyricsCache {
+    pub fn new(client: Arc<OpenSubsonicClient>) -> Self {
+        Self {
+            client,
+            cache: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    pub async fn get_lyrics(&self, id: &str) -> Result<Arc<Vec<LyricsList>>, Box<dyn Error>> {
+        {
+            let cache_r = self.cache.read().await;
+            if let Some(lyrics) = cache_r.get(id) {
+                return Ok(lyrics.clone());
+            }
+        }
+        let lyrics = Arc::new(self.client.get_lyrics(id).await?);
+        let mut cache_w = self.cache.write().await;
+        cache_w.insert(id.to_string(), lyrics.clone());
+        Ok(lyrics)
     }
 }

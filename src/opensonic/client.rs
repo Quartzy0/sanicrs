@@ -603,8 +603,12 @@ impl OpenSubsonicClient {
             };
             lines.and_then(|l| {
                 serde_json::from_value::<LyricsList>(v.take())
-                    .and_then(|info: LyricsList| {
-                        let mut info = info;
+                    .and_then(|mut info: LyricsList| {
+                        info.synced = match &l {
+                            LyricsLines::Synced(_) => true,
+                            LyricsLines::NotSynced(_) => false,
+                            LyricsLines::None => false,
+                        };
                         info.lines = l;
                         Ok(info)
                     })

@@ -62,13 +62,34 @@
     padding: 10px;
 }
 
+.lyric-line {
+    font-size: larger;
+    margin: 10px;
+}
+
+.spaced {
+    margin: 10px;
+}
 
 /* This class taken from Amberol (looks very nice) */
 /* https://gitlab.gnome.org/World/amberol/-/blob/main/src/gtk/style.css#L118-123 */
 .current-song {
-    background: linear-gradient(127deg, color-mix(in srgb, var(--background-color-0) 55%, transparent), color-mix(in srgb, var(--background-color-0) 0%, transparent) 70.71%),
-                linear-gradient(217deg, color-mix(in srgb, var(--background-color-1) 55%, transparent), color-mix(in srgb, var(--background-color-1) 0%, transparent) 70.71%),
-                linear-gradient(336deg, color-mix(in srgb, var(--background-color-2) 55%, transparent), color-mix(in srgb, var(--background-color-2) 0%, transparent) 70.71%);
+    background:
+        linear-gradient(
+            127deg,
+            color-mix(in srgb, var(--background-color-0) 55%, transparent),
+            color-mix(in srgb, var(--background-color-0) 0%, transparent) 70.71%
+        ),
+        linear-gradient(
+            217deg,
+            color-mix(in srgb, var(--background-color-1) 55%, transparent),
+            color-mix(in srgb, var(--background-color-1) 0%, transparent) 70.71%
+        ),
+        linear-gradient(
+            336deg,
+            color-mix(in srgb, var(--background-color-2) 55%, transparent),
+            color-mix(in srgb, var(--background-color-2) 0%, transparent) 70.71%
+        );
     transition-property: background;
     transition-duration: 250ms;
     transition-timing-function: ease;
@@ -76,10 +97,23 @@
 
 /* https://gitlab.gnome.org/World/amberol/-/blob/main/src/gtk/style.css#L127-133 */
 .track-list {
-    background: linear-gradient(127deg, color-mix(in srgb, var(--background-color-0) 55%, transparent), color-mix(in srgb, var(--background-color-0) 0%, transparent) 70.71%),
-                linear-gradient(217deg, color-mix(in srgb, var(--background-color-1) 55%, transparent), color-mix(in srgb, var(--background-color-1) 0%, transparent) 70.71%),
-                linear-gradient(336deg, color-mix(in srgb, var(--background-color-2) 55%, transparent), color-mix(in srgb, var(--background-color-2) 0%, transparent) 70.71%),
-                var(--window-bg-color);
+    background:
+        linear-gradient(
+            127deg,
+            color-mix(in srgb, var(--background-color-0) 55%, transparent),
+            color-mix(in srgb, var(--background-color-0) 0%, transparent) 70.71%
+        ),
+        linear-gradient(
+            217deg,
+            color-mix(in srgb, var(--background-color-1) 55%, transparent),
+            color-mix(in srgb, var(--background-color-1) 0%, transparent) 70.71%
+        ),
+        linear-gradient(
+            336deg,
+            color-mix(in srgb, var(--background-color-2) 55%, transparent),
+            color-mix(in srgb, var(--background-color-2) 0%, transparent) 70.71%
+        ),
+        var(--window-bg-color);
     transition-property: background;
     transition-duration: 250ms;
     transition-timing-function: ease;

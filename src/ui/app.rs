@@ -26,7 +26,7 @@ use tokio::sync::RwLock;
 use crate::ui::browse::BrowseWidget;
 use relm4::adw::glib as glib;
 use relm4::gtk::Widget;
-use crate::opensonic::cache::{AlbumCache, CoverCache, SongCache};
+use crate::opensonic::cache::{AlbumCache, CoverCache, LyricsCache, SongCache};
 
 pub struct Model {
     current_song: AsyncController<CurrentSong>,
@@ -60,6 +60,7 @@ pub type Init = (
     AlbumCache,
     Settings,
     Schema,
+    LyricsCache
 );
 
 relm4::new_action_group!(WindowActionGroup, "win");

@@ -1,20 +1,25 @@
-use crate::opensonic::types::Song;
+use crate::opensonic::cache::LyricsCache;
+use crate::opensonic::types::{Song};
 use crate::player::{LoopStatus, PlaybackStatus, PlayerInfo, SongEntry};
 use crate::ui::app::Init;
 use crate::ui::cover_picture::{CoverPicture, CoverSize};
+use crate::ui::lyrics_line::{self, LyricsLine};
 use crate::ui::random_songs_dialog::RandomSongsDialog;
-use crate::{PlayerCommand, icon_names};
+use crate::ui::song_object::PositionState;
+use crate::{icon_names, send_error, PlayerCommand};
 use async_channel::Sender;
 use color_thief::Color;
 use readlock_tokio::SharedReadLock;
-use relm4::adw::glib;
 use relm4::adw::glib::closure_local;
 use relm4::adw::gtk::glib::Propagation;
 use relm4::adw::gtk::prelude::OrientableExt;
 use relm4::adw::gtk::{Align, Orientation};
 use relm4::adw::prelude::*;
 use relm4::component::{AsyncComponent, AsyncComponentParts, AsyncComponentSender};
-use relm4::gtk::glib::clone;
+use relm4::gtk::glib::{clone, closure, Object};
+use relm4::gtk::{Justification, ListItem, ListScrollFlags, SignalListItemFactory, Widget};
+use relm4::adw::gio::ListStore;
+use relm4::adw::glib as glib;
 use relm4::prelude::*;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -24,6 +29,11 @@ use uuid::Uuid;
 pub struct CurrentSong {
     player_ref: SharedReadLock<PlayerInfo>,
     cmd_sender: Arc<Sender<PlayerCommand>>,
+    lyrics_cache: LyricsCache,
+    lyrics_factory: SignalListItemFactory,
+    synced_lyrics: bool,
+    show_lyrics: bool,
+    has_lyrics: bool,
 
     // UI data
     song_info: Option<Arc<Song>>,
@@ -52,6 +62,7 @@ pub enum CurrentSongMsg {
     SetLoopStatus(LoopStatus),
     ToggleShuffleUI,
     SetShuffle(bool),
+    ToggleLyrics,
 }
 
 #[derive(Debug)]
@@ -80,11 +91,53 @@ impl AsyncComponent for CurrentSong {
                 add_css_class: "t2",
 
                 append = if model.song_info.is_some() {
-                    #[name = "cover_image"]
-                    &CoverPicture {
-                        set_cover_size: CoverSize::Huge,
-                        set_cache: init.2,
+                    &gtk::Overlay {
+                        add_overlay = &gtk::Button {
+                            set_icon_name: icon_names::SUBTITLES2,
+                            connect_clicked => CurrentSongMsg::ToggleLyrics,
+                            set_halign: Align::End,
+                            set_valign: Align::Start,
+                            add_css_class: "spaced",
+                            #[watch]
+                            set_visible: model.has_lyrics,
+                        },
+
+                        #[wrap(Some)]
+                        set_child = if !model.show_lyrics {
+                            #[name = "cover_image"]
+                            &CoverPicture {
+                                set_cover_size: CoverSize::Huge,
+                                set_cache: init.2,
+                            }
+                        } else {
+                            &gtk::Box {
+                                set_orientation: Orientation::Vertical,
+                                set_valign: Align::Fill,
+                                set_vexpand: true,
+                                set_vexpand_set: true,
+
+                                gtk::ScrolledWindow {
+                                    set_vscrollbar_policy: gtk::PolicyType::Automatic,
+                                    set_hscrollbar_policy: gtk::PolicyType::Never,
+                                    set_valign: Align::Fill,
+                                    set_vexpand: true,
+                                    set_vexpand_set: true,
+                                    set_halign: Align::Fill,
+                                    set_hexpand: true,
+                                    set_hexpand_set: true,
+
+                                    #[name = "lyrics_list"]
+                                    gtk::ListView {
+                                        set_orientation: Orientation::Vertical,
+                                        set_factory: Some(&model.lyrics_factory),
+                                        add_css_class: "upcoming",
+                                        add_css_class: "track-list-item"
+                                    }
+                                }
+                            }
+                        }
                     }
+
                 } else {
                     &adw::Bin {}
                 },
@@ -283,6 +336,11 @@ impl AsyncComponent for CurrentSong {
             playback_rate: 1.0,
             cmd_sender: init.3,
             previous_progress_check: SystemTime::now(),
+            lyrics_cache: init.8,
+            lyrics_factory: SignalListItemFactory::new(),
+            synced_lyrics: false,
+            show_lyrics: false,
+            has_lyrics: false,
         };
         let widgets: Self::Widgets = view_output!();
 
@@ -333,6 +391,36 @@ impl AsyncComponent for CurrentSong {
             }
         ));
 
+        model.lyrics_factory.connect_setup(clone!(
+            move |_, list_item| {
+                let label = gtk::Label::new(None);
+                label.set_wrap(true);
+                label.set_justify(Justification::Center);
+
+                let list_item = list_item
+                    .downcast_ref::<ListItem>()
+                    .expect("Needs to be ListItem");
+                list_item.set_child(Some(&label));
+
+                list_item
+                    .property_expression("item")
+                    .chain_property::<LyricsLine>("value")
+                    .bind(&label, "label", Widget::NONE);
+                list_item
+                    .property_expression("item")
+                    .chain_property::<LyricsLine>("position-state")
+                    .chain_closure::<Vec<String>>(closure!(
+                        move |_: Option<Object>, position_state: PositionState| {
+                            match position_state {
+                                PositionState::Passed => vec!["lyric-line".to_string()],
+                                PositionState::Current => vec!["bold".to_string(), "lyric-line".to_string()],
+                                PositionState::Upcoming => vec!["lyric-line".to_string()]
+                            }
+                    }))
+                    .bind(&label, "css-classes", Widget::NONE);
+            }
+        ));
+
         AsyncComponentParts { model, widgets }
     }
 
@@ -372,10 +460,28 @@ impl AsyncComponent for CurrentSong {
                 widgets.cover_image.set_cover_id(
                     info.as_ref().and_then(|t| t.1.cover_art.clone())
                 );
+                self.has_lyrics = false;
                 self.song_info = match info {
                     None => None,
-                    Some(i) => Some(i.1),
+                    Some(i) => {
+                        let lyrics = self.lyrics_cache.get_lyrics(&i.1.id).await;
+                        match lyrics {
+                            Ok(l) => {
+                                if let Some(list) = l.get(0){
+                                    let lines = lyrics_line::from_list(list);
+                                    let lyrics_store = ListStore::from_iter(lines);
+                                    widgets.lyrics_list.set_model(Some(&gtk::NoSelection::new(Some(lyrics_store))));
+                                    self.synced_lyrics = l[0].synced;
+                                    self.has_lyrics = true;
+                                }
+                            },
+                            Err(e) => send_error(&self.cmd_sender, e).await,
+                        }
+                        Some(i.1)
+                    },
                 };
+
+
                 self.previous_progress_check = SystemTime::now();
                 sender.input(CurrentSongMsg::PlaybackStateChange(
                     self.player_ref.lock().await.playback_status(),
@@ -395,6 +501,7 @@ impl AsyncComponent for CurrentSong {
                         .expect("Error calculating progress tiem")
                         .as_secs_f64()
                         * self.playback_rate;
+                    self.update_lyrics(&widgets.lyrics_list);
                 }
                 self.previous_progress_check = SystemTime::now();
             }
@@ -410,6 +517,7 @@ impl AsyncComponent for CurrentSong {
             CurrentSongMsg::ProgressUpdateSync(pos) => {
                 if let Some(pos) = pos {
                     self.playback_position = pos;
+                    self.update_lyrics(&widgets.lyrics_list);
                 } else {
                     self.playback_position = Duration::from_micros(PlayerInfo::position(
                         self.player_ref.lock().await.deref(),
@@ -450,8 +558,54 @@ impl AsyncComponent for CurrentSong {
             }
             CurrentSongMsg::SetShuffle(shuffle) => {
                 widgets.shuffle_toggle.set_active(shuffle);
-            }
+            },
+            CurrentSongMsg::ToggleLyrics => {
+                self.show_lyrics = !self.show_lyrics;
+                self.update_lyrics(&widgets.lyrics_list);
+            },
         }
         self.update_view(widgets, sender);
+    }
+}
+
+impl CurrentSong {
+    fn update_lyrics(
+        &mut self,
+        list_view: &gtk::ListView
+    ) {
+        if let Some(model) = list_view.model() && self.synced_lyrics && self.show_lyrics {
+            let selection = model.downcast::<gtk::NoSelection>()
+                .expect("Song list model should be NoSelection");
+            let store = selection.model().unwrap().downcast::<ListStore>().expect("Should be ListStore");
+            let pos = Duration::from_secs_f64(self.playback_position);
+            let mut prev_item = store.item(0)
+                .expect("Expected item at 0")
+                .downcast::<LyricsLine>()
+                .expect("Expected LyricsLine");
+            for (i, item) in store.iter::<LyricsLine>().enumerate().skip(1) {
+                if let Ok(item) = item {
+                    let start = Duration::from_millis(item.start() as u64);
+                    let prev_start = Duration::from_millis(prev_item.start() as u64);
+                    let state = if pos > prev_start {
+                            if pos > start {
+                                PositionState::Passed
+                            } else {
+                                PositionState::Current
+                            }
+                        } else if pos < prev_start {
+                            PositionState::Upcoming
+                        } else {
+                            PositionState::Current
+                        };
+                    prev_item.set_position_state(state);
+                    if state == PositionState::Current {
+                        let scroll_info = gtk::ScrollInfo::new();
+                        scroll_info.set_enable_vertical(true);
+                        list_view.scroll_to(i as u32, ListScrollFlags::FOCUS, Some(scroll_info));
+                    }
+                    prev_item = item;
+                }
+            }
+        }
     }
 }

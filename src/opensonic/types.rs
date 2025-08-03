@@ -1,4 +1,3 @@
-use serde::de::Visitor;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_with::DurationSeconds;
@@ -57,7 +56,7 @@ impl TryFrom<&String> for SupportedExtensions {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Default, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct LyricsLine {
     pub start: u32,
