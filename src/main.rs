@@ -1,12 +1,12 @@
 use crate::dbus::base::MprisBase;
 use crate::dbus::player::{MprisPlayer, MprisPlayerSignals};
-use crate::dbus::track_list::{MprisTrackList, MprisTrackListSignals};
+use crate::dbus::track_list::{track_list_replaced, MprisTrackList, MprisTrackListSignals};
 use crate::opensonic::client::{self, OpenSubsonicClient};
 use crate::player::{LoopStatus, PlayerInfo, TrackList};
 use crate::ui::app::{AppMsg, Init, Model};
 use crate::ui::current_song::{CurrentSong, CurrentSongMsg};
 use crate::ui::setup::{SetupMsg, SetupOut, SetupWidget};
-use crate::ui::track_list::{TrackListMsg, TrackListWidget};
+use crate::ui::track_list::{MoveDirection, TrackListMsg, TrackListWidget};
 use libsecret::{password_lookup_sync, Schema, SchemaFlags};
 use readlock_tokio::{Shared};
 use relm4::gtk::gio::prelude::{ApplicationExt, SettingsExt};
@@ -70,7 +70,8 @@ pub enum PlayerCommand {
     QueueRandom{size: u32, genre: Option<String>, from_year: Option<u32>, to_year: Option<u32>},
     Restart,
     ReloadPlayerSettings,
-    ReportError(String, String)
+    ReportError(String, String),
+    MoveItem{index: usize, direction: MoveDirection}
 }
 
 pub async fn send_error(sender: &Sender<PlayerCommand>, error: Box<dyn Error>) {
@@ -527,6 +528,8 @@ async fn process_command(
                     .metadata_changed(player_ref.signal_emitter()).await?;
                 send_tl_msg(tl_sender, TrackListMsg::ReloadList);
                 player_ref.get().await.playback_status_changed(player_ref.signal_emitter()).await?;
+                let guard = track_list.read().await;
+                track_list_replaced(track_list_ref, guard.get_songs(), guard.current_index()).await?;
             }
         },
         PlayerCommand::QueueAlbum(id) => {
@@ -545,6 +548,8 @@ async fn process_command(
                         .metadata_changed(player_ref.signal_emitter()).await?;
                     player_ref.get().await.playback_status_changed(player_ref.signal_emitter()).await?;
                 }
+                let guard = track_list.read().await;
+                track_list_replaced(track_list_ref, guard.get_songs(), guard.current_index()).await?;
                 send_tl_msg(tl_sender, TrackListMsg::ReloadList);
             }
         }
@@ -564,12 +569,31 @@ async fn process_command(
                     .metadata_changed(player_ref.signal_emitter()).await?;
                 player_ref.get().await.playback_status_changed(player_ref.signal_emitter()).await?;
             }
+            let guard = track_list.read().await;
+            track_list_replaced(track_list_ref, guard.get_songs(), guard.current_index()).await?;
             send_tl_msg(tl_sender, TrackListMsg::ReloadList);
         },
         PlayerCommand::ReloadPlayerSettings => {
             player.load_settings(&settings).await?;
         },
         PlayerCommand::ReportError(summary, description) => send_app_msg(app_sender, AppMsg::ShowError(summary, description)),
+        PlayerCommand::MoveItem { index, direction } => {
+            let mut guard = track_list.write().await;
+            let new_i = guard.move_song(index, direction);
+            if let Some(new_i) = new_i {
+                let moved = guard.song_at_index(new_i).ok_or("No song found at moved index")?;
+                track_list_ref.track_removed(moved.dbus_obj()).await?;
+                track_list_ref.track_added(
+                    dbus::player::get_song_metadata(Some(moved), client.clone()).await,
+                    if index != 0 && let Some(prev) = guard.song_at_index(index-1) {
+                        prev.dbus_obj()
+                    } else {
+                        ObjectPath::from_static_str_unchecked("/org/mpris/MediaPlayer2/TrackList/NoTrack")
+                    }
+                ).await?;
+                send_tl_msg(tl_sender, TrackListMsg::TrackChanged(None));
+            }
+        }
     };
 
     Ok(Status::Ok)

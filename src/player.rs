@@ -20,6 +20,7 @@ use zvariant::ObjectPath;
 use crate::opensonic::cache::SongCache;
 use crate::opensonic::client::OpenSubsonicClient;
 use crate::opensonic::types::{InvalidResponseError, Song};
+use crate::ui::track_list::MoveDirection;
 use crate::PlayerCommand;
 
 pub const MAX_PLAYBACK_RATE: f64 = 10.0;
@@ -492,12 +493,16 @@ impl TrackList {
         }
     }
 
-    pub fn current(&self) -> Option<&SongEntry> {
+    pub fn song_at_index(&self, i: usize) -> Option<&SongEntry> {
         if self.shuffled {
-            self.songs.get(self.shuffled_order[self.current])
+            self.songs.get(self.shuffled_order[i])
         } else {
-            self.songs.get(self.current)
+            self.songs.get(i)
         }
+    }
+
+    pub fn current(&self) -> Option<&SongEntry> {
+        self.song_at_index(self.current)
     }
 
     pub fn current_index(&self) -> Option<usize> {
@@ -541,5 +546,36 @@ impl TrackList {
 
     pub fn get_songs(&self) -> &Vec<SongEntry> {
         &self.songs
+    }
+
+    // Returns the index of the current song after the move. This may be the same as before
+    // or it may be different due to the move. If None is returned, no move was performed.
+    pub fn move_song(&mut self, index: usize, direction: MoveDirection) -> Option<usize> {
+        let new_i = match direction {
+            MoveDirection::Up => if index == 0 {
+                return None;
+            } else {
+                index - 1
+            },
+            MoveDirection::Down => if index == self.songs.len()-1 {
+                return None;
+            } else {
+                index + 1
+            },
+        };
+        self.songs.swap(index, new_i);
+        // When shuffled also swap the two indexes in the shuffled_order vec. This should leave the shuffled order unaffected
+        if self.shuffled {
+            let oldi = self.shuffled_order.iter().find(|i| **i==index).expect("Couldn't find old index in shuffle map").clone();
+            let newi = self.shuffled_order.iter().find(|i| **i==new_i).expect("Couldn't find new index in shuffle map").clone();
+            self.shuffled_order.swap(oldi, newi);
+        } else {
+            if index == self.current {
+                self.current = new_i;
+            } else if new_i == self.current {
+                self.current = index;
+            }
+        }
+        self.current_index()
     }
 }

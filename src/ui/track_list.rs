@@ -12,7 +12,7 @@ use std::sync::Arc;
 use async_channel::Sender;
 use relm4::gtk::pango::EllipsizeMode;
 use tokio::sync::RwLock;
-use crate::PlayerCommand;
+use crate::{icon_names, PlayerCommand};
 
 pub struct TrackListWidget {
     track_list: Arc<RwLock<TrackList>>,
@@ -22,10 +22,17 @@ pub struct TrackListWidget {
 }
 
 #[derive(Debug)]
+pub enum MoveDirection{
+    Up,
+    Down
+}
+
+#[derive(Debug)]
 pub enum TrackListMsg {
     TrackActivated(usize),
     TrackChanged(Option<usize>),
     ReloadList,
+    MoveItem{index: u32, direction: MoveDirection}
 }
 
 #[relm4::component(pub async)]
@@ -92,7 +99,17 @@ impl AsyncComponent for TrackListWidget {
         model.factory.connect_setup(clone!(
             #[strong(rename_to = cover_cache)]
             init.2,
+            #[weak(rename_to = list)]
+            widgets.list,
+            #[strong]
+            sender,
             move |_, list_item| {
+            let center_box = gtk::CenterBox::builder()
+                .orientation(Orientation::Horizontal)
+                .hexpand(true)
+                .hexpand_set(true)
+                .halign(Align::Fill)
+                .build();
             let hbox = gtk::Box::builder()
                 .orientation(Orientation::Horizontal)
                 .valign(Align::Start)
@@ -124,11 +141,45 @@ impl AsyncComponent for TrackListWidget {
             hbox.append(&picture);
             hbox.append(&vbox);
 
+            let btn_vbox = gtk::Box::builder()
+                .orientation(Orientation::Vertical)
+                .valign(Align::Start)
+                .halign(Align::End)
+                .build();
+            let up_btn = gtk::Button::from_icon_name(icon_names::UP_SMALL);
+            up_btn.add_css_class("no-bg");
+            let down_btn = gtk::Button::from_icon_name(icon_names::DOWN_SMALL);
+            down_btn.add_css_class("no-bg");
+            btn_vbox.append(&up_btn);
+            btn_vbox.append(&down_btn);
+
+            center_box.set_start_widget(Some(&hbox));
+            center_box.set_end_widget(Some(&btn_vbox));
+
             let list_item = list_item
                 .downcast_ref::<ListItem>()
                 .expect("Needs to be ListItem");
             list_item
-                .set_child(Some(&hbox));
+                .set_child(Some(&center_box));
+
+            up_btn.connect_clicked(clone!(
+                #[strong]
+                sender,
+                #[weak]
+                list_item,
+                move |_| {
+                    sender.input(TrackListMsg::MoveItem { index: list_item.position(), direction: MoveDirection::Up });
+                }
+            ));
+            down_btn.connect_clicked(clone!(
+                #[strong]
+                sender,
+                #[weak]
+                list_item,
+                move |_| {
+                    sender.input(TrackListMsg::MoveItem { index: list_item.position(), direction: MoveDirection::Down });
+                }
+            ));
 
             list_item
                 .property_expression("item")
@@ -153,7 +204,40 @@ impl AsyncComponent for TrackListWidget {
                             PositionState::Upcoming => vec!["track-list-item".to_string(), "upcoming".to_string()]
                         }
                 }))
-                .bind(&hbox, "css-classes", Widget::NONE);
+                .bind(&center_box, "css-classes", Widget::NONE);
+            list_item
+                .property_expression("position")
+                .chain_closure::<bool>(closure!(
+                    move |_: Option<Object>, pos: u32| {
+                        pos != 0
+                    }
+                ))
+                .bind(&up_btn, "visible", Widget::NONE);
+            list_item
+                .property_expression("position")
+                .chain_closure::<Align>(closure!(
+                    move |_: Option<Object>, pos: u32| {
+                        if pos == 0 {
+                            Align::End
+                        } else {
+                            Align::Start
+                        }
+                    }
+                ))
+                .bind(&btn_vbox, "valign", Widget::NONE);
+            list_item
+                .property_expression("position")
+                .chain_closure::<bool>(closure!(
+                    move |list_view: Option<gtk::ListView>, pos: u32| {
+                        if let Some(list_view) = list_view {
+                            if let Some(model) = list_view.model() {
+                                return pos != model.n_items()-1
+                            }
+                        }
+                        false
+                    }
+                ))
+                .bind(&down_btn, "visible", Some(&list));
         }));
 
         sender.input(TrackListMsg::ReloadList);
@@ -175,7 +259,7 @@ impl AsyncComponent for TrackListWidget {
                     Some(p) => p,
                     None => self.track_list.read().await.current_index().unwrap_or(0),
                 };
-                
+
                 let model = widgets.list.model();
                 if let Some(model) = model {
                     model.iter::<Object>().enumerate().for_each(|x| {
@@ -210,6 +294,22 @@ impl AsyncComponent for TrackListWidget {
                 }));
 
                 widgets.list.set_model(Some(&gtk::NoSelection::new(Some(list_store))));
+            },
+            TrackListMsg::MoveItem { index, direction } => {
+                if let Some(model) = widgets.list.model() {
+                    let model = model.downcast::<gtk::NoSelection>().expect("Model should be NoSelection");
+                    if let Some(model) = model.model() {
+                        let model = model.downcast::<ListStore>().expect("Model should be ListStore");
+                        if let Some(item) = model.item(index as u32) {
+                            model.remove(index as u32);
+                            model.insert((index as i32 + match direction {
+                                MoveDirection::Up => -1 as i32,
+                                MoveDirection::Down => 1 as i32,
+                            }) as u32, &item);
+                            self.cmd_sender.send(PlayerCommand::MoveItem { index: index as usize, direction }).await.expect("Error sending message to main");
+                        }
+                    }
+                }
             }
         };
         self.update_view(widgets, sender);

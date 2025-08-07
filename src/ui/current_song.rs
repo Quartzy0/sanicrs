@@ -473,9 +473,14 @@ impl AsyncComponent for CurrentSong {
                                     widgets.lyrics_list.set_model(Some(&gtk::NoSelection::new(Some(lyrics_store))));
                                     self.synced_lyrics = l[0].synced;
                                     self.has_lyrics = true;
+                                } else {
+                                    self.show_lyrics = false;
                                 }
                             },
-                            Err(e) => send_error(&self.cmd_sender, e).await,
+                            Err(e) => {
+                                self.show_lyrics = false;
+                                send_error(&self.cmd_sender, e).await;
+                            },
                         }
                         Some(i.1)
                     },
@@ -601,7 +606,7 @@ impl CurrentSong {
                     if state == PositionState::Current {
                         let scroll_info = gtk::ScrollInfo::new();
                         scroll_info.set_enable_vertical(true);
-                        list_view.scroll_to(i as u32, ListScrollFlags::FOCUS, Some(scroll_info));
+                        list_view.scroll_to(i as u32, ListScrollFlags::NONE, Some(scroll_info));
                     }
                     prev_item = item;
                 }

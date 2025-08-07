@@ -7,13 +7,24 @@ use std::sync::Arc;
 use async_channel::Sender;
 use tokio::sync::RwLock;
 use zbus::interface;
-use zbus::object_server::SignalEmitter;
+use zbus::object_server::{InterfaceRef, SignalEmitter};
 use zvariant::{ObjectPath, Value};
 
 pub struct MprisTrackList {
     pub track_list: Arc<RwLock<TrackList>>,
     pub client: Arc<OpenSubsonicClient>,
     pub cmd_channel: Arc<Sender<PlayerCommand>>,
+}
+
+pub async fn track_list_replaced(track_list_ref: &InterfaceRef<MprisTrackList>, songs: &Vec<SongEntry>, current_i: Option<usize>) -> Result<(), zbus::Error> {
+    track_list_ref.track_list_replaced(
+        songs.iter().map(|s| s.dbus_obj()).collect(),
+        if let Some(i) = current_i && let Some(current) = songs.get(i) {
+            current.dbus_obj()
+        } else {
+            ObjectPath::from_static_str_unchecked("/org/mpris/MediaPlayer2/TrackList/NoTrack")
+        }
+    ).await
 }
 
 #[interface(name = "org.mpris.MediaPlayer2.TrackList")]
