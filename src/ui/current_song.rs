@@ -1,42 +1,42 @@
+use crate::dbus::player::MprisPlayer;
 use crate::opensonic::cache::LyricsCache;
-use crate::opensonic::types::{Song};
-use crate::player::{LoopStatus, PlaybackStatus, PlayerInfo, SongEntry};
+use crate::opensonic::types::Song;
+use crate::player::SongEntry;
 use crate::ui::app::Init;
 use crate::ui::cover_picture::{CoverPicture, CoverSize};
 use crate::ui::lyrics_line::{self, LyricsLine};
 use crate::ui::random_songs_dialog::RandomSongsDialog;
 use crate::ui::song_object::PositionState;
-use crate::{icon_names, send_error, PlayerCommand};
-use async_channel::Sender;
+use crate::icon_names;
 use color_thief::Color;
-use readlock_tokio::SharedReadLock;
+use mpris_server::{LocalPlayerInterface, Time};
+use mpris_server::{LocalServer, LoopStatus, PlaybackStatus};
+use relm4::adw::gio::ListStore;
+use relm4::adw::glib as glib;
 use relm4::adw::glib::closure_local;
 use relm4::adw::gtk::glib::Propagation;
 use relm4::adw::gtk::prelude::OrientableExt;
 use relm4::adw::gtk::{Align, Orientation};
 use relm4::adw::prelude::*;
-use relm4::component::{AsyncComponent, AsyncComponentParts, AsyncComponentSender};
+use relm4::component::{AsyncComponent, AsyncComponentParts, AsyncComponentSender, AsyncConnector};
 use relm4::gtk::glib::{clone, closure, Object};
 use relm4::gtk::{Justification, ListItem, ListScrollFlags, SignalListItemFactory, Widget};
-use relm4::adw::gio::ListStore;
-use relm4::adw::glib as glib;
 use relm4::prelude::*;
-use std::ops::Deref;
-use std::sync::Arc;
+use std::rc::Rc;
 use std::time::{Duration, SystemTime};
 use uuid::Uuid;
 
 pub struct CurrentSong {
-    player_ref: SharedReadLock<PlayerInfo>,
-    cmd_sender: Arc<Sender<PlayerCommand>>,
+    mpris_player: Rc<LocalServer<MprisPlayer>>,
     lyrics_cache: LyricsCache,
     lyrics_factory: SignalListItemFactory,
     synced_lyrics: bool,
     show_lyrics: bool,
     has_lyrics: bool,
+    random_songs_dialog: Option<AsyncConnector<RandomSongsDialog>>,
 
     // UI data
-    song_info: Option<Arc<Song>>,
+    song_info: Option<Rc<Song>>,
     playback_state_icon: &'static str,
     loop_status_icon: &'static str,
     playback_position: f64,
@@ -63,6 +63,7 @@ pub enum CurrentSongMsg {
     ToggleShuffleUI,
     SetShuffle(bool),
     ToggleLyrics,
+    ShowRandomSongsDialog,
 }
 
 #[derive(Debug)]
@@ -107,7 +108,7 @@ impl AsyncComponent for CurrentSong {
                             #[name = "cover_image"]
                             &CoverPicture {
                                 set_cover_size: CoverSize::Huge,
-                                set_cache: init.2,
+                                set_cache: init.1,
                             }
                         } else {
                             &gtk::Box {
@@ -247,10 +248,10 @@ impl AsyncComponent for CurrentSong {
                                     .expect("Error when sending message out of CurrentSong component");
                             },
                         },
-                        #[name = "random_btn"]
                         gtk::Button {
                             set_icon_name: icon_names::ADD_REGULAR,
                             set_tooltip_text: Some("Add random songs"),
+                            connect_clicked => CurrentSongMsg::ShowRandomSongsDialog,
                         }
                     },
 
@@ -318,7 +319,7 @@ impl AsyncComponent for CurrentSong {
         sender: AsyncComponentSender<Self>,
     ) -> AsyncComponentParts<Self> {
         {
-            let track_list = init.1.read().await;
+            let track_list = init.0.read().await;
             match track_list.current() {
                 None => Default::default(),
                 Some(song) => sender.input(CurrentSongMsg::SongUpdate(Some(SongEntry(
@@ -328,46 +329,67 @@ impl AsyncComponent for CurrentSong {
             };
         }
         let model = CurrentSong {
-            player_ref: init.0,
+            mpris_player: init.7,
             playback_state_icon: icon_names::PLAY,
             loop_status_icon: icon_names::PLAYLIST_CONSECUTIVE,
             song_info: Default::default(),
             playback_position: 0.0,
             playback_rate: 1.0,
-            cmd_sender: init.3,
             previous_progress_check: SystemTime::now(),
-            lyrics_cache: init.8,
+            lyrics_cache: init.6,
             lyrics_factory: SignalListItemFactory::new(),
             synced_lyrics: false,
             show_lyrics: false,
             has_lyrics: false,
+            random_songs_dialog: None,
         };
         let widgets: Self::Widgets = view_output!();
+        model.mpris_player.imp().cs_sender.replace(Some(sender.clone()));
 
-        model
-            .cmd_sender
-            .send(PlayerCommand::CurrentSongSendSender(sender.clone()))
-            .await
-            .expect("Error sending sender to player");
-
-        let s1 = sender.clone();
-        sender.command(|_out, shutdown| {
-            shutdown
-                .register(async move {
-                    let mut n = 0;
-                    loop {
-                        tokio::time::sleep(Duration::from_millis(500)).await;
-                        s1.input(CurrentSongMsg::ProgressUpdate);
-                        if n >= 20 {
-                            s1.input(CurrentSongMsg::ProgressUpdateSync(None));
-                            n = 0;
-                        }
-                        n += 1;
+        glib::timeout_add_local(Duration::from_millis(500), clone!(
+            #[strong]
+            sender,
+            move || {
+                match sender.input_sender().send(CurrentSongMsg::ProgressUpdate) {
+                    Ok(_) => glib::ControlFlow::Continue,
+                    Err(_) => {
+                        println!("Dropped timout");
+                        glib::ControlFlow::Break
                     }
-                })
-                .drop_on_shutdown()
-        });
-        let v = model.player_ref.lock().await.volume().await;
+                }
+            }
+        ));
+        glib::timeout_add_seconds_local(10, clone!(
+            #[strong]
+            sender,
+            move || {
+                match sender.input_sender().send(CurrentSongMsg::ProgressUpdateSync(None)) {
+                    Ok(_) => glib::ControlFlow::Continue,
+                    Err(_) => {
+                        println!("Dropped timout");
+                        glib::ControlFlow::Break
+                    }
+                }
+            }
+        ));
+        // let s1 = sender.clone();
+        // sender.command(|_out, shutdown| {
+        //     shutdown
+        //         .register(async move {
+        //             let mut n = 0;
+        //             loop {
+        //                 tokio::time::sleep(Duration::from_millis(500)).await;
+        //                 s1.input(CurrentSongMsg::ProgressUpdate);
+        //                 if n >= 20 {
+        //                     s1.input(CurrentSongMsg::ProgressUpdateSync(None));
+        //                     n = 0;
+        //                 }
+        //                 n += 1;
+        //             }
+        //         })
+        //         .drop_on_shutdown()
+        // });
+        let v = model.mpris_player.imp().volume().await.unwrap();
         sender.input(CurrentSongMsg::VolumeChangedExternal(v));
 
         let s2 = sender.clone();
@@ -381,15 +403,6 @@ impl AsyncComponent for CurrentSong {
                 .expect("Error when sending color scheme change event");
             }),
         );
-
-        widgets.random_btn.connect_clicked(clone!(
-            #[strong(rename_to = sndr)]
-            model.cmd_sender,
-            move |this| {
-                let dialog = RandomSongsDialog::builder().launch(sndr.clone());
-                dialog.widget().present(Some(this));
-            }
-        ));
 
         model.lyrics_factory.connect_setup(clone!(
             move |_, list_item| {
@@ -429,33 +442,20 @@ impl AsyncComponent for CurrentSong {
         widgets: &mut Self::Widgets,
         message: Self::Input,
         sender: AsyncComponentSender<Self>,
-        _root: &Self::Root,
+        root: &Self::Root,
     ) {
+        let player = self.mpris_player.imp();
         match message {
-            CurrentSongMsg::PlayPause => self
-                .cmd_sender
-                .send(PlayerCommand::PlayPause)
-                .await
-                .expect("Error sending message to player"),
-            CurrentSongMsg::Next => self
-                .cmd_sender
-                .send(PlayerCommand::Next)
-                .await
-                .expect("Error sending message to player"),
-            CurrentSongMsg::Previous => self
-                .cmd_sender
-                .send(PlayerCommand::Previous)
-                .await
-                .expect("Error sending message to player"),
+            CurrentSongMsg::PlayPause => player.play_pause().await.unwrap(),
+            CurrentSongMsg::Next => player.next().await.unwrap(),
+            CurrentSongMsg::Previous => player.previous().await.unwrap(),
             CurrentSongMsg::PlaybackStateChange(new_state) => match new_state {
                 PlaybackStatus::Paused => self.playback_state_icon = icon_names::PLAY,
                 PlaybackStatus::Playing => self.playback_state_icon = icon_names::PAUSE,
                 PlaybackStatus::Stopped => self.playback_state_icon = icon_names::STOP,
             },
             CurrentSongMsg::SongUpdate(info) => {
-                self.playback_position = Duration::from_micros(PlayerInfo::position(
-                    self.player_ref.lock().await.deref(),
-                ) as u64)
+                self.playback_position = Duration::from_micros(player.position().await.unwrap().as_micros() as u64)
                 .as_secs_f64();
                 widgets.cover_image.set_cover_id(
                     info.as_ref().and_then(|t| t.1.cover_art.clone())
@@ -479,7 +479,7 @@ impl AsyncComponent for CurrentSong {
                             },
                             Err(e) => {
                                 self.show_lyrics = false;
-                                send_error(&self.cmd_sender, e).await;
+                                player.send_error(e).await;
                             },
                         }
                         Some(i.1)
@@ -489,14 +489,10 @@ impl AsyncComponent for CurrentSong {
 
                 self.previous_progress_check = SystemTime::now();
                 sender.input(CurrentSongMsg::PlaybackStateChange(
-                    self.player_ref.lock().await.playback_status(),
+                    player.playback_status().await.unwrap(),
                 ));
             }
-            CurrentSongMsg::VolumeChanged(v) => self
-                .cmd_sender
-                .send(PlayerCommand::SetVolume(v))
-                .await
-                .expect("Error sending message to player"),
+            CurrentSongMsg::VolumeChanged(v) => player.set_volume(v).await.unwrap(),
             CurrentSongMsg::VolumeChangedExternal(v) => widgets.volume_btn.set_value(v),
             CurrentSongMsg::ProgressUpdate => {
                 if self.playback_state_icon == icon_names::PAUSE {
@@ -514,38 +510,25 @@ impl AsyncComponent for CurrentSong {
                 self.playback_rate = rate;
                 sender.input(CurrentSongMsg::ProgressUpdateSync(None));
             }
-            CurrentSongMsg::RateChangeUI(r) => self
-                .cmd_sender
-                .send(PlayerCommand::SetRate(r))
-                .await
-                .expect("Error sending message to player"),
+            CurrentSongMsg::RateChangeUI(r) => player.set_rate(r).await.unwrap(),
             CurrentSongMsg::ProgressUpdateSync(pos) => {
                 if let Some(pos) = pos {
                     self.playback_position = pos;
                     self.update_lyrics(&widgets.lyrics_list);
                 } else {
-                    self.playback_position = Duration::from_micros(PlayerInfo::position(
-                        self.player_ref.lock().await.deref(),
-                    ) as u64)
+                    self.playback_position = Duration::from_micros(player.position().await.unwrap().as_micros() as u64)
                     .as_secs_f64();
                 }
             }
-            CurrentSongMsg::Seek(pos) => self
-                .cmd_sender
-                .send(PlayerCommand::SetPosition(Duration::from_secs_f64(pos)))
-                .await
-                .expect("Error sending message to player"),
+            CurrentSongMsg::Seek(pos) => player.seek(Time::from_micros(Duration::from_secs_f64(pos).as_micros() as i64)).await.unwrap(),
             CurrentSongMsg::CycleLoopStatusUI => {
-                let loop_status = self.player_ref.lock().await.loop_status().await;
+                let loop_status = player.loop_status().await.unwrap();
                 let new_status = match loop_status {
                     LoopStatus::None => LoopStatus::Playlist,
                     LoopStatus::Playlist => LoopStatus::Track,
                     LoopStatus::Track => LoopStatus::None,
                 };
-                self.cmd_sender
-                    .send(PlayerCommand::SetLoopStatus(new_status))
-                    .await
-                    .expect("Error sending message to player");
+                player.set_loop_status(new_status).await.unwrap();
             }
             CurrentSongMsg::SetLoopStatus(loop_status) => {
                 self.loop_status_icon = match loop_status {
@@ -555,11 +538,8 @@ impl AsyncComponent for CurrentSong {
                 }
             }
             CurrentSongMsg::ToggleShuffleUI => {
-                let shuffle = !self.player_ref.lock().await.shuffled().await;
-                self.cmd_sender
-                    .send(PlayerCommand::SetShuffle(shuffle))
-                    .await
-                    .expect("Error sending message to player");
+                let shuffle = !player.shuffle().await.unwrap();
+                player.set_shuffle(shuffle).await.unwrap()
             }
             CurrentSongMsg::SetShuffle(shuffle) => {
                 widgets.shuffle_toggle.set_active(shuffle);
@@ -568,6 +548,11 @@ impl AsyncComponent for CurrentSong {
                 self.show_lyrics = !self.show_lyrics;
                 self.update_lyrics(&widgets.lyrics_list);
             },
+            CurrentSongMsg::ShowRandomSongsDialog => {
+                let dialog = RandomSongsDialog::builder().launch(self.mpris_player.clone());
+                dialog.widget().present(Some(root));
+                self.random_songs_dialog = Some(dialog);
+            }
         }
         self.update_view(widgets, sender);
     }

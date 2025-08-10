@@ -3,6 +3,7 @@ use crate::opensonic::types::{AlbumListType, LyricsList, Song};
 use crate::ui::album_object::AlbumObject;
 use std::collections::HashMap;
 use std::error::Error;
+use std::rc::Rc;
 use std::sync::Arc;
 use relm4::adw::gdk::Texture;
 use relm4::adw::glib;
@@ -10,19 +11,19 @@ use tokio::sync::RwLock;
 
 #[derive(Clone, Debug)]
 pub struct SongCache {
-    cache: Arc<RwLock<HashMap<String, Arc<Song>>>>,
-    client: Arc<OpenSubsonicClient>,
+    cache: Rc<RwLock<HashMap<String, Rc<Song>>>>,
+    client: Rc<OpenSubsonicClient>,
 }
 
 impl SongCache {
-    pub fn new(client: Arc<OpenSubsonicClient>) -> Self {
+    pub fn new(client: Rc<OpenSubsonicClient>) -> Self {
         Self {
             client,
-            cache: Arc::new(RwLock::new(HashMap::new())),
+            cache: Rc::new(RwLock::new(HashMap::new())),
         }
     }
 
-    pub async fn get_song(&self, id: &str) -> Result<Arc<Song>, Box<dyn Error>> {
+    pub async fn get_song(&self, id: &str) -> Result<Rc<Song>, Box<dyn Error>> {
         {
             let cahce_r = self.cache.read().await;
             if let Some(song) = cahce_r.get(id) {
@@ -35,14 +36,14 @@ impl SongCache {
         Ok(song)
     }
 
-    pub async fn add_songs(&self, songs: Vec<Song>) -> Vec<Arc<Song>> {
+    pub async fn add_songs(&self, songs: Vec<Song>) -> Vec<Rc<Song>> {
         let mut cache_w = self.cache.write().await;
 
         songs
             .into_iter()
             .map(|s| {
                 cache_w.get(&s.id).cloned().unwrap_or_else(|| {
-                    let s1 = Arc::new(s);
+                    let s1 = Rc::new(s);
                     cache_w.insert(s1.id.clone(), s1.clone());
                     s1
                 })
@@ -50,7 +51,7 @@ impl SongCache {
             .collect()
     }
 
-    pub async fn get_similar_songs(&self, id: &str, count: Option<u32>) -> Result<Vec<Arc<Song>>, Box<dyn Error>> {
+    pub async fn get_similar_songs(&self, id: &str, count: Option<u32>) -> Result<Vec<Rc<Song>>, Box<dyn Error>> {
         let songs = self.client.get_similar_songs(id, count).await?;
         Ok(self.add_songs(songs).await)
     }
@@ -62,7 +63,7 @@ impl SongCache {
         from_year: Option<u32>,
         to_year: Option<u32>,
         music_folder_id: Option<&str>
-    ) -> Result<Vec<Arc<Song>>, Box<dyn Error>> {
+    ) -> Result<Vec<Rc<Song>>, Box<dyn Error>> {
         let songs = self.client.get_random_songs(size, genre, from_year, to_year, music_folder_id).await?;
         Ok(self.add_songs(songs).await)
     }
@@ -70,16 +71,16 @@ impl SongCache {
 
 #[derive(Clone, Debug)]
 pub struct AlbumCache {
-    cache: Arc<RwLock<HashMap<String, AlbumObject>>>,
-    client: Arc<OpenSubsonicClient>,
+    cache: Rc<RwLock<HashMap<String, AlbumObject>>>,
+    client: Rc<OpenSubsonicClient>,
     song_cache: SongCache,
 }
 
 impl AlbumCache {
-    pub fn new(client: Arc<OpenSubsonicClient>, song_cache: SongCache) -> Self {
+    pub fn new(client: Rc<OpenSubsonicClient>, song_cache: SongCache) -> Self {
         Self {
             client,
-            cache: Arc::new(RwLock::new(HashMap::new())),
+            cache: Rc::new(RwLock::new(HashMap::new())),
             song_cache,
         }
     }
@@ -147,15 +148,15 @@ impl AlbumCache {
 
 #[derive(Clone, Debug, Default)]
 pub struct CoverCache {
-    cache: Arc<RwLock<HashMap<String, Texture>>>,
-    client: Arc<OpenSubsonicClient>,
+    cache: Rc<RwLock<HashMap<String, Texture>>>,
+    client: Rc<OpenSubsonicClient>,
 }
 
 impl CoverCache {
-    pub fn new(client: Arc<OpenSubsonicClient>) -> Self {
+    pub fn new(client: Rc<OpenSubsonicClient>) -> Self {
         Self {
             client,
-            cache: Arc::new(RwLock::new(HashMap::new())),
+            cache: Rc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -178,15 +179,15 @@ impl CoverCache {
 
 #[derive(Clone, Debug, Default)]
 pub struct LyricsCache {
-    cache: Arc<RwLock<HashMap<String, Arc<Vec<LyricsList>>>>>,
-    client: Arc<OpenSubsonicClient>,
+    cache: Rc<RwLock<HashMap<String, Arc<Vec<LyricsList>>>>>,
+    client: Rc<OpenSubsonicClient>,
 }
 
 impl LyricsCache {
-    pub fn new(client: Arc<OpenSubsonicClient>) -> Self {
+    pub fn new(client: Rc<OpenSubsonicClient>) -> Self {
         Self {
             client,
-            cache: Arc::new(RwLock::new(HashMap::new())),
+            cache: Rc::new(RwLock::new(HashMap::new())),
         }
     }
 

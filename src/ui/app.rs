@@ -1,32 +1,31 @@
-use crate::player::{PlayerInfo, TrackList};
+use crate::dbus::player::MprisPlayer;
+use crate::opensonic::cache::{AlbumCache, CoverCache, LyricsCache, SongCache};
+use crate::player::TrackList;
+use crate::ui::browse::BrowseWidget;
 use crate::ui::current_song::{CurrentSong, CurrentSongOut};
 use crate::ui::preferences_view::{PreferencesOut, PreferencesWidget};
 use crate::ui::track_list::TrackListWidget;
-use crate::{icon_names, PlayerCommand};
+use crate::icon_names;
+use async_channel::Receiver;
 use color_thief::Color;
 use gtk::prelude::GtkWindowExt;
 use libsecret::Schema;
-use readlock_tokio::SharedReadLock;
+use mpris_server::{LocalPlayerInterface, LocalRootInterface, LocalServer};
 use relm4::abstractions::Toaster;
 use relm4::actions::{AccelsPlus, RelmAction, RelmActionGroup};
-use relm4::adw::{gdk, ViewSwitcherPolicy};
-use relm4::adw::prelude::*;
-use relm4::component::AsyncConnector;
-use relm4::adw::gtk::CssProvider;
-use relm4::gtk::gio::{self, Settings};
-use relm4::prelude::*;
-use relm4::{
-    adw,
-    component::{AsyncComponent, AsyncComponentParts, AsyncComponentSender},
-};
-use std::sync::Arc;
-use async_channel::Sender;
-use relm4::adw::glib::{clone, closure};
-use tokio::sync::RwLock;
-use crate::ui::browse::BrowseWidget;
 use relm4::adw::glib as glib;
+use relm4::adw::glib::{clone, closure};
+use relm4::adw::gtk::CssProvider;
+use relm4::adw::prelude::*;
+use relm4::adw::{gdk, ViewSwitcherPolicy};
+use relm4::component::AsyncConnector;
+use relm4::gtk::gio::{self, Settings};
 use relm4::gtk::Widget;
-use crate::opensonic::cache::{AlbumCache, CoverCache, LyricsCache, SongCache};
+use relm4::prelude::*;
+use relm4::{adw, component::{AsyncComponent, AsyncComponentParts, AsyncComponentSender}, Sender};
+use std::rc::Rc;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 pub struct Model {
     current_song: AsyncController<CurrentSong>,
@@ -35,9 +34,9 @@ pub struct Model {
     provider: CssProvider,
     settings: Settings,
     schema: Schema,
-    cmd_sender: Arc<Sender<PlayerCommand>>,
     preferences_view: Option<AsyncController<PreferencesWidget>>,
     toaster: Toaster,
+    mpris_player: Rc<LocalServer<MprisPlayer>>
 }
 
 #[derive(Debug)]
@@ -46,22 +45,40 @@ pub enum AppMsg {
     ToggleSidebar,
     Quit,
     ShowPreferences,
-    Restart(String),
+    RestartRequest(String),
+    Restart,
     ReloadPlayer,
-    ShowError(String, String)
+    ShowError(String, String),
+    PlayPause,
+    CloseRequest,
 }
 
 pub type Init = (
-    SharedReadLock<PlayerInfo>,
     Arc<RwLock<TrackList>>,
     CoverCache,
-    Arc<Sender<PlayerCommand>>,
     SongCache,
     AlbumCache,
     Settings,
     Schema,
-    LyricsCache
+    LyricsCache,
+    Rc<LocalServer<MprisPlayer>>
 );
+
+pub type StartInit = (
+    Arc<RwLock<TrackList>>,
+    CoverCache,
+    SongCache,
+    AlbumCache,
+    Settings,
+    Schema,
+    LyricsCache,
+    Receiver<Rc<LocalServer<MprisPlayer>>>
+);
+
+fn into_init(value: &StartInit, server: Rc<LocalServer<MprisPlayer>>) -> Init {
+    let value = value.clone();
+    (value.0, value.1, value.2, value.3, value.4, value.5, value.6, server).into()
+}
 
 relm4::new_action_group!(WindowActionGroup, "win");
 relm4::new_stateless_action!(PreferencesAction, WindowActionGroup, "preferences");
@@ -72,7 +89,7 @@ impl AsyncComponent for Model {
     type CommandOutput = ();
     type Input = AppMsg;
     type Output = ();
-    type Init = Init;
+    type Init = StartInit;
 
     view! {
         #[name = "window"]
@@ -80,6 +97,10 @@ impl AsyncComponent for Model {
             set_title: Some("Sanic-rs"),
             set_default_width: 400,
             set_default_height: 400,
+            connect_close_request[sender] => move |_| {
+                sender.input(AppMsg::CloseRequest);
+                glib::Propagation::Proceed
+            },
 
             #[name = "split_view"]
             adw::OverlaySplitView{
@@ -97,6 +118,22 @@ impl AsyncComponent for Model {
                             add = model.current_song.widget(),
                             add = model.browse_connector.widget(),
                         }
+
+                        // gtk::Box {
+                        //     set_orientation: gtk::Orientation::Vertical,
+                        //     set_hexpand: true,
+                        //
+                        //     append = model.current_song.widget(),
+                        //     append = &gtk::Separator{
+                        //         set_orientation: gtk::Orientation::Vertical,
+                        //     },
+                        //     append = &gtk::Box {
+                        //         set_orientation: gtk::Orientation::Horizontal,
+                        //         gtk::Label {
+                        //             set_label: "Hello"
+                        //         }
+                        //     }
+                        // }
                     },
 
                     #[name = "header_bar"]
@@ -134,25 +171,30 @@ impl AsyncComponent for Model {
         root: adw::ApplicationWindow,
         sender: AsyncComponentSender<Self>,
     ) -> AsyncComponentParts<Self> {
+        let rec = init.7.clone();
+        let server = rec.recv().await.expect("Error receiving MPRIS server");
+        server.imp().app_sender.replace(Some(sender.clone()));
+
+
         let current_song =
             CurrentSong::builder()
-                .launch(init.clone())
+                .launch(into_init(&init, server.clone()))
                 .forward(sender.input_sender(), |msg| match msg {
                     CurrentSongOut::ColorSchemeChange(colors) => AppMsg::ColorschemeChange(colors),
                     CurrentSongOut::ToggleSidebar => AppMsg::ToggleSidebar,
                 });
-        let track_list_connector = TrackListWidget::builder().launch(init.clone());
-        let browse_connector = BrowseWidget::builder().launch(init.clone());
+        let track_list_connector = TrackListWidget::builder().launch(into_init(&init, server.clone()));
+        let browse_connector = BrowseWidget::builder().launch(into_init(&init, server.clone()));
         let model = Model {
             current_song,
             track_list_connector,
             browse_connector,
             provider: CssProvider::new(),
-            settings: init.6,
-            schema: init.7,
-            cmd_sender: init.3,
+            settings: init.4,
+            schema: init.5,
             preferences_view: None,
-            toaster: Toaster::default()
+            toaster: Toaster::default(),
+            mpris_player: server,
         };
         let base_provider = CssProvider::new();
         let display = gdk::Display::default().expect("Unable to create Display object");
@@ -167,8 +209,6 @@ impl AsyncComponent for Model {
             &model.provider,
             gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
         );
-
-        model.cmd_sender.send(PlayerCommand::AppSendSender(sender.clone())).await.expect("Error sending sender to app");
 
         let toast_overlay = model.toaster.overlay_widget();
 
@@ -224,27 +264,12 @@ impl AsyncComponent for Model {
             }))
             .bind(&widgets.split_view, "show-sidebar", Some(&widgets.split_view));
 
-        root.connect_close_request(clone!(
-            #[strong(rename_to = sndr)]
-            model.cmd_sender,
-            #[strong(rename_to = settings)]
-            model.settings,
-            move |_| {
-                if !settings.boolean("stay-in-background") {
-                    sndr.send_blocking(PlayerCommand::Quit).expect("Error when sending message to main");
-                }
-                glib::Propagation::Proceed
-
-                // glib::Propagation::Proceed
-            }
-        ));
-
+        let sndr = sender.clone();
         let action: RelmAction<PreferencesAction> = RelmAction::new_stateless(move |_| {
             sender.input(AppMsg::ShowPreferences);
         });
-        let sndr = model.cmd_sender.clone();
         let playpause_action: RelmAction<PlayPauseAction> = RelmAction::new_stateless(move |_| {
-            sndr.send_blocking(PlayerCommand::PlayPause).expect("Error sending message to main");
+            sndr.input(AppMsg::PlayPause);
         });
         relm4::main_application().set_accelerators_for_action::<PlayPauseAction>(&["space"]);
 
@@ -286,6 +311,7 @@ impl AsyncComponent for Model {
                 widgets.split_view.set_show_sidebar(true);
             },
             AppMsg::Quit => {
+                self.mpris_player.imp().quit_no_app().await;
                 if let Some(app) = root.application() {
                     app.quit();
                 }
@@ -296,7 +322,7 @@ impl AsyncComponent for Model {
                         .launch((self.settings.clone(), self.schema.clone()))
                         .forward(sender.input_sender(), move |msg| {
                             match msg {
-                                PreferencesOut::Restart => AppMsg::Restart(
+                                PreferencesOut::Restart => AppMsg::RestartRequest(
                                     "In order for the changes to take effect, the app needs to be restarted.".to_string()
                                 ),
                                 PreferencesOut::ReloadPlayer => AppMsg::ReloadPlayer
@@ -306,7 +332,7 @@ impl AsyncComponent for Model {
                 }
                 self.preferences_view.as_ref().unwrap().widget().present(Some(root));
             },
-            AppMsg::Restart(reason) => {
+            AppMsg::RestartRequest(reason) => {
                 let dialog = adw::AlertDialog::new(Some("Restart required"), Some(reason.as_str()));
                 dialog.add_responses(&[("now", "Restart"), ("later", "Later")]);
                 dialog.set_default_response(Some("now"));
@@ -314,23 +340,31 @@ impl AsyncComponent for Model {
                 dialog.set_close_response("later");
                 dialog.choose(root, None::<&gio::Cancellable>, clone!(
                     #[strong(rename_to = sndr)]
-                    self.cmd_sender,
+                    sender,
                     move |response| {
                         if response == "now" {
-                            sndr.send_blocking(PlayerCommand::Restart).expect("Error sending restart message to main");
+                            sndr.input(AppMsg::Restart)
                         }
                     }
                 ));
             },
+            AppMsg::Restart => {
+                self.mpris_player.imp().restart().await;
+            }
             AppMsg::ReloadPlayer => {
-                self.cmd_sender.send(PlayerCommand::ReloadPlayerSettings).await.expect("Error sending message to main");
+                let err = self.mpris_player.imp().reload_settings().await;
+                if err.is_err() {
+                    let err = err.err().unwrap();
+                    sender.input(AppMsg::ShowError(err.to_string(), format!("{:?}", err)))
+                }
             },
             AppMsg::ShowError(summary, description) => {
                 let toast = adw::Toast::builder()
-                    .title(format!("Error occured: {}", summary))
+                    .title(format!("Error occurred: {}", summary))
                     .button_label("Details")
                     .timeout(8)
                     .build();
+                eprintln!("Error occurred: {}", description);
                 toast.connect_button_clicked(clone!(
                     #[strong]
                     root,
@@ -343,8 +377,23 @@ impl AsyncComponent for Model {
                     }
                 ));
                 self.toaster.add_toast(toast);
+            },
+            AppMsg::PlayPause => {
+                self.mpris_player.imp().play_pause().await.unwrap();
+            },
+            AppMsg::CloseRequest => {
+                if !self.settings.boolean("stay-in-background") {
+                    sender.input(AppMsg::Quit);
+                } {
+                    self.mpris_player.imp().close().await;
+
+                }
             }
         };
         self.update_view(widgets, sender);
+    }
+
+    fn shutdown(&mut self, widgets: &mut Self::Widgets, output: Sender<Self::Output>) {
+        println!("Shutdown!");
     }
 }

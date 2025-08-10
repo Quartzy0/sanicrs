@@ -7,6 +7,7 @@ use serde_json::Value;
 use std::env;
 use std::error::Error;
 use std::path::Path;
+use std::rc::Rc;
 use std::sync::Arc;
 
 #[derive(Default, Debug)]
@@ -403,7 +404,7 @@ impl OpenSubsonicClient {
         Some(self.get_action_request_get_url("getCoverArt", vec![("id", id)]))
     }
 
-    pub async fn get_song(&self, id: &str) -> Result<Arc<Song>, Box<dyn Error>> {
+    pub async fn get_song(&self, id: &str) -> Result<Rc<Song>, Box<dyn Error>> {
         let body = self
             .get_action_request("getSong", vec![("id", id)])
             .await?
@@ -417,7 +418,7 @@ impl OpenSubsonicClient {
         let resp: Song = serde_json::from_value(
             response["subsonic-response"]["song"].take(),
         )?;
-        Ok(Arc::new(resp))
+        Ok(Rc::new(resp))
     }
 
     pub(super) async fn get_album_list(

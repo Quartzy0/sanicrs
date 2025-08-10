@@ -1,20 +1,21 @@
-use std::sync::Arc;
-use async_channel::Sender;
-use relm4::adw::gio::ListStore;
-use relm4::adw::glib::{clone, closure, Object};
-use relm4::prelude::*;
-use relm4::adw::prelude::*;
-use relm4::adw::gtk::{Orientation, ListItem, SignalListItemFactory, Widget, Align};
-use relm4::adw::glib as glib;
-use uuid::Uuid;
-use crate::{icon_names, PlayerCommand};
+use crate::dbus::player::MprisPlayer;
 use crate::opensonic::cache::{AlbumCache, CoverCache};
 use crate::ui::album_object::AlbumObject;
 use crate::ui::cover_picture::{CoverPicture, CoverSize};
 use crate::ui::song_object::{PositionState, SongObject};
+use crate::icon_names;
+use mpris_server::LocalServer;
+use relm4::adw::gio::ListStore;
+use relm4::adw::glib as glib;
+use relm4::adw::glib::{clone, closure, Object};
+use relm4::adw::gtk::{Align, ListItem, Orientation, SignalListItemFactory, Widget};
+use relm4::adw::prelude::*;
+use relm4::prelude::*;
+use std::rc::Rc;
+use uuid::Uuid;
 
 pub struct ViewAlbumWidget {
-    cmd_sender: Arc<Sender<PlayerCommand>>,
+    mpris_player: Rc<LocalServer<MprisPlayer>>,
     song_list_factory: SignalListItemFactory,
     album: AlbumObject,
     album_cache: AlbumCache,
@@ -29,7 +30,7 @@ pub enum ViewAlbumMsg {
 
 type ViewAlbumInit = (
     AlbumObject,
-    Arc<Sender<PlayerCommand>>,
+    Rc<LocalServer<MprisPlayer>>,
     CoverCache,
     AlbumCache
 );
@@ -136,7 +137,7 @@ impl AsyncComponent for ViewAlbumWidget {
         sender: AsyncComponentSender<Self>,
     ) -> AsyncComponentParts<Self> {
         let model = Self {
-            cmd_sender: init.1,
+            mpris_player: init.1,
             album: init.0,
             song_list_factory: SignalListItemFactory::new(),
             album_cache: init.3,
@@ -242,12 +243,10 @@ impl AsyncComponent for ViewAlbumWidget {
         sender: AsyncComponentSender<Self>,
         _root: &Self::Root,
     ) {
+        let player = self.mpris_player.imp();
         match message {
             ViewAlbumMsg::PlayAlbum(index) => {
-                self.cmd_sender
-                    .send(PlayerCommand::PlayAlbum(self.album.id(), index))
-                    .await
-                    .expect("Error sending command to Player");
+                player.send_res(player.play_album(self.album.id(), index).await).await;
             },
             ViewAlbumMsg::SetAlbum(album) => {
                 if self.album.id() == album.id(){
@@ -275,10 +274,7 @@ impl AsyncComponent for ViewAlbumWidget {
                 store.splice(0, store.n_items(), &songs);
             },
             ViewAlbumMsg::QueueAlbum => {
-                self.cmd_sender
-                    .send(PlayerCommand::QueueAlbum(self.album.id()))
-                    .await
-                    .expect("Error sending command to Player");
+                player.send_res(player.queue_album(self.album.id()).await).await;
             }
         };
         self.update_view(widgets, sender);

@@ -126,7 +126,7 @@ impl AsyncComponent for PreferencesWidget {
         widgets: &mut Self::Widgets,
         message: Self::Input,
         sender: AsyncComponentSender<Self>,
-        root: &adw::PreferencesDialog,
+        _root: &adw::PreferencesDialog,
     ) {
         match message {
             PreferencesMsg::AuthChanged{pass} => {

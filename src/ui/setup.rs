@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use async_channel::Sender;
@@ -16,7 +17,7 @@ use crate::opensonic::client::OpenSubsonicClient;
 
 
 pub struct SetupWidget {
-    sender: Sender<Arc<OpenSubsonicClient>>,
+    sender: Sender<Rc<OpenSubsonicClient>>,
     settings: Settings,
     schema: Schema,
 }
@@ -27,14 +28,14 @@ pub enum SetupMsg {
     Save,
 }
 
-pub type SetupOut = Arc<OpenSubsonicClient>;
+pub type SetupOut = Rc<OpenSubsonicClient>;
 
 #[relm4::component(pub async)]
 impl AsyncComponent for SetupWidget {
     type CommandOutput = ();
     type Input = SetupMsg;
     type Output = ();
-    type Init = (Settings, Sender<Arc<OpenSubsonicClient>>, Schema);
+    type Init = (Settings, Sender<Rc<OpenSubsonicClient>>, Schema);
 
     view! {
         adw::ApplicationWindow {
@@ -153,7 +154,7 @@ impl AsyncComponent for SetupWidget {
                     .await
                     .expect("Error storing password in secret store");
 
-                    self.sender.send(Arc::new(client.unwrap())).await.expect("Error sending created client");
+                    self.sender.send(Rc::new(client.unwrap())).await.expect("Error sending created client");
 
                     root.close();
                 }

@@ -1,115 +1,150 @@
-use crate::PlayerCommand;
-use crate::dbus::player;
-use crate::opensonic::client::OpenSubsonicClient;
-use crate::player::{SongEntry, TrackList};
-use std::collections::HashMap;
+use std::error::Error;
+use std::rc::Rc;
 use std::sync::Arc;
-use async_channel::Sender;
-use tokio::sync::RwLock;
-use zbus::interface;
-use zbus::object_server::{InterfaceRef, SignalEmitter};
-use zvariant::{ObjectPath, Value};
+use crate::dbus::player;
+use crate::player::{SongEntry};
+use mpris_server::{zbus::fdo, LocalTrackListInterface, Metadata, Property, TrackId, TrackListSignal};
+use crate::dbus::player::{get_song_metadata, MprisPlayer};
+use crate::opensonic::types::Song;
+use crate::ui::current_song::CurrentSongMsg;
+use crate::ui::track_list::{MoveDirection, TrackListMsg};
 
-pub struct MprisTrackList {
-    pub track_list: Arc<RwLock<TrackList>>,
-    pub client: Arc<OpenSubsonicClient>,
-    pub cmd_channel: Arc<Sender<PlayerCommand>>,
-}
+impl MprisPlayer {
+    pub async fn add_track_to_index(&self, uri: String, index: Option<usize>, set_as_current: bool) -> Result<(), Box<dyn Error>> {
+        let mut track_list_guard = self.track_list.write().await;
+        match track_list_guard
+            .add_song_from_uri(&*uri, &self.song_cache, index)
+            .await
+        {
+            None => {
+                let songs = track_list_guard.get_songs();
+                let new_i = index.unwrap_or(songs.len() - 1);
+                self.track_list_emit(TrackListSignal::TrackAdded {
+                    metadata: get_song_metadata(Some(&songs[new_i]), self.client.clone()).await,
+                    after_track: if new_i == 0 {
+                        TrackId::NO_TRACK
+                    } else {
+                        songs[new_i-1].dbus_obj()
+                    },
+                }).await?;
+                if set_as_current {
+                    track_list_guard.set_current(new_i);
+                    drop(track_list_guard);
+                    let song = self.player_ref.start_current().await?;
+                    self.send_cs_msg(CurrentSongMsg::SongUpdate(song));
+                    self.properties_changed([
+                        Property::Metadata(self.current_song_metadata().await),
+                        Property::PlaybackStatus(self.player_ref.playback_status())
+                    ]).await?;
+                }
+                self.send_tl_msg(TrackListMsg::ReloadList);
+            }
+            Some(err) => return Err(err),
+        };
+        Ok(())
+    }
 
-pub async fn track_list_replaced(track_list_ref: &InterfaceRef<MprisTrackList>, songs: &Vec<SongEntry>, current_i: Option<usize>) -> Result<(), zbus::Error> {
-    track_list_ref.track_list_replaced(
-        songs.iter().map(|s| s.dbus_obj()).collect(),
-        if let Some(i) = current_i && let Some(current) = songs.get(i) {
-            current.dbus_obj()
-        } else {
-            ObjectPath::from_static_str_unchecked("/org/mpris/MediaPlayer2/TrackList/NoTrack")
+    pub async fn queue_songs(&self, songs: Vec<Rc<Song>>) -> Result<(), Box<dyn Error>> {
+        let was_empty;
+        {
+            let mut guard = self.track_list.write().await;
+            was_empty = guard.empty();
+            guard.add_songs(songs);
         }
-    ).await
+        if was_empty {
+            let song = self.player_ref.start_current().await?;
+            self.send_cs_msg(CurrentSongMsg::SongUpdate(song));
+            self.properties_changed([
+                Property::Metadata(self.current_song_metadata().await),
+                Property::PlaybackStatus(self.player_ref.playback_status())
+            ]).await?;
+        }
+        let guard = self.track_list.read().await;
+        self.track_list_replaced(guard.get_songs(), guard.current_index()).await?;
+        self.send_tl_msg(TrackListMsg::ReloadList);
+        Ok(())
+    }
+
+    pub async fn queue_random(&self, size: u32, genre: Option<String>, from_year: Option<u32>, to_year: Option<u32>) -> Result<(), Box<dyn Error>> {
+        let songs = self.song_cache.get_random_songs(Some(size), genre.as_deref(), from_year, to_year, None).await?;
+        println!("Added {} random songs", songs.len());
+        self.queue_songs(songs).await
+    }
+
+    pub async fn queue_album(&self, id: String) -> Result<(), Box<dyn Error>> {
+        let album = self.album_cache.get_album(id.as_str()).await?;
+        if let Some(songs) = album.get_songs() {
+            self.queue_songs(songs).await
+        } else {
+            Ok(())
+        }
+    }
+
+    pub async fn play_album(&self, id: String, index: Option<usize>) -> Result<(), Box<dyn Error>> {
+        self.queue_album(id).await?;
+        if let Some(index) = index {
+            let mut guard = self.track_list.write().await;
+            guard.set_current(index);
+        }
+        self.properties_changed([
+            Property::Metadata(self.current_song_metadata().await),
+            Property::PlaybackStatus(self.player_ref.playback_status())
+        ]).await?;
+
+        Ok(())
+    }
+    
+    pub async fn goto(&self, i: usize) -> Result<(), Box<dyn Error>>{
+        let song = self.player_ref.goto(i).await?;
+        self.send_tl_msg(TrackListMsg::TrackChanged(Some(i)));
+        self.send_cs_msg(CurrentSongMsg::SongUpdate(song));
+        self.properties_changed([
+            Property::Metadata(self.current_song_metadata().await),
+            Property::PlaybackStatus(self.player_ref.playback_status())
+        ]).await?;
+        Ok(())
+    }
+    
+    pub async fn remove(&self, i: usize) -> Result<(), Box<dyn Error>> {
+        let e = self.player_ref.remove_song(i).await?;
+        self.send_tl_msg(TrackListMsg::ReloadList);
+        self.track_list_emit(TrackListSignal::TrackRemoved {
+            track_id: e.dbus_obj()
+        }).await?;
+        self.send_cs_msg(CurrentSongMsg::SongUpdate(Some(e)));
+        self.properties_changed([
+            Property::Metadata(self.current_song_metadata().await),
+        ]).await?;
+        Ok(())
+    }
+    
+    pub async fn move_item(&self, index: usize, direction: MoveDirection) -> Result<(), Box<dyn Error>> {
+        let mut guard = self.track_list.write().await;
+        let new_i = guard.move_song(index, direction);
+        if let Some(new_i) = new_i {
+            let moved = guard.song_at_index(new_i).ok_or("No song found at moved index")?;
+            self.track_list_emit(TrackListSignal::TrackRemoved {
+                track_id: moved.dbus_obj(),
+            }).await?;
+            self.track_list_emit(TrackListSignal::TrackAdded {
+                metadata: get_song_metadata(Some(moved), self.client.clone()).await,
+                after_track: if index != 0 && let Some(prev) = guard.song_at_index(index-1) {
+                    prev.dbus_obj()
+                } else {
+                    TrackId::NO_TRACK
+                },
+            }).await?;
+            self.send_tl_msg(TrackListMsg::TrackChanged(None));
+        }
+        Ok(())
+    }
 }
 
-#[interface(name = "org.mpris.MediaPlayer2.TrackList")]
-impl MprisTrackList {
-    #[zbus(signal)]
-    pub async fn track_list_replaced(
-        emitter: &SignalEmitter<'_>,
-        tracks: Vec<ObjectPath<'_>>,
-        current: ObjectPath<'_>,
-    ) -> Result<(), zbus::Error>;
-
-    #[zbus(signal)]
-    pub async fn track_added(
-        emitter: &SignalEmitter<'_>,
-        metadata: HashMap<&str, Value<'_>>,
-        after_track: ObjectPath<'_>,
-    ) -> Result<(), zbus::Error>;
-
-    #[zbus(signal)]
-    pub async fn track_removed(
-        emitter: &SignalEmitter<'_>,
-        track_id: ObjectPath<'_>,
-    ) -> Result<(), zbus::Error>;
-
-    #[zbus(signal)]
-    pub async fn track_metadata_changed(
-        emitter: &SignalEmitter<'_>,
-        track: ObjectPath<'_>,
-        metadata: HashMap<&str, Value<'_>>,
-    ) -> Result<(), zbus::Error>;
-
-    async fn add_track(&self, uri: String, after_track: ObjectPath<'_>, set_as_current: bool) {
-        let index: Option<usize> =
-            if after_track.as_str() == "/org/mpris/MediaPlayer2/TrackList/NoTrack" {
-                Some(0)
-            } else {
-                let track_list = self.track_list.read().await;
-                track_list
-                    .get_songs()
-                    .iter()
-                    .position(|x| x.dbus_path() == after_track.as_str())
-                    .and_then(|t| Some(t + 1))
-            };
-        self.cmd_channel
-            .send(PlayerCommand::AddFromUri(uri, index, set_as_current))
-            .await
-            .expect("Error sending message to player");
-    }
-
-    async fn remove_track(&self, track_id: ObjectPath<'_>) -> Result<(), zbus::fdo::Error> {
-        let index: usize = {
-            let track_list = self.track_list.read().await;
-            track_list
-                .get_songs()
-                .iter()
-                .position(|x| x.dbus_path() == track_id.as_str())
-                .ok_or(zbus::fdo::Error::Failed("Track not found".to_string()))?
-        };
-        self.cmd_channel
-            .send(PlayerCommand::Remove(index))
-            .await
-            .expect("Error sending message to player");
-        Ok(())
-    }
-
-    async fn go_to(&self, track_id: ObjectPath<'_>) -> Result<(), zbus::fdo::Error> {
-        let index: usize = {
-            let track_list = self.track_list.read().await;
-            track_list
-                .get_songs()
-                .iter()
-                .position(|x| x.dbus_path() == track_id.as_str())
-                .ok_or(zbus::fdo::Error::Failed("Track not found".to_string()))?
-        };
-        self.cmd_channel
-            .send(PlayerCommand::GoTo(index))
-            .await
-            .expect("Error sending message to player");
-        Ok(())
-    }
-
+impl LocalTrackListInterface for MprisPlayer{
     async fn get_tracks_metadata(
         &self,
-        tracks_in: Vec<ObjectPath<'_>>,
-    ) -> Vec<HashMap<&str, Value>> {
+        tracks_in: Vec<TrackId>,
+    ) -> fdo::Result<Vec<Metadata>> {
         let track_list = self.track_list.read().await;
         let mut songs_refs: Vec<&SongEntry> = Vec::new();
         let loaded_songs = track_list.get_songs();
@@ -121,26 +156,66 @@ impl MprisTrackList {
             }
         }
 
-        let mut map: Vec<HashMap<&str, Value>> = Vec::new();
+        let mut map: Vec<Metadata> = Vec::new();
         for x in songs_refs {
             map.push(player::get_song_metadata(Some(&x), self.client.clone()).await);
         }
 
-        map
+        Ok(map)
     }
 
-    #[zbus(property)]
-    fn can_edit_tracks(&self) -> bool {
-        true
+    async fn add_track(&self, uri: String, after_track: TrackId, set_as_current: bool) -> fdo::Result<()> {
+        let index: Option<usize> =
+            if after_track.as_str() == "/org/mpris/MediaPlayer2/TrackList/NoTrack" {
+                Some(0)
+            } else {
+                let track_list = self.track_list.read().await;
+                track_list
+                    .get_songs()
+                    .iter()
+                    .position(|x| x.dbus_path() == after_track.as_str())
+                    .and_then(|t| Some(t + 1))
+            };
+        self.add_track_to_index(uri, index, set_as_current).await.map_err(|e| fdo::Error::Failed(format!("{}", e)))?;
+        Ok(())
     }
 
-    #[zbus(property)]
-    async fn tracks(&self) -> Vec<ObjectPath> {
+    async fn remove_track(&self, track_id: TrackId) -> fdo::Result<()> {
+        let index: usize = {
+            let track_list = self.track_list.read().await;
+            track_list
+                .get_songs()
+                .iter()
+                .position(|x| x.dbus_path() == track_id.as_str())
+                .ok_or(fdo::Error::Failed("Track not found".to_string()))?
+        };
+        self.remove(index).await.map_err(|e| fdo::Error::Failed(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn go_to(&self, track_id: TrackId) -> fdo::Result<()> {
+        let index: usize = {
+            let track_list = self.track_list.read().await;
+            track_list
+                .get_songs()
+                .iter()
+                .position(|x| x.dbus_path() == track_id.as_str())
+                .ok_or(fdo::Error::Failed("Track not found".to_string()))?
+        };
+        self.goto(index).await.map_err(|e| fdo::Error::Failed(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn tracks(&self) -> fdo::Result<Vec<TrackId>> {
         let track_list = self.track_list.read().await;
-        track_list
+        Ok(track_list
             .get_songs()
             .iter()
-            .map(|song| ObjectPath::try_from(song.dbus_path()).expect("Invalid object path"))
-            .collect()
+            .map(|song| song.dbus_obj())
+            .collect())
+    }
+
+    async fn can_edit_tracks(&self) -> fdo::Result<bool> {
+        Ok(true)
     }
 }

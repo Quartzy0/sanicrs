@@ -1,60 +1,83 @@
-use std::sync::Arc;
-use async_channel::Sender;
-use zbus::interface;
+use mpris_server::{LocalRootInterface};
+use mpris_server::zbus::fdo::Result;
+use crate::dbus::player::MprisPlayer;
 use crate::PlayerCommand;
+use crate::ui::app::AppMsg;
 
-pub struct MprisBase {
-    pub cmd_channel: Arc<Sender<PlayerCommand>>,
-}
-
-#[interface(name = "org.mpris.MediaPlayer2")]
-impl MprisBase {
-    async fn quit(&self) {
+impl MprisPlayer {
+    pub async fn restart(&self) {
         self.cmd_channel
-            .send(PlayerCommand::Quit)
+            .send(PlayerCommand::Quit(true))
+            .await
+            .expect("Error when sending restart signal");
+    }
+
+    pub async fn close(&self) {
+        self.cmd_channel
+            .send(PlayerCommand::Close)
+            .await
+            .expect("Error when sending close signal");
+    }
+
+    pub async fn quit_no_app(&self) {
+        self.cmd_channel
+            .send(PlayerCommand::Quit(false))
             .await
             .expect("Error when sending quit signal");
     }
+}
 
-    async fn raise(&self) {
+impl LocalRootInterface for MprisPlayer {
+    async fn raise(&self) -> Result<()> {
         self.cmd_channel
             .send(PlayerCommand::Raise)
             .await
             .expect("Error when sending raise signal");
+        Ok(())
     }
 
-    #[zbus(property)]
-    fn can_quit(&self) -> bool {
-        true
+    async fn quit(&self) -> Result<()> {
+        self.send_app_msg(AppMsg::Quit);
+        Ok(())
     }
 
-    #[zbus(property)]
-    fn can_set_fullscreen(&self) -> bool {
-        false
+    async fn can_quit(&self) -> Result<bool> {
+        Ok(true)
     }
 
-    #[zbus(property)]
-    fn can_raise(&self) -> bool {
-        true
+    async fn fullscreen(&self) -> Result<bool> {
+        Ok(false)
     }
 
-    #[zbus(property)]
-    fn has_track_list(&self) -> bool {
-        true
+    async fn set_fullscreen(&self, _fullscreen: bool) -> std::result::Result<(), zbus::Error> {
+        Ok(())
     }
 
-    #[zbus(property)]
-    fn identity(&self) -> &str {
-        "Sanic-rs"
+    async fn can_set_fullscreen(&self) -> Result<bool> {
+        Ok(false)
     }
 
-    #[zbus(property)]
-    fn supported_uri_schemes(&self) -> Vec<&str> {
-        vec!["sanic"]
+    async fn can_raise(&self) -> Result<bool> {
+        Ok(true)
     }
 
-    #[zbus(property)]
-    fn supported_mime_types(&self) -> Vec<&str> {
-        vec![]
+    async fn has_track_list(&self) -> Result<bool> {
+        Ok(true)
+    }
+
+    async fn identity(&self) -> Result<String> {
+        Ok("Sanic-rs".into())
+    }
+
+    async fn desktop_entry(&self) -> Result<String> {
+        Ok("".into())
+    }
+
+    async fn supported_uri_schemes(&self) -> Result<Vec<String>> {
+        Ok(vec!["sanic".into()])
+    }
+
+    async fn supported_mime_types(&self) -> Result<Vec<String>> {
+        Ok(vec![])
     }
 }

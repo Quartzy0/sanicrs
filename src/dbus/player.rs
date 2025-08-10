@@ -1,160 +1,252 @@
+use std::cell::RefCell;
+use std::error::Error;
 use crate::opensonic::client::OpenSubsonicClient;
-use crate::player::{LoopStatus, PlaybackStatus, PlayerInfo, SongEntry, TrackList, MAX_PLAYBACK_RATE, MIN_PLAYBACK_RATE};
+use crate::player::{PlayerInfo, SongEntry, TrackList, MAX_PLAYBACK_RATE, MIN_PLAYBACK_RATE};
 use crate::PlayerCommand;
-use std::collections::HashMap;
 use std::ops::{Add, Deref};
+use std::rc::Rc;
 use std::sync::Arc;
 use async_channel::Sender;
 use std::time::Duration;
-use readlock_tokio::SharedReadLock;
+use mpris_server::{LocalPlayerInterface, Metadata, Time, TrackId, LoopStatus, PlaybackStatus, Property, LocalServer, TrackListSignal, Signal, zbus::fdo};
+use relm4::adw::gio::Settings;
+use relm4::adw::prelude::SettingsExt;
+use relm4::AsyncComponentSender;
 use tokio::sync::RwLock;
-use zbus::interface;
-use zbus::object_server::SignalEmitter;
-use zvariant::{Array, ObjectPath, Str, Value};
+use crate::opensonic::cache::{AlbumCache, SongCache};
+use crate::ui::app::{AppMsg, Model};
+use crate::ui::current_song::{CurrentSong, CurrentSongMsg};
+use crate::ui::track_list::{TrackListMsg, TrackListWidget};
 
 pub struct MprisPlayer {
-    pub client: Arc<OpenSubsonicClient>,
+    pub client: Rc<OpenSubsonicClient>,
     pub track_list: Arc<RwLock<TrackList>>,
     pub cmd_channel: Arc<Sender<PlayerCommand>>,
-    pub player_ref: Arc<SharedReadLock<PlayerInfo>>,
+    pub player_ref: Rc<PlayerInfo>,
+
+    pub app_sender: RefCell<Option<AsyncComponentSender<Model>>>,
+    pub tl_sender: RefCell<Option<AsyncComponentSender<TrackListWidget>>>,
+    pub cs_sender: RefCell<Option<AsyncComponentSender<CurrentSong>>>,
+    pub server: RefCell<Option<Rc<LocalServer<MprisPlayer>>>>,
+    
+    pub song_cache: SongCache,
+    pub album_cache: AlbumCache,
+    pub settings: Settings,
 }
 
-pub async fn get_song_metadata<'a>(song: Option<&SongEntry>, client: Arc<OpenSubsonicClient>) -> HashMap<&'a str, Value<'a>> {
-    let mut map: HashMap<&str, Value> = HashMap::new();
+pub async fn get_song_metadata<'a>(song: Option<&SongEntry>, client: Rc<OpenSubsonicClient>) -> Metadata {
+    let mut map: Metadata = Metadata::new();
     if song.is_none() {
-        map.insert("mpris:trackid", Value::ObjectPath(ObjectPath::from_static_str_unchecked("/org/mpris/MediaPlayer2/TrackList/NoTrack")));
+        map.set_trackid(Some(TrackId::NO_TRACK));
         return map;
     }
     let song = song.unwrap();
-    map.insert("mpris:trackid", Value::ObjectPath(song.dbus_obj()));
+    map.set_trackid(Some(song.dbus_obj()));
     let song = &song.1;
-    map.insert("xesam:title", Value::Str(Str::from(song.title.clone())));
+    map.set_title(Some(song.title.clone()));
     if let Some(cover_art) = &song.cover_art{
         let url = client.get_cover_image_url(cover_art.as_str()).await;
         if let Some(url) = url {
-            map.insert("mpris:artUrl", Value::Str(Str::from(url)));
+            map.set_art_url(Some(url));
         }
     }
-    if let Some(duration) = song.duration{
-        map.insert("mpris:length", Value::I64(duration.as_micros() as i64));
-    }
-    if let Some(album) = &song.album {
-        map.insert("xesam:album", Value::Str(Str::from(album.clone())));
-    }
+    map.set_length(song.duration.and_then(|d| Some(Time::from_millis(d.as_millis() as i64))));
+    map.set_album(song.album.as_ref());
     if let Some(artists) = &song.artists {
         let a: Vec<String> = artists.iter().map(|x| x.name.clone()).collect();
-        map.insert("xesam:artist", Value::Array(Array::from(a)));
+        map.set_artist(Some(a));
     }
     if let Some(artists) = &song.album_artists {
         let al: Vec<String> = artists.iter().map(|x| x.name.clone()).collect();
-        map.insert("xesam:albumArtist", Value::Array(Array::from(al)));
+        map.set_album_artist(Some(al));
     }
     if let Some(artists) = &song.genres {
         let g: Vec<String> = artists.iter().map(|x| x.name.clone()).collect();
-        map.insert("xesam:genre", Value::Array(Array::from(g)));
+        map.set_genre(Some(g));
     }
-    if let Some(comment) = &song.comment {
-        map.insert("xesam:comment", Value::Str(Str::from(comment.clone())));
-    }
-    if let Some(composer) = &song.display_composer {
-        map.insert("xesam:composer", Value::Str(Str::from(composer.clone())));
-    }
-    if let Some(played) = &song.played {
-        map.insert("xesam:lastUsed", Value::Str(Str::from(played.clone())));
-    }
-    if let Some(played) = song.play_count {
-        map.insert("xesam:useCount", Value::I64(played as i64));
-    }
-    if let Some(track) = song.track {
-        map.insert("xesam:trackNumber", Value::I64(track as i64));
-    }
-    if let Some(rating) = song.user_rating {
-        map.insert("xesam:trackNumber", Value::F64(rating as f64 / 5.0));
-    }
-    if let Some(disc_number) = song.disc_number {
-        map.insert("xesam:discNumber", Value::I64(disc_number as i64));
-    }
-    if let Some(bpm) = song.bpm {
-        map.insert("xesam:audioBPM", Value::I64(bpm as i64));
-    }
+    map.set_comment(song.comment.as_ref().and_then(|c| Some(vec![c.clone()])));
+    map.set_composer(song.display_composer.as_ref().and_then(|c| Some(vec![c.clone()])));
+    map.set_last_used(song.played.as_ref());
+    map.set_use_count(song.play_count.and_then(|n| Some(n as i32)));
+    map.set_track_number(song.track);
+    map.set_user_rating(song.user_rating.and_then(|r| Some(r as f64 / 5.0)));
+    map.set_disc_number(song.disc_number.and_then(|d| Some(d as i32)));
+    map.set_audio_bpm(song.bpm.and_then(|b| Some(b as i32)));
 
     map
 }
 
-#[interface(name = "org.mpris.MediaPlayer2.Player")]
 impl MprisPlayer {
-
-    #[zbus(signal)]
-    pub async fn seeked(emitter: &SignalEmitter<'_>, position: i64) -> Result<(), zbus::Error>;
-
-    #[zbus(property)]
-    pub async fn loop_status(&self) -> String {
-        self.track_list.read().await.loop_status.clone().into()
-    }
-
-    #[zbus(property)]
-    pub async fn set_loop_status(&self, loop_status: String) -> Result<(), zbus::Error> {
-        let loop_status = LoopStatus::try_from(loop_status)?;
-        self.cmd_channel.send(PlayerCommand::SetLoopStatus(loop_status)).await.expect("Error sending message to player");
-        Ok(())
-    }
-
-    pub async fn open_uri(&self, uri: String) {
-        self.cmd_channel.send(PlayerCommand::AddFromUri(uri, None, false)).await.expect("Error sending message to player");
-    }
-
-    pub async fn play(&self) {
-        self.cmd_channel.send(PlayerCommand::Play).await.expect("Error sending message to player")
-    }
-
-    pub async fn pause(&self) {
-        self.cmd_channel.send(PlayerCommand::Pause).await.expect("Error sending message to player")
-    }
-
-    pub async fn play_pause(&self) {
-        self.cmd_channel.send(PlayerCommand::PlayPause).await.expect("Error sending message to player")
-    }
-
-    pub async fn next(&self) {
-        self.cmd_channel.send(PlayerCommand::Next).await.expect("Error sending message to player")
-    }
-
-    pub async fn previous(&self) {
-        self.cmd_channel.send(PlayerCommand::Previous).await.expect("Error sending message to player")
-    }
-
-    pub async fn stop(&self) {
-        self.cmd_channel.send(PlayerCommand::Stop).await.expect("Error sending message to player")
-    }
-
-    pub async fn set_position(&mut self, track_id: &str, position: i64) -> Result<(), zbus::fdo::Error> {
-        if position < 0{
-            return Ok(());
-        }
-        let position = Duration::from_micros(position as u64);
-        {
-            let track_list = self.track_list.read().await;
-            let song = match track_list.current() {
-                Some(t) => t,
-                None => return Ok(())
-            };
-            if song.dbus_path() != track_id {
-                return Ok(());
-            }
-            if let Some(duration) = song.1.duration && position > duration {
-                return Ok(());
+    pub fn send_app_msg(&self, msg: AppMsg) {
+        if let Some(sender) = self.app_sender.borrow().as_ref() {
+            let r = sender.input_sender().send(msg);
+            if r.is_err() {
+                self.app_sender.replace(None);
             }
         }
-        self.cmd_channel.send(PlayerCommand::SetPosition(position)).await.expect("Error sending message to player");
-        Ok(())
     }
 
-    pub async fn seek(&mut self, offset: i64) -> Result<(), zbus::fdo::Error> {
-        let current_position = Duration::from_micros(PlayerInfo::position(&self.player_ref.lock().await.deref()) as u64);
-        let new_positon = if offset > 0 {
-            current_position.add(Duration::from_micros(offset as u64))
+    pub fn send_cs_msg(&self, msg: CurrentSongMsg) {
+        if let Some(sender) = self.cs_sender.borrow().as_ref() {
+            let r = sender.input_sender().send(msg);
+            if r.is_err() {
+                self.app_sender.replace(None);
+            }
+        }
+    }
+
+    pub fn send_tl_msg(&self, msg: TrackListMsg) {
+        if let Some(sender) = self.tl_sender.borrow().as_ref() {
+            let r = sender.input_sender().send(msg);
+            if r.is_err() {
+                self.app_sender.replace(None);
+            }
+        }
+    }
+
+    pub async fn properties_changed(&self, properties: impl IntoIterator<Item = Property>) -> zbus::Result<()>{
+        if let Some(server) = self.server.borrow().as_ref() {
+            server.properties_changed(properties).await
         } else {
-            current_position.checked_sub(Duration::from_micros((-offset) as u64)).unwrap_or(Duration::from_secs(0))
+            Ok(())
+        }
+    }
+    
+    pub async fn send_error(&self, error: Box<dyn Error>) {
+        self.send_app_msg(AppMsg::ShowError(format!("{}", error), format!("{:?}", error)));
+    }
+
+    pub async fn send_res(&self, result: Result<(), Box<dyn Error>>) {
+        if let Err(error) = result {
+            self.send_app_msg(AppMsg::ShowError(format!("{}", error), format!("{:?}", error)));
+        }
+    }
+
+    pub async fn send_res_fdo(&self, result: fdo::Result<()>) {
+        if let Err(error) = result {
+            self.send_app_msg(AppMsg::ShowError(format!("{}", error), format!("{:?}", error)));
+        }
+    }
+
+    pub async fn track_list_emit(&self, signal: TrackListSignal) -> zbus::Result<()> {
+        if let Some(server) = self.server.borrow().as_ref() {
+            server.track_list_emit(signal).await
+        } else {
+            Ok(())
+        }
+    }
+    
+    pub async fn emit(&self, signal: Signal) -> zbus::Result<()> {
+        if let Some(server) = self.server.borrow().as_ref() {
+            server.emit(signal).await
+        } else {
+            Ok(())
+        }
+    }
+
+    pub async fn track_list_replaced(&self, songs: &Vec<SongEntry>, current_i: Option<usize>) -> Result<(), zbus::Error> {
+        if let Some(server) = self.server.borrow().as_ref() {
+            server.track_list_emit(TrackListSignal::TrackListReplaced {
+                tracks: songs.iter().map(|s| s.dbus_obj()).collect(),
+                current_track: if let Some(i) = current_i && let Some(current) = songs.get(i) {
+                    current.dbus_obj()
+                } else {
+                    TrackId::NO_TRACK
+                }
+            }
+            ).await
+        }else {
+            Ok(())
+        }
+    }
+    
+    pub async fn set_position(&self, p: Duration) -> Result<(), Box<dyn Error>> {
+        self.player_ref.set_position(p).await?;
+        self.send_cs_msg(CurrentSongMsg::ProgressUpdateSync(Some(p.as_secs_f64())));
+        self.emit(Signal::Seeked {
+            position: Time::from_micros(p.as_micros() as i64),
+        }).await?;
+        Ok(())
+    }
+    
+    pub async fn reload_settings(&self) -> Result<(), Box<dyn Error>> {
+        self.player_ref.load_settings(&self.settings).await
+    }
+
+    pub async fn current_song_metadata(&self) -> Metadata {
+        let guard = self.track_list.read().await;
+        get_song_metadata(guard.current(), self.client.clone()).await
+    }
+}
+
+impl LocalPlayerInterface for MprisPlayer {
+    async fn next(&self) -> fdo::Result<()> {
+        let s = self.player_ref.next().await;
+        if s.is_none() { // Track list over
+            self.pause().await?;
+        }
+        self.send_cs_msg(CurrentSongMsg::SongUpdate(s));
+        self.send_tl_msg(TrackListMsg::TrackChanged(None));
+        self.properties_changed([
+            Property::Metadata(self.current_song_metadata().await),
+            Property::PlaybackStatus(self.player_ref.playback_status())
+        ]).await?;
+        Ok(())
+    }
+
+    async fn previous(&self) -> fdo::Result<()> {
+        let s = self.player_ref.previous().await;
+        self.send_cs_msg(CurrentSongMsg::SongUpdate(s));
+        self.send_tl_msg(TrackListMsg::TrackChanged(None));
+        self.properties_changed([
+            Property::Metadata(self.current_song_metadata().await),
+            Property::PlaybackStatus(self.player_ref.playback_status())
+        ]).await?;
+        Ok(())
+    }
+
+    async fn pause(&self) -> fdo::Result<()> {
+        self.player_ref.pause();
+        self.send_cs_msg(CurrentSongMsg::PlaybackStateChange(self.player_ref.playback_status()));
+        self.properties_changed([
+            Property::PlaybackStatus(self.player_ref.playback_status())
+        ]).await?;
+        Ok(())
+    }
+
+    async fn play_pause(&self) -> fdo::Result<()> {
+        self.player_ref.playpause().await;
+        self.send_cs_msg(CurrentSongMsg::PlaybackStateChange(self.player_ref.playback_status()));
+        self.properties_changed([
+            Property::PlaybackStatus(self.player_ref.playback_status())
+        ]).await?;
+        Ok(())
+    }
+
+    async fn stop(&self) -> fdo::Result<()> {
+        self.player_ref.stop().await;
+        self.send_cs_msg(CurrentSongMsg::PlaybackStateChange(self.player_ref.playback_status()));
+        self.properties_changed([
+            Property::PlaybackStatus(self.player_ref.playback_status())
+        ]).await?;
+        Ok(())
+    }
+
+    async fn play(&self) -> fdo::Result<()> {
+        self.player_ref.play().await;
+        self.send_cs_msg(CurrentSongMsg::PlaybackStateChange(self.player_ref.playback_status()));
+        self.properties_changed([
+            Property::PlaybackStatus(self.player_ref.playback_status())
+        ]).await?;
+        Ok(())
+    }
+
+    async fn seek(&self, offset: Time) -> Result<(), fdo::Error> {
+        let current_position = Duration::from_micros(PlayerInfo::position(&self.player_ref.deref()) as u64);
+        let new_positon = if offset.is_positive() {
+            current_position.add(Duration::from_micros(offset.as_micros() as u64))
+        } else {
+            current_position.checked_sub(Duration::from_micros((-offset.as_micros()) as u64)).unwrap_or(Duration::from_secs(0))
         };
         let mut seek_next = false;
         {
@@ -169,45 +261,65 @@ impl MprisPlayer {
             }
         }
         if seek_next {
-            self.cmd_channel.send(PlayerCommand::Next).await.expect("Error sending message to player");
+            self.next().await?;
         } else {
-            self.cmd_channel.send(PlayerCommand::SetPosition(new_positon)).await.expect("Error sending message to player");
+            self.set_position(new_positon).await.map_err(|e| fdo::Error::Failed(e.to_string()))?;
         }
         Ok(())
     }
 
-    #[zbus(property)]
-    pub async fn metadata(&self) -> Result<HashMap<&str, Value>, zbus::fdo::Error> {
-        let track_list = self.track_list.read().await;
-        Ok(get_song_metadata(track_list.current(), self.client.clone()).await)
-    }
-
-    #[zbus(property)]
-    pub async fn volume(&self) -> f64 {
-        self.player_ref.lock().await.volume().await
-    }
-
-    #[zbus(property)]
-    pub async fn set_volume(&self, volume: f64) {
-        self.cmd_channel.send(PlayerCommand::SetVolume(volume)).await.expect("Error sending message to player");
-    }
-
-    #[zbus(property)]
-    pub async fn playback_status(&self) -> &str {
-        match self.player_ref.lock().await.playback_status() {
-            PlaybackStatus::Playing => "Playing",
-            PlaybackStatus::Paused => "Paused",
-            PlaybackStatus::Stopped => "Stopped"
+    async fn set_position(&self, track_id: TrackId, position: Time) -> Result<(), fdo::Error> {
+        if position.is_negative(){
+            return Ok(());
         }
+        let position = Duration::from_micros(position.as_micros() as u64);
+        {
+            let track_list = self.track_list.read().await;
+            let song = match track_list.current() {
+                Some(t) => t,
+                None => return Ok(())
+            };
+            if song.dbus_path() != track_id.as_str() {
+                return Ok(());
+            }
+            if let Some(duration) = song.1.duration && position > duration {
+                return Ok(());
+            }
+        }
+        self.set_position(position).await.map_err(|e| fdo::Error::Failed(e.to_string()))?;
+        Ok(())
     }
 
-    #[zbus(property)]
-    pub async fn rate(&self) -> f64 {
-        self.player_ref.lock().await.rate()
+    async fn open_uri(&self, uri: String) -> fdo::Result<()> {
+        self.add_track_to_index(uri, None, false).await.map_err(|e| fdo::Error::Failed(e.to_string()))?;
+        Ok(())
     }
 
-    #[zbus(property)]
-    pub async fn set_rate(&self, rate: f64) {
+    async fn playback_status(&self) -> fdo::Result<PlaybackStatus> {
+        Ok(self.player_ref.playback_status())
+    }
+
+    async fn loop_status(&self) -> fdo::Result<LoopStatus> {
+        Ok(self.track_list.read().await.loop_status)
+    }
+
+    async fn set_loop_status(&self, loop_status: LoopStatus) -> Result<(), zbus::Error> {
+        {
+            let mut guard = self.track_list.write().await;
+            guard.loop_status = loop_status;
+        }
+        self.send_cs_msg(CurrentSongMsg::SetLoopStatus(loop_status));
+        self.properties_changed([
+            Property::LoopStatus(loop_status)
+        ]).await?;
+        Ok(())
+    }
+
+    async fn rate(&self) -> fdo::Result<f64> {
+        Ok(self.player_ref.rate())
+    }
+
+    async fn set_rate(&self, rate: f64) -> zbus::Result<()> {
         let rate = if rate > MAX_PLAYBACK_RATE {
             MAX_PLAYBACK_RATE
         } else if rate < MIN_PLAYBACK_RATE {
@@ -216,65 +328,86 @@ impl MprisPlayer {
             rate
         };
         if rate == 0.0 {
-            self.pause().await;
+            self.pause().await?;
         } else {
-            self.cmd_channel.send(PlayerCommand::SetRate(rate)).await.expect("Error sending message to player");
+            self.player_ref.set_rate(rate);
+            self.send_cs_msg(CurrentSongMsg::RateChange(rate));
+            self.properties_changed([
+                Property::Rate(rate)
+            ]).await?;
         }
+        Ok(())
     }
 
-    #[zbus(property)]
-    pub async fn position(&self) -> i64 {
-        PlayerInfo::position(&self.player_ref.lock().await.deref())
-    }
-
-    #[zbus(property)]
-    pub fn maximum_rate(&self) -> f64 {
-        MAX_PLAYBACK_RATE
-    }
-
-    #[zbus(property)]
-    pub fn minimum_rate(&self) -> f64 {
-        MIN_PLAYBACK_RATE
-    }
-
-    #[zbus(property)]
-    pub async fn shuffle(&self) -> bool {
+    async fn shuffle(&self) -> fdo::Result<bool> {
         let track_list = self.track_list.read().await;
-        track_list.is_suffled()
+        Ok(track_list.is_suffled())
     }
 
-    #[zbus(property)]
-    pub async fn set_shuffle(&self, shuffle: bool) {
-        self.cmd_channel.send(PlayerCommand::SetShuffle(shuffle)).await.expect("Error sending message to player");
+    async fn set_shuffle(&self, shuffle: bool) -> zbus::Result<()> {
+        {
+            let mut guard = self.track_list.write().await;
+            guard.set_shuffle(shuffle);
+        }
+        self.send_cs_msg(CurrentSongMsg::SetShuffle(shuffle));
+        self.properties_changed([
+            Property::Shuffle(shuffle)
+        ]).await?;
+        Ok(())
     }
 
-    #[zbus(property)]
-    pub fn can_go_next(&self) -> bool {
-        true
+    async fn metadata(&self) -> Result<Metadata, fdo::Error> {
+        let track_list = self.track_list.read().await;
+        Ok(get_song_metadata(track_list.current(), self.client.clone()).await)
     }
 
-    #[zbus(property)]
-    pub fn can_go_previous(&self) -> bool {
-        true
+    async fn volume(&self) -> fdo::Result<f64> {
+        Ok(self.player_ref.volume().await)
     }
 
-    #[zbus(property)]
-    pub fn can_play(&self) -> bool {
-        true
+    async fn set_volume(&self, v: f64) -> zbus::Result<()> {
+        self.player_ref.set_volume(v).await;
+        self.settings.set_double("volume", v).map_err(|e| fdo::Error::Failed(e.to_string()))?;
+        self.send_cs_msg(CurrentSongMsg::VolumeChangedExternal(v));
+        self.properties_changed([
+            Property::Volume(v)
+        ]).await?;
+        Ok(())
     }
 
-    #[zbus(property)]
-    pub fn can_pause(&self) -> bool {
-        true
+    async fn position(&self) -> fdo::Result<Time> {
+        Ok(Time::from_micros(PlayerInfo::position(&self.player_ref.deref())))
     }
 
-    #[zbus(property)]
-    pub fn can_seek(&self) -> bool {
-        true
+    async fn minimum_rate(&self) -> fdo::Result<f64> {
+        Ok(MIN_PLAYBACK_RATE)
     }
 
-    #[zbus(property)]
-    pub fn can_control(&self) -> bool {
-        true
+    async fn maximum_rate(&self) -> fdo::Result<f64> {
+        Ok(MAX_PLAYBACK_RATE)
+    }
+
+    async fn can_go_next(&self) -> fdo::Result<bool> {
+        Ok(true)
+    }
+
+    async fn can_go_previous(&self) -> fdo::Result<bool> {
+        Ok(true)
+    }
+
+    async fn can_play(&self) -> fdo::Result<bool> {
+        Ok(true)
+    }
+
+    async fn can_pause(&self) -> fdo::Result<bool> {
+        Ok(true)
+    }
+
+    async fn can_seek(&self) -> fdo::Result<bool> {
+        Ok(true)
+    }
+
+    async fn can_control(&self) -> fdo::Result<bool> {
+        Ok(true)
     }
 }

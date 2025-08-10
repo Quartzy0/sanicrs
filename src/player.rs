@@ -1,67 +1,30 @@
-use std::cmp::PartialEq;
-use std::error::Error;
-use std::sync::Arc;
-use async_channel::Sender;
-use futures_util::TryStreamExt;
-use rand::Rng;
-use relm4::gtk::gio::prelude::SettingsExt;
-use relm4::gtk::gio::Settings;
-use stream_download::async_read::AsyncReadStreamParams;
-use stream_download::storage::memory::MemoryStorageProvider;
-use stream_download::StreamDownload;
-use tokio_util::io::StreamReader;
-use std::time::Duration;
-use rand::prelude::SliceRandom;
-use rodio::{Decoder, OutputStream, Sink};
-use rodio::source::EmptyCallback;
-use tokio::sync::RwLock;
-use uuid::Uuid;
-use zvariant::ObjectPath;
 use crate::opensonic::cache::SongCache;
 use crate::opensonic::client::OpenSubsonicClient;
 use crate::opensonic::types::{InvalidResponseError, Song};
 use crate::ui::track_list::MoveDirection;
 use crate::PlayerCommand;
+use async_channel::Sender;
+use futures_util::TryStreamExt;
+use mpris_server::{LoopStatus, PlaybackStatus, TrackId};
+use rand::prelude::SliceRandom;
+use rand::Rng;
+use relm4::gtk::gio::prelude::SettingsExt;
+use relm4::gtk::gio::Settings;
+use rodio::source::EmptyCallback;
+use rodio::{Decoder, OutputStream, Sink};
+use std::error::Error;
+use std::rc::Rc;
+use std::sync::Arc;
+use std::time::Duration;
+use stream_download::async_read::AsyncReadStreamParams;
+use stream_download::storage::memory::MemoryStorageProvider;
+use stream_download::StreamDownload;
+use tokio::sync::RwLock;
+use tokio_util::io::StreamReader;
+use uuid::Uuid;
 
 pub const MAX_PLAYBACK_RATE: f64 = 10.0;
 pub const MIN_PLAYBACK_RATE: f64 = 0.0;
-
-#[derive(Debug)]
-pub enum PlaybackStatus {
-    Playing,
-    Paused,
-    Stopped
-}
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum LoopStatus {
-    None,
-    Track,
-    Playlist,
-}
-
-impl Into<String> for LoopStatus {
-    fn into(self) -> String {
-        match self {
-            LoopStatus::None => "None",
-            LoopStatus::Track => "Track",
-            LoopStatus::Playlist => "Playlist"
-        }.to_string()
-    }
-}
-
-impl TryFrom<String> for LoopStatus {
-    type Error = zbus::fdo::Error;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        match value.as_str() {
-            "None" => Ok(LoopStatus::None),
-            "Track" => Ok(LoopStatus::Track),
-            "Playlist" => Ok(LoopStatus::Playlist),
-            _ => Err(zbus::fdo::Error::Failed(format!("Unknown loop status: {}", value)))
-        }
-    }
-}
 
 #[derive(Debug, Default)]
 #[repr(u8)]
@@ -103,7 +66,7 @@ impl PlayerSettings {
 }
 
 pub struct PlayerInfo {
-    client: Arc<OpenSubsonicClient>,
+    client: Rc<OpenSubsonicClient>,
     sink: Sink,
     track_list: Arc<RwLock<TrackList>>,
     cmd_channel: Arc<Sender<PlayerCommand>>,
@@ -113,7 +76,7 @@ pub struct PlayerInfo {
 
 impl PlayerInfo {
     pub fn new(
-        client: Arc<OpenSubsonicClient>,
+        client: Rc<OpenSubsonicClient>,
         stream_handle: &OutputStream,
         track_list: Arc<RwLock<TrackList>>,
         cmd_channel: Arc<Sender<PlayerCommand>>,
@@ -223,7 +186,7 @@ impl PlayerInfo {
         self.sink.append(decoder.build()?);
         let cmd_channel = self.cmd_channel.clone();
         let callback_source = EmptyCallback::new(Box::new(move || {
-            cmd_channel.send_blocking(PlayerCommand::Next).expect("Error sending message Next");
+            cmd_channel.send_blocking(PlayerCommand::TrackOver).expect("Error sending message TrackOver");
         }));
         self.sink.append(callback_source);
         self.sink.play();
@@ -242,7 +205,6 @@ impl PlayerInfo {
             over = track_list.next();
         }
         if over {
-            self.cmd_channel.send(PlayerCommand::Pause).await.expect("Error sending message to player");
             None
         } else {
             self.start_current()
@@ -363,7 +325,7 @@ impl PlayerInfo {
 #[derive(Clone, Debug)]
 pub struct SongEntry(
     pub Uuid,
-    pub Arc<Song>
+    pub Rc<Song>
 );
 
 impl SongEntry {
@@ -371,13 +333,13 @@ impl SongEntry {
         format!("/me/quartzy/sanicrs/song/{}", self.0.as_simple().to_string())
     }
 
-    pub fn dbus_obj<'a>(&self) -> ObjectPath<'a> {
-        ObjectPath::try_from(self.dbus_path().clone()).expect("Error when making object path")
+    pub fn dbus_obj<'a>(&self) -> TrackId {
+        TrackId::try_from(self.dbus_path().clone()).expect("Error when making object path")
     }
 }
 
-impl From<(Uuid, Arc<Song>)> for SongEntry {
-    fn from(value: (Uuid, Arc<Song>)) -> Self {
+impl From<(Uuid, Rc<Song>)> for SongEntry {
+    fn from(value: (Uuid, Rc<Song>)) -> Self {
         Self {
             0: value.0,
             1: value.1
@@ -517,7 +479,7 @@ impl TrackList {
         }
     }
 
-    pub fn add_song(&mut self, song: Arc<Song>, index: Option<usize>) {
+    pub fn add_song(&mut self, song: Rc<Song>, index: Option<usize>) {
         let index = index.unwrap_or(self.songs.len());
         if index <= self.current {
             self.current += 1;
@@ -529,7 +491,7 @@ impl TrackList {
         }
     }
 
-    pub fn add_songs(&mut self, songs: Vec<Arc<Song>>) {
+    pub fn add_songs(&mut self, songs: Vec<Rc<Song>>) {
         let mut x: Vec<SongEntry> = songs.into_iter().map(|song| {
             (Uuid::new_v4(), song).into()
         }).collect();

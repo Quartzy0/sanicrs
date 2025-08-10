@@ -1,25 +1,23 @@
-use std::sync::Arc;
+use std::rc::Rc;
 
-use async_channel::Sender;
+use crate::dbus::player::MprisPlayer;
+use mpris_server::LocalServer;
+use relm4::adw;
+use relm4::adw::gtk;
+use relm4::adw::prelude::*;
 use relm4::gtk::Orientation;
 use relm4::prelude::*;
-use relm4::adw::prelude::*;
-use relm4::adw::gtk;
-use relm4::adw;
-use crate::PlayerCommand;
-
 
 pub struct RandomSongsDialog {
-
+    mpris_player: Rc<LocalServer<MprisPlayer>>,
 }
 
 #[derive(Debug)]
 pub enum RandomSongsMsg {
+    AddRandom(u32),
 }
 
-pub type RandomSongsInit = (
-    Arc<Sender<PlayerCommand>>
-);
+pub type RandomSongsInit = Rc<LocalServer<MprisPlayer>>;
 
 #[relm4::component(pub async)]
 impl AsyncComponent for RandomSongsDialog {
@@ -43,12 +41,10 @@ impl AsyncComponent for RandomSongsDialog {
                 gtk::Entry {},
                 gtk::Button {
                     set_label: "Add",
-                    connect_clicked[init, songs_n] => move |_| {
+                    connect_clicked[sender, songs_n] => move |_| {
                         let size = songs_n.text().parse::<u32>();
                         if size.is_ok() {
-                            init
-                                .send_blocking(PlayerCommand::QueueRandom { size: size.unwrap(), genre: None, from_year: None, to_year: None })
-                                .expect("Error sending message to player");
+                            sender.input(RandomSongsMsg::AddRandom(size.unwrap()));
                         }
                         root.close();
                     }
@@ -62,13 +58,27 @@ impl AsyncComponent for RandomSongsDialog {
         root: adw::Dialog,
         sender: AsyncComponentSender<Self>,
     ) -> AsyncComponentParts<Self> {
-        let model = Self {
-        };
+        let model = Self { mpris_player: init };
 
         let widgets: RandomSongsDialogWidgets = view_output!();
 
         AsyncComponentParts { model, widgets }
     }
 
-
+    async fn update(
+        &mut self,
+        message: Self::Input,
+        _sender: AsyncComponentSender<Self>,
+        _root: &Self::Root,
+    ) {
+        match message {
+            RandomSongsMsg::AddRandom(count) => {
+                self.mpris_player
+                    .imp()
+                    .queue_random(count, None, None, None)
+                    .await
+                    .expect("Error sending message to player");
+            }
+        }
+    }
 }

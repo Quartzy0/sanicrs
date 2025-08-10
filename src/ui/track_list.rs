@@ -1,22 +1,24 @@
+use crate::dbus::player::MprisPlayer;
 use crate::player::TrackList;
 use crate::ui::app::Init;
 use crate::ui::cover_picture::{CoverPicture, CoverSize};
 use crate::ui::song_object::{PositionState, SongObject};
+use crate::icon_names;
+use mpris_server::LocalServer;
 use relm4::adw::gio::ListStore;
 use relm4::adw::glib::{clone, closure, Object};
 use relm4::adw::gtk::{Align, ListItem, Orientation, SignalListItemFactory, Widget};
 use relm4::adw::prelude::*;
 use relm4::adw::{glib, gtk};
-use relm4::prelude::*;
-use std::sync::Arc;
-use async_channel::Sender;
 use relm4::gtk::pango::EllipsizeMode;
+use relm4::prelude::*;
+use std::rc::Rc;
+use std::sync::Arc;
 use tokio::sync::RwLock;
-use crate::{icon_names, PlayerCommand};
 
 pub struct TrackListWidget {
     track_list: Arc<RwLock<TrackList>>,
-    cmd_sender: Arc<Sender<PlayerCommand>>,
+    mpris_player: Rc<LocalServer<MprisPlayer>>,
 
     factory: SignalListItemFactory,
 }
@@ -89,16 +91,16 @@ impl AsyncComponent for TrackListWidget {
         sender: AsyncComponentSender<Self>,
     ) -> AsyncComponentParts<Self> {
         let model = TrackListWidget {
-            track_list: init.1,
+            track_list: init.0,
             factory: SignalListItemFactory::new(),
-            cmd_sender: init.3,
+            mpris_player: init.7,
         };
-        model.cmd_sender.send(PlayerCommand::TrackListSendSender(sender.clone())).await.expect("Error sending sender to player");
+        model.mpris_player.imp().tl_sender.replace(Some(sender.clone()));
         let widgets: Self::Widgets = view_output!();
 
         model.factory.connect_setup(clone!(
             #[strong(rename_to = cover_cache)]
-            init.2,
+            init.1,
             #[weak(rename_to = list)]
             widgets.list,
             #[strong]
@@ -253,7 +255,9 @@ impl AsyncComponent for TrackListWidget {
         _root: &Self::Root,
     ) {
         match message {
-            TrackListMsg::TrackActivated(i) => self.cmd_sender.send(PlayerCommand::GoTo(i)).await.expect("Error sending message to player"),
+            TrackListMsg::TrackActivated(i) => {
+                self.mpris_player.imp().send_res(self.mpris_player.imp().goto(i).await).await;
+            },
             TrackListMsg::TrackChanged(pos) => {
                 let pos = match pos {
                     Some(p) => p,
@@ -300,13 +304,13 @@ impl AsyncComponent for TrackListWidget {
                     let model = model.downcast::<gtk::NoSelection>().expect("Model should be NoSelection");
                     if let Some(model) = model.model() {
                         let model = model.downcast::<ListStore>().expect("Model should be ListStore");
-                        if let Some(item) = model.item(index as u32) {
-                            model.remove(index as u32);
+                        if let Some(item) = model.item(index) {
+                            model.remove(index);
                             model.insert((index as i32 + match direction {
-                                MoveDirection::Up => -1 as i32,
-                                MoveDirection::Down => 1 as i32,
+                                MoveDirection::Up => -1,
+                                MoveDirection::Down => 1i32,
                             }) as u32, &item);
-                            self.cmd_sender.send(PlayerCommand::MoveItem { index: index as usize, direction }).await.expect("Error sending message to main");
+                            self.mpris_player.imp().send_res(self.mpris_player.imp().move_item(index as usize, direction).await).await;
                         }
                     }
                 }

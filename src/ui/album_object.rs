@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::rc::Rc;
 use relm4::adw::glib;
 use relm4::adw::glib::Object;
 use relm4::adw::prelude::*;
@@ -25,11 +25,11 @@ impl AlbumObject {
         self.property("cover-art-id")
     }
 
-    pub fn set_songs(&self, songs: Vec<Arc<Song>>) {
+    pub fn set_songs(&self, songs: Vec<Rc<Song>>) {
         self.imp().songs.replace(Some(songs));
     }
 
-    pub fn get_songs(&self) -> Option<Vec<Arc<Song>>> {
+    pub fn get_songs(&self) -> Option<Vec<Rc<Song>>> {
         (*self.imp().songs.borrow()).as_ref().cloned()
     }
 
@@ -62,6 +62,7 @@ mod imp {
     use relm4::once_cell::sync::Lazy;
     use std::cell::{RefCell};
     use std::ops::Deref;
+    use std::rc::Rc;
     use std::sync::Arc;
     use crate::opensonic::types::{Album, Song};
 
@@ -69,7 +70,7 @@ mod imp {
     #[derive(Default)]
     pub struct AlbumObject {
         pub album: RefCell<Option<Album>>,
-        pub songs: RefCell<Option<Vec<Arc<Song>>>>
+        pub songs: RefCell<Option<Vec<Rc<Song>>>>
     }
 
     #[glib::object_subclass]

@@ -1,23 +1,23 @@
-use std::sync::Arc;
-use async_channel::Sender;
-use relm4::adw::gio::ListStore;
-use relm4::adw::glib::clone;
-use relm4::adw::prelude::*;
-use relm4::AsyncComponentSender;
-use relm4::adw::gtk::Orientation;
-use relm4::gtk::{ListItem, SignalListItemFactory, Widget};
-use relm4::prelude::*;
+use crate::dbus::player::MprisPlayer;
 use crate::opensonic::cache::AlbumCache;
 use crate::opensonic::types::AlbumListType;
-use crate::{send_error, PlayerCommand};
 use crate::ui::album_object::AlbumObject;
 use crate::ui::app::Init;
 use crate::ui::browse::album_list::AlbumList;
 use crate::ui::cover_picture::{CoverPicture, CoverSize};
+use mpris_server::LocalServer;
+use relm4::adw::gio::ListStore;
+use relm4::adw::glib::clone;
+use relm4::adw::gtk::Orientation;
+use relm4::adw::prelude::*;
+use relm4::gtk::{ListItem, SignalListItemFactory, Widget};
+use relm4::prelude::*;
+use relm4::AsyncComponentSender;
+use std::rc::Rc;
 
 pub struct BrowsePageWidget {
     album_cache: AlbumCache,
-    cmd_sender: Arc<Sender<PlayerCommand>>,
+    mpris_player: Rc<LocalServer<MprisPlayer>>,
 
     album_factory: SignalListItemFactory,
 }
@@ -147,8 +147,8 @@ impl AsyncComponent for BrowsePageWidget {
         sender: AsyncComponentSender<Self>,
     ) -> AsyncComponentParts<Self> {
         let model = Self {
-            cmd_sender: init.3,
-            album_cache: init.5,
+            mpris_player: init.7,
+            album_cache: init.3,
             album_factory: SignalListItemFactory::new(),
         };
 
@@ -156,7 +156,7 @@ impl AsyncComponent for BrowsePageWidget {
 
         model.album_factory.connect_setup(clone!(
             #[strong(rename_to = cover_cache)]
-            init.2,
+            init.1,
             move |_, list_item| {
                 let vbox = gtk::Box::builder()
                     .orientation(Orientation::Vertical)
@@ -204,7 +204,7 @@ impl AsyncComponent for BrowsePageWidget {
                     .list
                     .set_model(Some(&gtk::NoSelection::new(Some(newest_store))));
             },
-            Err(err) => send_error(&model.cmd_sender, err).await,
+            Err(err) => model.mpris_player.imp().send_error(err).await,
         };
 
         let highest = model
@@ -219,7 +219,7 @@ impl AsyncComponent for BrowsePageWidget {
                     .list
                     .set_model(Some(&gtk::NoSelection::new(Some(highest_store))));
             },
-            Err(err) => send_error(&model.cmd_sender, err).await,
+            Err(err) => model.mpris_player.imp().send_error(err).await,
         }
 
         let explore = model
@@ -234,7 +234,7 @@ impl AsyncComponent for BrowsePageWidget {
                     .list
                     .set_model(Some(&gtk::NoSelection::new(Some(explore_store))));
             },
-            Err(err) => send_error(&model.cmd_sender, err).await,
+            Err(err) => model.mpris_player.imp().send_error(err).await,
         }
 
         AsyncComponentParts { model, widgets }

@@ -1,26 +1,26 @@
 use relm4::component::{AsyncComponentController, AsyncConnector};
+use std::rc::Rc;
 mod album_list;
 mod browse_page;
 mod view_album_page;
 
+use crate::dbus::player::MprisPlayer;
 use crate::opensonic::cache::{AlbumCache, CoverCache};
 use crate::ui::album_object::AlbumObject;
 use crate::ui::app::Init;
-use crate::PlayerCommand;
-use async_channel::Sender;
+use crate::ui::browse::browse_page::{BrowsePageOut, BrowsePageWidget};
+use crate::ui::browse::view_album_page::{ViewAlbumMsg, ViewAlbumWidget};
+use mpris_server::LocalServer;
 use relm4::adw::gtk;
 use relm4::adw::gtk::Align;
 use relm4::adw::prelude::*;
-use relm4::component::{AsyncComponentParts};
+use relm4::component::AsyncComponentParts;
 use relm4::prelude::{AsyncComponent, AsyncController};
 use relm4::{adw, AsyncComponentSender};
-use std::sync::Arc;
-use crate::ui::browse::browse_page::{BrowsePageOut, BrowsePageWidget};
-use crate::ui::browse::view_album_page::{ViewAlbumMsg, ViewAlbumWidget};
 
 pub struct BrowseWidget {
     cover_cache: CoverCache,
-    cmd_sender: Arc<Sender<PlayerCommand>>,
+    mpris_player: Rc<LocalServer<MprisPlayer>>,
     album_cache: AlbumCache,
 
     browse_page: AsyncController<BrowsePageWidget>,
@@ -64,9 +64,9 @@ impl AsyncComponent for BrowseWidget {
                 BrowsePageOut::ViewAlbum(a) => BrowseMsg::ViewAlbum(a)
             });
         let model = Self {
-            cmd_sender: init.3,
-            cover_cache: init.2,
-            album_cache: init.5,
+            mpris_player: init.7,
+            cover_cache: init.1,
+            album_cache: init.3,
             browse_page,
             view_album_page: None
         };
@@ -90,7 +90,7 @@ impl AsyncComponent for BrowseWidget {
                     widgets.navigation_view.push_by_tag("view-album");
                 } else {
                     let view_album_page = ViewAlbumWidget::builder()
-                        .launch((album, self.cmd_sender.clone(), self.cover_cache.clone(), self.album_cache.clone()));
+                        .launch((album, self.mpris_player.clone(), self.cover_cache.clone(), self.album_cache.clone()));
                     widgets.navigation_view.add(view_album_page.widget());
                     widgets.navigation_view.push(view_album_page.widget());
                     self.view_album_page = Some(view_album_page);
