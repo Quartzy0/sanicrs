@@ -68,7 +68,7 @@ impl PlayerSettings {
 pub struct PlayerInfo {
     client: Rc<OpenSubsonicClient>,
     sink: Sink,
-    track_list: Arc<RwLock<TrackList>>,
+    track_list: RwLock<TrackList>,
     cmd_channel: Arc<Sender<PlayerCommand>>,
 
     settings: RwLock<PlayerSettings>,
@@ -78,7 +78,7 @@ impl PlayerInfo {
     pub fn new(
         client: Rc<OpenSubsonicClient>,
         stream_handle: &OutputStream,
-        track_list: Arc<RwLock<TrackList>>,
+        track_list: RwLock<TrackList>,
         cmd_channel: Arc<Sender<PlayerCommand>>,
     ) -> Self {
         PlayerInfo {
@@ -88,6 +88,10 @@ impl PlayerInfo {
             cmd_channel,
             settings: RwLock::new(Default::default())
         }
+    }
+
+    pub fn track_list(&self) -> &RwLock<TrackList> {
+        &self.track_list
     }
 
     pub fn load_settings_blocking(&self, settings: &Settings) -> Result<(), Box<dyn Error>>{
@@ -421,6 +425,7 @@ impl TrackList {
 
     pub fn clear(&mut self) {
         self.songs.clear();
+        self.shuffled_order.clear();
         self.current = 0;
         self.shuffled = false;
         self.loop_status = LoopStatus::None;

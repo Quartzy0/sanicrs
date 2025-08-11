@@ -1,7 +1,5 @@
 use std::error::Error;
 use std::rc::Rc;
-use std::sync::Arc;
-use crate::dbus::player;
 use crate::player::{SongEntry};
 use mpris_server::{zbus::fdo, LocalTrackListInterface, Metadata, Property, TrackId, TrackListSignal};
 use crate::dbus::player::{get_song_metadata, MprisPlayer};
@@ -11,7 +9,7 @@ use crate::ui::track_list::{MoveDirection, TrackListMsg};
 
 impl MprisPlayer {
     pub async fn add_track_to_index(&self, uri: String, index: Option<usize>, set_as_current: bool) -> Result<(), Box<dyn Error>> {
-        let mut track_list_guard = self.track_list.write().await;
+        let mut track_list_guard = self.track_list().write().await;
         match track_list_guard
             .add_song_from_uri(&*uri, &self.song_cache, index)
             .await
@@ -47,7 +45,7 @@ impl MprisPlayer {
     pub async fn queue_songs(&self, songs: Vec<Rc<Song>>) -> Result<(), Box<dyn Error>> {
         let was_empty;
         {
-            let mut guard = self.track_list.write().await;
+            let mut guard = self.track_list().write().await;
             was_empty = guard.empty();
             guard.add_songs(songs);
         }
@@ -59,7 +57,7 @@ impl MprisPlayer {
                 Property::PlaybackStatus(self.player_ref.playback_status())
             ]).await?;
         }
-        let guard = self.track_list.read().await;
+        let guard = self.track_list().read().await;
         self.track_list_replaced(guard.get_songs(), guard.current_index()).await?;
         self.send_tl_msg(TrackListMsg::ReloadList);
         Ok(())
@@ -81,9 +79,13 @@ impl MprisPlayer {
     }
 
     pub async fn play_album(&self, id: String, index: Option<usize>) -> Result<(), Box<dyn Error>> {
+        {
+            let mut guard = self.track_list().write().await;
+            guard.clear();
+        }
         self.queue_album(id).await?;
         if let Some(index) = index {
-            let mut guard = self.track_list.write().await;
+            let mut guard = self.track_list().write().await;
             guard.set_current(index);
         }
         self.properties_changed([
@@ -119,7 +121,7 @@ impl MprisPlayer {
     }
     
     pub async fn move_item(&self, index: usize, direction: MoveDirection) -> Result<(), Box<dyn Error>> {
-        let mut guard = self.track_list.write().await;
+        let mut guard = self.track_list().write().await;
         let new_i = guard.move_song(index, direction);
         if let Some(new_i) = new_i {
             let moved = guard.song_at_index(new_i).ok_or("No song found at moved index")?;
@@ -145,7 +147,7 @@ impl LocalTrackListInterface for MprisPlayer{
         &self,
         tracks_in: Vec<TrackId>,
     ) -> fdo::Result<Vec<Metadata>> {
-        let track_list = self.track_list.read().await;
+        let track_list = self.track_list().read().await;
         let mut songs_refs: Vec<&SongEntry> = Vec::new();
         let loaded_songs = track_list.get_songs();
         for x in tracks_in {
@@ -158,7 +160,7 @@ impl LocalTrackListInterface for MprisPlayer{
 
         let mut map: Vec<Metadata> = Vec::new();
         for x in songs_refs {
-            map.push(player::get_song_metadata(Some(&x), self.client.clone()).await);
+            map.push(get_song_metadata(Some(&x), self.client.clone()).await);
         }
 
         Ok(map)
@@ -169,7 +171,7 @@ impl LocalTrackListInterface for MprisPlayer{
             if after_track.as_str() == "/org/mpris/MediaPlayer2/TrackList/NoTrack" {
                 Some(0)
             } else {
-                let track_list = self.track_list.read().await;
+                let track_list = self.track_list().read().await;
                 track_list
                     .get_songs()
                     .iter()
@@ -182,7 +184,7 @@ impl LocalTrackListInterface for MprisPlayer{
 
     async fn remove_track(&self, track_id: TrackId) -> fdo::Result<()> {
         let index: usize = {
-            let track_list = self.track_list.read().await;
+            let track_list = self.track_list().read().await;
             track_list
                 .get_songs()
                 .iter()
@@ -195,7 +197,7 @@ impl LocalTrackListInterface for MprisPlayer{
 
     async fn go_to(&self, track_id: TrackId) -> fdo::Result<()> {
         let index: usize = {
-            let track_list = self.track_list.read().await;
+            let track_list = self.track_list().read().await;
             track_list
                 .get_songs()
                 .iter()
@@ -207,7 +209,7 @@ impl LocalTrackListInterface for MprisPlayer{
     }
 
     async fn tracks(&self) -> fdo::Result<Vec<TrackId>> {
-        let track_list = self.track_list.read().await;
+        let track_list = self.track_list().read().await;
         Ok(track_list
             .get_songs()
             .iter()

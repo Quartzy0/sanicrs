@@ -64,9 +64,9 @@ impl AsyncComponent for BrowseWidget {
                 BrowsePageOut::ViewAlbum(a) => BrowseMsg::ViewAlbum(a)
             });
         let model = Self {
-            mpris_player: init.7,
-            cover_cache: init.1,
-            album_cache: init.3,
+            mpris_player: init.6,
+            cover_cache: init.0,
+            album_cache: init.2,
             browse_page,
             view_album_page: None
         };

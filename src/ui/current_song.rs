@@ -108,7 +108,7 @@ impl AsyncComponent for CurrentSong {
                             #[name = "cover_image"]
                             &CoverPicture {
                                 set_cover_size: CoverSize::Huge,
-                                set_cache: init.1,
+                                set_cache: init.0,
                             }
                         } else {
                             &gtk::Box {
@@ -318,25 +318,15 @@ impl AsyncComponent for CurrentSong {
         root: Self::Root,
         sender: AsyncComponentSender<Self>,
     ) -> AsyncComponentParts<Self> {
-        {
-            let track_list = init.0.read().await;
-            match track_list.current() {
-                None => Default::default(),
-                Some(song) => sender.input(CurrentSongMsg::SongUpdate(Some(SongEntry(
-                    Uuid::new_v4(),
-                    song.1.clone(),
-                )))),
-            };
-        }
         let model = CurrentSong {
-            mpris_player: init.7,
+            mpris_player: init.6,
             playback_state_icon: icon_names::PLAY,
             loop_status_icon: icon_names::PLAYLIST_CONSECUTIVE,
             song_info: Default::default(),
             playback_position: 0.0,
             playback_rate: 1.0,
             previous_progress_check: SystemTime::now(),
-            lyrics_cache: init.6,
+            lyrics_cache: init.5,
             lyrics_factory: SignalListItemFactory::new(),
             synced_lyrics: false,
             show_lyrics: false,
@@ -345,6 +335,16 @@ impl AsyncComponent for CurrentSong {
         };
         let widgets: Self::Widgets = view_output!();
         model.mpris_player.imp().cs_sender.replace(Some(sender.clone()));
+        {
+            let track_list = model.mpris_player.imp().track_list().read().await;
+            match track_list.current() {
+                None => Default::default(),
+                Some(song) => sender.input(CurrentSongMsg::SongUpdate(Some(SongEntry(
+                    Uuid::new_v4(),
+                    song.1.clone(),
+                )))),
+            };
+        }
 
         glib::timeout_add_local(Duration::from_millis(500), clone!(
             #[strong]
@@ -352,10 +352,7 @@ impl AsyncComponent for CurrentSong {
             move || {
                 match sender.input_sender().send(CurrentSongMsg::ProgressUpdate) {
                     Ok(_) => glib::ControlFlow::Continue,
-                    Err(_) => {
-                        println!("Dropped timout");
-                        glib::ControlFlow::Break
-                    }
+                    Err(_) => glib::ControlFlow::Break
                 }
             }
         ));
@@ -365,30 +362,10 @@ impl AsyncComponent for CurrentSong {
             move || {
                 match sender.input_sender().send(CurrentSongMsg::ProgressUpdateSync(None)) {
                     Ok(_) => glib::ControlFlow::Continue,
-                    Err(_) => {
-                        println!("Dropped timout");
-                        glib::ControlFlow::Break
-                    }
+                    Err(_) => glib::ControlFlow::Break
                 }
             }
         ));
-        // let s1 = sender.clone();
-        // sender.command(|_out, shutdown| {
-        //     shutdown
-        //         .register(async move {
-        //             let mut n = 0;
-        //             loop {
-        //                 tokio::time::sleep(Duration::from_millis(500)).await;
-        //                 s1.input(CurrentSongMsg::ProgressUpdate);
-        //                 if n >= 20 {
-        //                     s1.input(CurrentSongMsg::ProgressUpdateSync(None));
-        //                     n = 0;
-        //                 }
-        //                 n += 1;
-        //             }
-        //         })
-        //         .drop_on_shutdown()
-        // });
         let v = model.mpris_player.imp().volume().await.unwrap();
         sender.input(CurrentSongMsg::VolumeChangedExternal(v));
 

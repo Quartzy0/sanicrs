@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use async_channel::Sender;
 use libsecret::password_store_future;

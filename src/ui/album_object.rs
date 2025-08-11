@@ -63,7 +63,6 @@ mod imp {
     use std::cell::{RefCell};
     use std::ops::Deref;
     use std::rc::Rc;
-    use std::sync::Arc;
     use crate::opensonic::types::{Album, Song};
 
     // Object holding the state

@@ -147,8 +147,8 @@ impl AsyncComponent for BrowsePageWidget {
         sender: AsyncComponentSender<Self>,
     ) -> AsyncComponentParts<Self> {
         let model = Self {
-            mpris_player: init.7,
-            album_cache: init.3,
+            mpris_player: init.6,
+            album_cache: init.2,
             album_factory: SignalListItemFactory::new(),
         };
 
@@ -156,7 +156,7 @@ impl AsyncComponent for BrowsePageWidget {
 
         model.album_factory.connect_setup(clone!(
             #[strong(rename_to = cover_cache)]
-            init.1,
+            init.0,
             move |_, list_item| {
                 let vbox = gtk::Box::builder()
                     .orientation(Orientation::Vertical)

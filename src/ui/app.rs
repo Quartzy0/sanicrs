@@ -1,6 +1,5 @@
 use crate::dbus::player::MprisPlayer;
 use crate::opensonic::cache::{AlbumCache, CoverCache, LyricsCache, SongCache};
-use crate::player::TrackList;
 use crate::ui::browse::BrowseWidget;
 use crate::ui::current_song::{CurrentSong, CurrentSongOut};
 use crate::ui::preferences_view::{PreferencesOut, PreferencesWidget};
@@ -10,7 +9,7 @@ use async_channel::Receiver;
 use color_thief::Color;
 use gtk::prelude::GtkWindowExt;
 use libsecret::Schema;
-use mpris_server::{LocalPlayerInterface, LocalRootInterface, LocalServer};
+use mpris_server::{LocalPlayerInterface, LocalServer};
 use relm4::abstractions::Toaster;
 use relm4::actions::{AccelsPlus, RelmAction, RelmActionGroup};
 use relm4::adw::glib as glib;
@@ -22,10 +21,8 @@ use relm4::component::AsyncConnector;
 use relm4::gtk::gio::{self, Settings};
 use relm4::gtk::Widget;
 use relm4::prelude::*;
-use relm4::{adw, component::{AsyncComponent, AsyncComponentParts, AsyncComponentSender}, Sender};
+use relm4::{adw, component::{AsyncComponent, AsyncComponentParts, AsyncComponentSender}};
 use std::rc::Rc;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 
 pub struct Model {
     current_song: AsyncController<CurrentSong>,
@@ -54,7 +51,6 @@ pub enum AppMsg {
 }
 
 pub type Init = (
-    Arc<RwLock<TrackList>>,
     CoverCache,
     SongCache,
     AlbumCache,
@@ -65,7 +61,6 @@ pub type Init = (
 );
 
 pub type StartInit = (
-    Arc<RwLock<TrackList>>,
     CoverCache,
     SongCache,
     AlbumCache,
@@ -77,7 +72,7 @@ pub type StartInit = (
 
 fn into_init(value: &StartInit, server: Rc<LocalServer<MprisPlayer>>) -> Init {
     let value = value.clone();
-    (value.0, value.1, value.2, value.3, value.4, value.5, value.6, server).into()
+    (value.0, value.1, value.2, value.3, value.4, value.5, server).into()
 }
 
 relm4::new_action_group!(WindowActionGroup, "win");
@@ -171,7 +166,7 @@ impl AsyncComponent for Model {
         root: adw::ApplicationWindow,
         sender: AsyncComponentSender<Self>,
     ) -> AsyncComponentParts<Self> {
-        let rec = init.7.clone();
+        let rec = init.6.clone();
         let server = rec.recv().await.expect("Error receiving MPRIS server");
         server.imp().app_sender.replace(Some(sender.clone()));
 
@@ -190,8 +185,8 @@ impl AsyncComponent for Model {
             track_list_connector,
             browse_connector,
             provider: CssProvider::new(),
-            settings: init.4,
-            schema: init.5,
+            settings: init.3,
+            schema: init.4,
             preferences_view: None,
             toaster: Toaster::default(),
             mpris_player: server,
@@ -391,9 +386,5 @@ impl AsyncComponent for Model {
             }
         };
         self.update_view(widgets, sender);
-    }
-
-    fn shutdown(&mut self, widgets: &mut Self::Widgets, output: Sender<Self::Output>) {
-        println!("Shutdown!");
     }
 }

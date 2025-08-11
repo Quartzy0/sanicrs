@@ -8,7 +8,6 @@ use std::env;
 use std::error::Error;
 use std::path::Path;
 use std::rc::Rc;
-use std::sync::Arc;
 
 #[derive(Default, Debug)]
 pub struct OpenSubsonicClient {

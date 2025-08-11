@@ -1,5 +1,4 @@
 use crate::dbus::player::MprisPlayer;
-use crate::player::TrackList;
 use crate::ui::app::Init;
 use crate::ui::cover_picture::{CoverPicture, CoverSize};
 use crate::ui::song_object::{PositionState, SongObject};
@@ -13,11 +12,8 @@ use relm4::adw::{glib, gtk};
 use relm4::gtk::pango::EllipsizeMode;
 use relm4::prelude::*;
 use std::rc::Rc;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 
 pub struct TrackListWidget {
-    track_list: Arc<RwLock<TrackList>>,
     mpris_player: Rc<LocalServer<MprisPlayer>>,
 
     factory: SignalListItemFactory,
@@ -91,16 +87,15 @@ impl AsyncComponent for TrackListWidget {
         sender: AsyncComponentSender<Self>,
     ) -> AsyncComponentParts<Self> {
         let model = TrackListWidget {
-            track_list: init.0,
             factory: SignalListItemFactory::new(),
-            mpris_player: init.7,
+            mpris_player: init.6,
         };
         model.mpris_player.imp().tl_sender.replace(Some(sender.clone()));
         let widgets: Self::Widgets = view_output!();
 
         model.factory.connect_setup(clone!(
             #[strong(rename_to = cover_cache)]
-            init.1,
+            init.0,
             #[weak(rename_to = list)]
             widgets.list,
             #[strong]
@@ -254,14 +249,15 @@ impl AsyncComponent for TrackListWidget {
         sender: AsyncComponentSender<Self>,
         _root: &Self::Root,
     ) {
+        let player = self.mpris_player.imp();
         match message {
             TrackListMsg::TrackActivated(i) => {
-                self.mpris_player.imp().send_res(self.mpris_player.imp().goto(i).await).await;
+                player.send_res(player.goto(i).await).await;
             },
             TrackListMsg::TrackChanged(pos) => {
                 let pos = match pos {
                     Some(p) => p,
-                    None => self.track_list.read().await.current_index().unwrap_or(0),
+                    None => player.track_list().read().await.current_index().unwrap_or(0),
                 };
 
                 let model = widgets.list.model();
@@ -285,7 +281,7 @@ impl AsyncComponent for TrackListWidget {
                 }
             },
             TrackListMsg::ReloadList => {
-                let guard = self.track_list.read().await;
+                let guard = player.track_list().read().await;
                 let pos = guard.current_index().unwrap_or(0);
                 let list_store = ListStore::from_iter(guard.get_songs().iter().enumerate().map(|x1| {
                     SongObject::new(x1.1.clone(), if x1.0 < pos {
@@ -310,7 +306,7 @@ impl AsyncComponent for TrackListWidget {
                                 MoveDirection::Up => -1,
                                 MoveDirection::Down => 1i32,
                             }) as u32, &item);
-                            self.mpris_player.imp().send_res(self.mpris_player.imp().move_item(index as usize, direction).await).await;
+                            player.send_res(player.move_item(index as usize, direction).await).await;
                         }
                     }
                 }

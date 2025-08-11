@@ -3,7 +3,7 @@ use std::error::Error;
 use crate::opensonic::client::OpenSubsonicClient;
 use crate::player::{PlayerInfo, SongEntry, TrackList, MAX_PLAYBACK_RATE, MIN_PLAYBACK_RATE};
 use crate::PlayerCommand;
-use std::ops::{Add, Deref};
+use std::ops::Add;
 use std::rc::Rc;
 use std::sync::Arc;
 use async_channel::Sender;
@@ -20,9 +20,8 @@ use crate::ui::track_list::{TrackListMsg, TrackListWidget};
 
 pub struct MprisPlayer {
     pub client: Rc<OpenSubsonicClient>,
-    pub track_list: Arc<RwLock<TrackList>>,
     pub cmd_channel: Arc<Sender<PlayerCommand>>,
-    pub player_ref: Rc<PlayerInfo>,
+    pub player_ref: PlayerInfo,
 
     pub app_sender: RefCell<Option<AsyncComponentSender<Model>>>,
     pub tl_sender: RefCell<Option<AsyncComponentSender<TrackListWidget>>>,
@@ -174,8 +173,12 @@ impl MprisPlayer {
     }
 
     pub async fn current_song_metadata(&self) -> Metadata {
-        let guard = self.track_list.read().await;
+        let guard = self.track_list().read().await;
         get_song_metadata(guard.current(), self.client.clone()).await
+    }
+    
+    pub fn track_list(&self) -> &RwLock<TrackList> {
+        self.player_ref.track_list()
     }
 }
 
@@ -242,7 +245,7 @@ impl LocalPlayerInterface for MprisPlayer {
     }
 
     async fn seek(&self, offset: Time) -> Result<(), fdo::Error> {
-        let current_position = Duration::from_micros(PlayerInfo::position(&self.player_ref.deref()) as u64);
+        let current_position = Duration::from_micros(PlayerInfo::position(&self.player_ref) as u64);
         let new_positon = if offset.is_positive() {
             current_position.add(Duration::from_micros(offset.as_micros() as u64))
         } else {
@@ -250,7 +253,7 @@ impl LocalPlayerInterface for MprisPlayer {
         };
         let mut seek_next = false;
         {
-            let track_list = self.track_list.read().await;
+            let track_list = self.track_list().read().await;
             let song = match track_list.current() {
                 Some(t) => &t.1,
                 None => return Ok(())
@@ -274,7 +277,7 @@ impl LocalPlayerInterface for MprisPlayer {
         }
         let position = Duration::from_micros(position.as_micros() as u64);
         {
-            let track_list = self.track_list.read().await;
+            let track_list = self.track_list().read().await;
             let song = match track_list.current() {
                 Some(t) => t,
                 None => return Ok(())
@@ -300,12 +303,12 @@ impl LocalPlayerInterface for MprisPlayer {
     }
 
     async fn loop_status(&self) -> fdo::Result<LoopStatus> {
-        Ok(self.track_list.read().await.loop_status)
+        Ok(self.track_list().read().await.loop_status)
     }
 
     async fn set_loop_status(&self, loop_status: LoopStatus) -> Result<(), zbus::Error> {
         {
-            let mut guard = self.track_list.write().await;
+            let mut guard = self.track_list().write().await;
             guard.loop_status = loop_status;
         }
         self.send_cs_msg(CurrentSongMsg::SetLoopStatus(loop_status));
@@ -340,13 +343,13 @@ impl LocalPlayerInterface for MprisPlayer {
     }
 
     async fn shuffle(&self) -> fdo::Result<bool> {
-        let track_list = self.track_list.read().await;
+        let track_list = self.track_list().read().await;
         Ok(track_list.is_suffled())
     }
 
     async fn set_shuffle(&self, shuffle: bool) -> zbus::Result<()> {
         {
-            let mut guard = self.track_list.write().await;
+            let mut guard = self.track_list().write().await;
             guard.set_shuffle(shuffle);
         }
         self.send_cs_msg(CurrentSongMsg::SetShuffle(shuffle));
@@ -357,7 +360,7 @@ impl LocalPlayerInterface for MprisPlayer {
     }
 
     async fn metadata(&self) -> Result<Metadata, fdo::Error> {
-        let track_list = self.track_list.read().await;
+        let track_list = self.track_list().read().await;
         Ok(get_song_metadata(track_list.current(), self.client.clone()).await)
     }
 
@@ -376,7 +379,7 @@ impl LocalPlayerInterface for MprisPlayer {
     }
 
     async fn position(&self) -> fdo::Result<Time> {
-        Ok(Time::from_micros(PlayerInfo::position(&self.player_ref.deref())))
+        Ok(Time::from_micros(PlayerInfo::position(&self.player_ref)))
     }
 
     async fn minimum_rate(&self) -> fdo::Result<f64> {

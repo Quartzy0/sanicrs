@@ -7,13 +7,13 @@ use crate::ui::setup::{SetupMsg, SetupOut, SetupWidget};
 use async_channel::{Receiver, Sender};
 use libsecret::{password_lookup_sync, Schema, SchemaFlags};
 use mpris_server::{LocalPlayerInterface, LocalServer};
-use relm4::adw::glib;
+use relm4::adw::{glib, Application};
 use relm4::adw::glib::clone;
 use relm4::adw::prelude::{ApplicationExtManual, GtkApplicationExt, WidgetExt};
 use relm4::component::{AsyncComponentBuilder, AsyncComponentController};
 use relm4::gtk::gio::prelude::{ApplicationExt, SettingsExt};
 use relm4::gtk::gio::{ApplicationFlags, Cancellable, Settings, SettingsBackend, SettingsSchemaSource};
-use relm4::{adw, RelmApp};
+use relm4::{RelmApp, RELM_BLOCKING_THREADS};
 use rodio::OutputStreamBuilder;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -24,9 +24,8 @@ use std::process::Command;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::{env, io};
-use relm4::once_cell::sync::Lazy;
 use relm4::prelude::AsyncController;
-use tokio::runtime::Runtime;
+use tokio::runtime::Handle;
 use tokio::sync::RwLock;
 use zbus::blocking;
 
@@ -41,15 +40,6 @@ const DBUS_NAME: &'static str = "org.mpris.MediaPlayer2.sanicrs";
 mod icon_names {
     include!(concat!(env!("OUT_DIR"), "/icon_names.rs"));
 }
-
-static RUNTIME: Lazy<Runtime> = Lazy::new(|| {
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .worker_threads(1)
-        .max_blocking_threads(1)
-        .build()
-        .unwrap()
-});
 
 pub enum PlayerCommand {
     Quit(bool),
@@ -86,7 +76,7 @@ fn make_client_from_saved(settings: &Settings, secret_schema: &Schema) -> Result
     ))
 }
 
-fn make_window(payload: &StartInit) -> AsyncController<Model> {
+fn make_window(app: &Application, payload: &StartInit) -> AsyncController<Model> {
     let builder = AsyncComponentBuilder::<Model>::default();
 
     let connector = builder.launch(payload.clone());
@@ -94,7 +84,7 @@ fn make_window(payload: &StartInit) -> AsyncController<Model> {
     let controller = connector.detach();
     let window = controller.widget();
     window.set_visible(true);
-    relm4::main_application().add_window(window);
+    app.add_window(window);
 
     controller
 }
@@ -102,7 +92,7 @@ fn make_window(payload: &StartInit) -> AsyncController<Model> {
 pub fn run_async(payload: StartInit, controller_cell: Rc<RefCell<Option<AsyncController<Model>>>>){
     let app = relm4::main_adw_application();
     app.connect_startup(move |app| {
-        let controller = make_window(&payload);
+        let controller = make_window(app, &payload);
         let old = controller_cell.replace(Some(controller));
         drop(old); // Would be dropped anyway but just making it explicit
     });
@@ -113,7 +103,6 @@ pub fn run_async(payload: StartInit, controller_cell: Rc<RefCell<Option<AsyncCon
         }
     });
 
-    let _guard = RUNTIME.enter();
     app.run();
 
     // Make sure everything is shut down
@@ -132,6 +121,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             return Ok(());
         }
     }
+    RELM_BLOCKING_THREADS.set(1).expect("Error setting relm4 max blocking threads");
 
     let should_restart;
     {
@@ -158,8 +148,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
             relm4_icons::initialize_icons(icon_names::GRESOURCE_BYTES, icon_names::RESOURCE_PREFIX);
         }
-        let adw_app = adw::Application::new(Some(APP_ID), ApplicationFlags::empty());
-        let app: RelmApp<AppMsg> = RelmApp::from_app(adw_app);
+        let adw_app = Application::new(Some(APP_ID), ApplicationFlags::empty());
+        let _app: RelmApp<AppMsg> = RelmApp::from_app(adw_app);
         let controller_cell: Rc<RefCell<Option<AsyncController<Model>>>> = Rc::new(RefCell::new(None));
 
         let stream = OutputStreamBuilder::from_default_device()
@@ -168,7 +158,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             .expect("Error opening output stream");
 
         let track_list = TrackList::new();
-        let track_list = Arc::new(RwLock::new(track_list));
+        let track_list = RwLock::new(track_list);
 
         let (command_send, command_recv) = async_channel::unbounded::<PlayerCommand>();
         let (restart_send, restart_recv) = async_channel::bounded::<bool>(1);
@@ -179,18 +169,17 @@ fn main() -> Result<(), Box<dyn Error>> {
         let cover_cache = CoverCache::new(client.clone());
         let lyrics_cache = LyricsCache::new(client.clone());
 
-        let player_inner = Rc::new(PlayerInfo::new(
+        let player_inner = PlayerInfo::new(
             client.clone(),
             &stream,
-            track_list.clone(),
+            track_list,
             command_send.clone()
-        ));
+        );
         player_inner.load_settings_blocking(&settings).expect("Error loading player settings");
         let player = MprisPlayer {
             client: client.clone(),
-            track_list: track_list.clone(),
             cmd_channel: command_send.clone(),
-            player_ref: player_inner.clone(),
+            player_ref: player_inner,
             app_sender: RefCell::new(None),
             tl_sender: RefCell::new(None),
             cs_sender: RefCell::new(None),
@@ -203,7 +192,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         let (mpris_send, mpris_receive) = async_channel::unbounded::<Rc<LocalServer<MprisPlayer>>>();
         let payload: StartInit = (
-            track_list.clone(),
             cover_cache.clone(),
             song_cache.clone(),
             album_cache.clone(),
@@ -214,7 +202,21 @@ fn main() -> Result<(), Box<dyn Error>> {
         );
 
 
-        glib::spawn_future_local(clone!(
+        // Get relm4's internal runtime handle and enter it, because relm4's run function isn't being called
+        // so the runtime has to be entered manually.
+        let handle;
+        {
+            let (runtime_send, runtime_recv) = async_channel::bounded::<Handle>(1);
+            relm4::spawn(async move {
+                runtime_send.send(Handle::current()).await.expect("Error sending runtime");
+            });
+            handle = runtime_recv.recv_blocking().expect("Error receiving runtime");
+        }
+        let _guard = handle.enter();
+
+
+
+        relm4::spawn_local(clone!(
             #[strong]
             payload,
             #[strong]
@@ -229,6 +231,21 @@ fn main() -> Result<(), Box<dyn Error>> {
                 restart_send.send(restart).await.expect("Error sending restart message");
             }
         ));
+        /*glib::spawn_future_local(clone!(
+            #[strong]
+            payload,
+            #[strong]
+            controller_cell,
+            async move {
+                let restart = app_main(command_recv,
+                   player,
+                   payload,
+                   mpris_send,
+                    controller_cell
+                ).await.expect("Error");
+                restart_send.send(restart).await.expect("Error sending restart message");
+            }
+        ));*/
 
         // app.run_async::<Model>(payload);
         run_async(payload, controller_cell);
@@ -280,8 +297,9 @@ async fn handle_command(
                 drop(old);
             }
             PlayerCommand::Raise => {
-                if relm4::main_application().windows().len() == 0 { // Only allow 1 window
-                    let controller = make_window(payload);
+                let app = relm4::main_adw_application();
+                if app.windows().len() == 0 { // Only allow 1 window
+                    let controller = make_window(&app, payload);
                     let old = controller_cell.replace(Some(controller));
                     drop(old);
                     mpris_send.send(server.clone()).await.expect("Error sending MPRIS server instance to app");
