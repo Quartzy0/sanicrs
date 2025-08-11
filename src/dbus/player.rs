@@ -15,6 +15,7 @@ use relm4::AsyncComponentSender;
 use tokio::sync::RwLock;
 use crate::opensonic::cache::{AlbumCache, SongCache};
 use crate::ui::app::{AppMsg, Model};
+use crate::ui::bottom_bar::BottomBar;
 use crate::ui::current_song::{CurrentSong, CurrentSongMsg};
 use crate::ui::track_list::{TrackListMsg, TrackListWidget};
 
@@ -26,6 +27,7 @@ pub struct MprisPlayer {
     pub app_sender: RefCell<Option<AsyncComponentSender<Model>>>,
     pub tl_sender: RefCell<Option<AsyncComponentSender<TrackListWidget>>>,
     pub cs_sender: RefCell<Option<AsyncComponentSender<CurrentSong>>>,
+    pub bb_sender: RefCell<Option<AsyncComponentSender<BottomBar>>>,
     pub server: RefCell<Option<Rc<LocalServer<MprisPlayer>>>>,
     
     pub song_cache: SongCache,
@@ -87,6 +89,12 @@ impl MprisPlayer {
 
     pub fn send_cs_msg(&self, msg: CurrentSongMsg) {
         if let Some(sender) = self.cs_sender.borrow().as_ref() {
+            let r = sender.input_sender().send(msg.clone());
+            if r.is_err() {
+                self.app_sender.replace(None);
+            }
+        }
+        if let Some(sender) = self.bb_sender.borrow().as_ref() {
             let r = sender.input_sender().send(msg);
             if r.is_err() {
                 self.app_sender.replace(None);

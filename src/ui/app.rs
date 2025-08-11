@@ -13,27 +13,28 @@ use mpris_server::{LocalPlayerInterface, LocalServer};
 use relm4::abstractions::Toaster;
 use relm4::actions::{AccelsPlus, RelmAction, RelmActionGroup};
 use relm4::adw::glib as glib;
-use relm4::adw::glib::{clone, closure};
+use relm4::adw::glib::{clone};
 use relm4::adw::gtk::CssProvider;
 use relm4::adw::prelude::*;
-use relm4::adw::{gdk, ViewSwitcherPolicy};
+use relm4::adw::{gdk};
 use relm4::component::AsyncConnector;
 use relm4::gtk::gio::{self, Settings};
-use relm4::gtk::Widget;
 use relm4::prelude::*;
 use relm4::{adw, component::{AsyncComponent, AsyncComponentParts, AsyncComponentSender}};
 use std::rc::Rc;
+use crate::ui::bottom_bar::{BottomBar, BottomBarOut};
 
 pub struct Model {
     current_song: AsyncController<CurrentSong>,
     track_list_connector: AsyncConnector<TrackListWidget>,
+    bottom_bar_connector: AsyncController<BottomBar>,
     browse_connector: AsyncConnector<BrowseWidget>,
     provider: CssProvider,
     settings: Settings,
     schema: Schema,
     preferences_view: Option<AsyncController<PreferencesWidget>>,
     toaster: Toaster,
-    mpris_player: Rc<LocalServer<MprisPlayer>>
+    mpris_player: Rc<LocalServer<MprisPlayer>>,
 }
 
 #[derive(Debug)]
@@ -48,6 +49,7 @@ pub enum AppMsg {
     ShowError(String, String),
     PlayPause,
     CloseRequest,
+    ShowSong,
 }
 
 pub type Init = (
@@ -100,6 +102,7 @@ impl AsyncComponent for Model {
             #[name = "split_view"]
             adw::OverlaySplitView{
                 add_css_class: "no-bg",
+                set_collapsed: true,
 
                 #[wrap(Some)]
                 set_content = &adw::ToolbarView {
@@ -108,36 +111,34 @@ impl AsyncComponent for Model {
                     set_content = toast_overlay -> adw::ToastOverlay {
                         set_vexpand: true,
 
-                        #[name = "view_stack"]
-                        adw::ViewStack {
-                            add = model.current_song.widget(),
-                            add = model.browse_connector.widget(),
-                        }
+                        #[name = "nav_view"]
+                        adw::NavigationView {
+                            adw::NavigationPage {
+                                set_title: "Browse",
+                                set_tag: Some("base"),
+                                #[wrap(Some)]
+                                set_child = &gtk::Box {
+                                    set_orientation: gtk::Orientation::Vertical,
+                                    set_hexpand: true,
 
-                        // gtk::Box {
-                        //     set_orientation: gtk::Orientation::Vertical,
-                        //     set_hexpand: true,
-                        //
-                        //     append = model.current_song.widget(),
-                        //     append = &gtk::Separator{
-                        //         set_orientation: gtk::Orientation::Vertical,
-                        //     },
-                        //     append = &gtk::Box {
-                        //         set_orientation: gtk::Orientation::Horizontal,
-                        //         gtk::Label {
-                        //             set_label: "Hello"
-                        //         }
-                        //     }
-                        // }
+                                    append = model.browse_connector.widget(),
+                                    append = &gtk::Separator{
+                                        set_orientation: gtk::Orientation::Vertical,
+                                    },
+                                    append = model.bottom_bar_connector.widget(),
+                                },
+                            },
+                            adw::NavigationPage {
+                                set_title: "Current song",
+                                set_tag: Some("current"),
+                                #[wrap(Some)]
+                                set_child = model.current_song.widget(),
+                            },
+                        },
                     },
 
                     #[name = "header_bar"]
                     add_top_bar = &adw::HeaderBar {
-                        #[name = "view_switcher"]
-                        #[wrap(Some)]
-                        set_title_widget = &adw::ViewSwitcher {
-                            set_policy: ViewSwitcherPolicy::Wide,
-                        },
                         set_show_end_title_buttons: true,
                         pack_end = &gtk::MenuButton {
                             set_icon_name: icon_names::MENU,
@@ -148,11 +149,6 @@ impl AsyncComponent for Model {
                             }
                         }
                     },
-
-                    #[name = "view_switcher_bar"]
-                    add_bottom_bar = &adw::ViewSwitcherBar {
-
-                    }
                 },
 
                 #[wrap(Some)]
@@ -180,10 +176,16 @@ impl AsyncComponent for Model {
                 });
         let track_list_connector = TrackListWidget::builder().launch(into_init(&init, server.clone()));
         let browse_connector = BrowseWidget::builder().launch(into_init(&init, server.clone()));
+        let bottom_bar_connector= BottomBar::builder()
+            .launch(into_init(&init, server.clone()))
+            .forward(sender.input_sender(), |msg| match msg {
+                BottomBarOut::ShowSong => AppMsg::ShowSong
+            });
         let model = Model {
             current_song,
             track_list_connector,
             browse_connector,
+            bottom_bar_connector,
             provider: CssProvider::new(),
             settings: init.3,
             schema: init.4,
@@ -209,7 +211,7 @@ impl AsyncComponent for Model {
 
         let widgets: ModelWidgets = view_output!();
 
-        let condition = adw::BreakpointCondition::parse("max-width: 1000px").unwrap();
+        /*let condition = adw::BreakpointCondition::parse("max-width: 1000px").unwrap();
         let breakpoint = adw::Breakpoint::new(condition.clone());
         breakpoint.add_setter(&widgets.view_switcher_bar, "reveal", Some(&true.to_value()));
         breakpoint.add_setter(&widgets.header_bar, "title-widget", Some(&None::<Widget>.to_value()));
@@ -257,15 +259,22 @@ impl AsyncComponent for Model {
             .chain_closure::<bool>(closure!(|this: Option<adw::OverlaySplitView>, name: Option<&str>| {
                 name.is_some() && name.unwrap() == "Song" && !this.unwrap().is_collapsed()
             }))
-            .bind(&widgets.split_view, "show-sidebar", Some(&widgets.split_view));
+            .bind(&widgets.split_view, "show-sidebar", Some(&widgets.split_view));*/
 
-        let sndr = sender.clone();
-        let action: RelmAction<PreferencesAction> = RelmAction::new_stateless(move |_| {
-            sender.input(AppMsg::ShowPreferences);
-        });
-        let playpause_action: RelmAction<PlayPauseAction> = RelmAction::new_stateless(move |_| {
-            sndr.input(AppMsg::PlayPause);
-        });
+        let action: RelmAction<PreferencesAction> = RelmAction::new_stateless(clone!(
+            #[strong]
+            sender,
+            move |_| {
+                sender.input(AppMsg::ShowPreferences);
+            }
+        ));
+        let playpause_action: RelmAction<PlayPauseAction> = RelmAction::new_stateless(clone!(
+            #[strong]
+            sender,
+            move |_| {
+                sender.input(AppMsg::PlayPause);
+            }
+        ));
         relm4::main_application().set_accelerators_for_action::<PlayPauseAction>(&["space"]);
 
         let mut group = RelmActionGroup::<WindowActionGroup>::new();
@@ -383,7 +392,10 @@ impl AsyncComponent for Model {
                     self.mpris_player.imp().close().await;
 
                 }
-            }
+            },
+            AppMsg::ShowSong => {
+                widgets.nav_view.push_by_tag("current");
+            },
         };
         self.update_view(widgets, sender);
     }

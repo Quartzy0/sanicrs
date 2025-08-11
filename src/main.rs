@@ -183,6 +183,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             app_sender: RefCell::new(None),
             tl_sender: RefCell::new(None),
             cs_sender: RefCell::new(None),
+            bb_sender: RefCell::new(None),
             server: RefCell::new(None),
             song_cache: song_cache.clone(),
             album_cache: album_cache.clone(),

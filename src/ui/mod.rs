@@ -9,3 +9,4 @@ mod random_songs_dialog;
 pub mod setup;
 pub mod preferences_view;
 mod lyrics_line;
+pub mod bottom_bar;

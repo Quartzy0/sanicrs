@@ -44,7 +44,7 @@ pub struct CurrentSong {
     previous_progress_check: SystemTime,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum CurrentSongMsg {
     PlayPause,
     Next,
@@ -284,6 +284,7 @@ impl AsyncComponent for CurrentSong {
                         gtk::ScaleButton {
                             set_icons: &[icon_names::SPEAKER_0, icon_names::SPEAKER_3, icon_names::SPEAKER_1, icon_names::SPEAKER_2],
                             set_adjustment: &gtk::Adjustment::new(1.0, 0.0, 1.0, 0.05, 0.0, 0.0),
+                            set_value: model.mpris_player.imp().volume().await.unwrap(),
                             connect_value_changed[sender] => move |_btn, val| {
                                 sender.input(CurrentSongMsg::VolumeChanged(val));
                             },
@@ -366,8 +367,6 @@ impl AsyncComponent for CurrentSong {
                 }
             }
         ));
-        let v = model.mpris_player.imp().volume().await.unwrap();
-        sender.input(CurrentSongMsg::VolumeChangedExternal(v));
 
         let s2 = sender.clone();
         widgets.cover_image.connect_closure(
