@@ -37,8 +37,6 @@ pub struct CurrentSong {
 
     // UI data
     song_info: Option<Rc<Song>>,
-    playback_state_icon: &'static str,
-    loop_status_icon: &'static str,
     playback_position: f64,
     playback_rate: f64,
     previous_progress_check: SystemTime,
@@ -50,20 +48,13 @@ pub enum CurrentSongMsg {
     Next,
     Previous,
     SongUpdate(Option<SongEntry>),
-    PlaybackStateChange(PlaybackStatus),
-    VolumeChanged(f64),
-    VolumeChangedExternal(f64),
     ProgressUpdate,
     ProgressUpdateSync(Option<f64>),
     RateChange(f64),
-    RateChangeUI(f64),
     Seek(f64),
-    CycleLoopStatusUI,
-    SetLoopStatus(LoopStatus),
-    ToggleShuffleUI,
-    SetShuffle(bool),
     ToggleLyrics,
     ShowRandomSongsDialog,
+    Update,
 }
 
 #[derive(Debug)]
@@ -177,7 +168,11 @@ impl AsyncComponent for CurrentSong {
                     #[name = "play_pause"]
                     gtk::Button {
                         #[watch]
-                        set_icon_name: model.playback_state_icon,
+                        set_icon_name: match model.mpris_player.imp().info().playback_status() {
+                            PlaybackStatus::Paused => icon_names::PLAY,
+                            PlaybackStatus::Playing => icon_names::PAUSE,
+                            PlaybackStatus::Stopped => icon_names::STOP,
+                        },
                         connect_clicked => CurrentSongMsg::PlayPause,
                         add_css_class: "track-action-btn",
                         add_css_class: "track-playpause-btn"
@@ -263,14 +258,30 @@ impl AsyncComponent for CurrentSong {
 
                         gtk::Button {
                             #[watch]
-                            set_icon_name: model.loop_status_icon,
+                            set_icon_name: match model.mpris_player.imp().info().loop_status() {
+                                LoopStatus::None => icon_names::PLAYLIST_CONSECUTIVE,
+                                LoopStatus::Track => icon_names::PLAYLIST_REPEAT_SONG,
+                                LoopStatus::Playlist => icon_names::PLAYLIST_REPEAT,
+                            },
                             set_tooltip_text: Some("Cycle loop status"),
-                            connect_clicked => CurrentSongMsg::CycleLoopStatusUI,
+                            connect_clicked[mplayer] => move |this| {
+                                let loop_status = mplayer.imp().info().loop_status();
+                                let new_status = match loop_status {
+                                    LoopStatus::None => LoopStatus::Playlist,
+                                    LoopStatus::Playlist => LoopStatus::Track,
+                                    LoopStatus::Track => LoopStatus::None,
+                                };
+                                mplayer.imp().set_loop_status(new_status);
+                            },
                         },
                         #[name = "shuffle_toggle"]
                         gtk::ToggleButton {
                             set_icon_name: icon_names::PLAYLIST_SHUFFLE,
-                            connect_clicked => CurrentSongMsg::ToggleShuffleUI,
+                            connect_clicked[mplayer] => move |_this| {
+                                mplayer.imp().set_shuffle(!mplayer.imp().info().shuffled());
+                            },
+                            #[watch]
+                            set_active: model.mpris_player.imp().info().shuffled(),
                         }
                     },
 
@@ -282,11 +293,12 @@ impl AsyncComponent for CurrentSong {
 
                         #[name = "volume_btn"]
                         gtk::ScaleButton {
+                            #[watch]
+                            set_value: model.mpris_player.imp().info().volume(),
                             set_icons: &[icon_names::SPEAKER_0, icon_names::SPEAKER_3, icon_names::SPEAKER_1, icon_names::SPEAKER_2],
                             set_adjustment: &gtk::Adjustment::new(1.0, 0.0, 1.0, 0.05, 0.0, 0.0),
-                            set_value: model.mpris_player.imp().volume().await.unwrap(),
-                            connect_value_changed[sender] => move |_btn, val| {
-                                sender.input(CurrentSongMsg::VolumeChanged(val));
+                            connect_value_changed[mplayer] => move |_btn, val| {
+                                mplayer.imp().set_volume(val);
                             },
                         },
 
@@ -295,8 +307,8 @@ impl AsyncComponent for CurrentSong {
                             set_enable_search: false,
                             set_model: Some(&gtk::StringList::new(&["0.5x", "0.75x", "1.0x", "1.25x", "1.5x", "1.75x", "2x"])),
                             set_selected: 2,
-                            connect_selected_notify[sender] => move |dd| {
-                                sender.input(CurrentSongMsg::RateChangeUI(match dd.selected() { // Rates from string list above
+                            connect_selected_notify[mplayer] => move |dd| {
+                                mplayer.imp().set_rate(match dd.selected() { // Rates from string list above
                                     0 => 0.5,
                                     1 => 0.75,
                                     2 => 1.0,
@@ -305,7 +317,7 @@ impl AsyncComponent for CurrentSong {
                                     5 => 1.75,
                                     6 => 2.0,
                                     _ => 1.0,
-                                }));
+                                });
                             }
                         },
                     }
@@ -321,8 +333,6 @@ impl AsyncComponent for CurrentSong {
     ) -> AsyncComponentParts<Self> {
         let model = CurrentSong {
             mpris_player: init.6,
-            playback_state_icon: icon_names::PLAY,
-            loop_status_icon: icon_names::PLAYLIST_CONSECUTIVE,
             song_info: Default::default(),
             playback_position: 0.0,
             playback_rate: 1.0,
@@ -334,10 +344,12 @@ impl AsyncComponent for CurrentSong {
             has_lyrics: false,
             random_songs_dialog: None,
         };
+        
+        let mplayer = &model.mpris_player;
         let widgets: Self::Widgets = view_output!();
         model.mpris_player.imp().cs_sender.replace(Some(sender.clone()));
         {
-            let track_list = model.mpris_player.imp().track_list().read().await;
+            let track_list = model.mpris_player.imp().track_list().borrow();
             match track_list.current() {
                 None => Default::default(),
                 Some(song) => sender.input(CurrentSongMsg::SongUpdate(Some(SongEntry(
@@ -425,11 +437,6 @@ impl AsyncComponent for CurrentSong {
             CurrentSongMsg::PlayPause => player.play_pause().await.unwrap(),
             CurrentSongMsg::Next => player.next().await.unwrap(),
             CurrentSongMsg::Previous => player.previous().await.unwrap(),
-            CurrentSongMsg::PlaybackStateChange(new_state) => match new_state {
-                PlaybackStatus::Paused => self.playback_state_icon = icon_names::PLAY,
-                PlaybackStatus::Playing => self.playback_state_icon = icon_names::PAUSE,
-                PlaybackStatus::Stopped => self.playback_state_icon = icon_names::STOP,
-            },
             CurrentSongMsg::SongUpdate(info) => {
                 self.playback_position = Duration::from_micros(player.position().await.unwrap().as_micros() as u64)
                 .as_secs_f64();
@@ -455,7 +462,7 @@ impl AsyncComponent for CurrentSong {
                             },
                             Err(e) => {
                                 self.show_lyrics = false;
-                                player.send_error(e).await;
+                                player.send_error(e);
                             },
                         }
                         Some(i.1)
@@ -464,15 +471,9 @@ impl AsyncComponent for CurrentSong {
 
 
                 self.previous_progress_check = SystemTime::now();
-                sender.input(CurrentSongMsg::PlaybackStateChange(
-                    player.playback_status().await.unwrap(),
-                ));
             }
-            CurrentSongMsg::VolumeChanged(v) => player.set_volume(v).await.unwrap(),
-            CurrentSongMsg::VolumeChangedExternal(v) => widgets.volume_btn.set_value(v),
             CurrentSongMsg::ProgressUpdate => {
-                if self.playback_state_icon == icon_names::PAUSE {
-                    // If icon is PAUSE, then its currently playing
+                if player.info().playback_status() == PlaybackStatus::Playing {
                     self.playback_position += SystemTime::now()
                         .duration_since(self.previous_progress_check)
                         .expect("Error calculating progress tiem")
@@ -486,40 +487,16 @@ impl AsyncComponent for CurrentSong {
                 self.playback_rate = rate;
                 sender.input(CurrentSongMsg::ProgressUpdateSync(None));
             }
-            CurrentSongMsg::RateChangeUI(r) => player.set_rate(r).await.unwrap(),
             CurrentSongMsg::ProgressUpdateSync(pos) => {
                 if let Some(pos) = pos {
                     self.playback_position = pos;
                     self.update_lyrics(&widgets.lyrics_list);
                 } else {
-                    self.playback_position = Duration::from_micros(player.position().await.unwrap().as_micros() as u64)
+                    self.playback_position = Duration::from_micros(player.info().position() as u64)
                     .as_secs_f64();
                 }
             }
             CurrentSongMsg::Seek(pos) => player.seek(Time::from_micros(Duration::from_secs_f64(pos).as_micros() as i64)).await.unwrap(),
-            CurrentSongMsg::CycleLoopStatusUI => {
-                let loop_status = player.loop_status().await.unwrap();
-                let new_status = match loop_status {
-                    LoopStatus::None => LoopStatus::Playlist,
-                    LoopStatus::Playlist => LoopStatus::Track,
-                    LoopStatus::Track => LoopStatus::None,
-                };
-                player.set_loop_status(new_status).await.unwrap();
-            }
-            CurrentSongMsg::SetLoopStatus(loop_status) => {
-                self.loop_status_icon = match loop_status {
-                    LoopStatus::None => icon_names::PLAYLIST_CONSECUTIVE,
-                    LoopStatus::Track => icon_names::PLAYLIST_REPEAT_SONG,
-                    LoopStatus::Playlist => icon_names::PLAYLIST_REPEAT,
-                }
-            }
-            CurrentSongMsg::ToggleShuffleUI => {
-                let shuffle = !player.shuffle().await.unwrap();
-                player.set_shuffle(shuffle).await.unwrap()
-            }
-            CurrentSongMsg::SetShuffle(shuffle) => {
-                widgets.shuffle_toggle.set_active(shuffle);
-            },
             CurrentSongMsg::ToggleLyrics => {
                 self.show_lyrics = !self.show_lyrics;
                 self.update_lyrics(&widgets.lyrics_list);
@@ -529,6 +506,7 @@ impl AsyncComponent for CurrentSong {
                 dialog.widget().present(Some(root));
                 self.random_songs_dialog = Some(dialog);
             }
+            CurrentSongMsg::Update => {} // A message sent just to update all values with #[watch] macro
         }
         self.update_view(widgets, sender);
     }

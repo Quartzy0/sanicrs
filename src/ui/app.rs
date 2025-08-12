@@ -356,7 +356,7 @@ impl AsyncComponent for Model {
                 self.mpris_player.imp().restart().await;
             }
             AppMsg::ReloadPlayer => {
-                let err = self.mpris_player.imp().reload_settings().await;
+                let err = self.mpris_player.imp().reload_settings();
                 if err.is_err() {
                     let err = err.err().unwrap();
                     sender.input(AppMsg::ShowError(err.to_string(), format!("{:?}", err)))

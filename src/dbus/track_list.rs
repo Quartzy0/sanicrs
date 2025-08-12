@@ -9,7 +9,7 @@ use crate::ui::track_list::{MoveDirection, TrackListMsg};
 
 impl MprisPlayer {
     pub async fn add_track_to_index(&self, uri: String, index: Option<usize>, set_as_current: bool) -> Result<(), Box<dyn Error>> {
-        let mut track_list_guard = self.track_list().write().await;
+        let mut track_list_guard = self.track_list().borrow_mut();
         match track_list_guard
             .add_song_from_uri(&*uri, &self.song_cache, index)
             .await
@@ -24,7 +24,7 @@ impl MprisPlayer {
                     } else {
                         songs[new_i-1].dbus_obj()
                     },
-                }).await?;
+                });
                 if set_as_current {
                     track_list_guard.set_current(new_i);
                     drop(track_list_guard);
@@ -33,7 +33,7 @@ impl MprisPlayer {
                     self.properties_changed([
                         Property::Metadata(self.current_song_metadata().await),
                         Property::PlaybackStatus(self.player_ref.playback_status())
-                    ]).await?;
+                    ]);
                 }
                 self.send_tl_msg(TrackListMsg::ReloadList);
             }
@@ -45,7 +45,7 @@ impl MprisPlayer {
     pub async fn queue_songs(&self, songs: Vec<Rc<Song>>) -> Result<(), Box<dyn Error>> {
         let was_empty;
         {
-            let mut guard = self.track_list().write().await;
+            let mut guard = self.track_list().borrow_mut();
             was_empty = guard.empty();
             guard.add_songs(songs);
         }
@@ -55,9 +55,9 @@ impl MprisPlayer {
             self.properties_changed([
                 Property::Metadata(self.current_song_metadata().await),
                 Property::PlaybackStatus(self.player_ref.playback_status())
-            ]).await?;
+            ]);
         }
-        let guard = self.track_list().read().await;
+        let guard = self.track_list().borrow();
         self.track_list_replaced(guard.get_songs(), guard.current_index()).await?;
         self.send_tl_msg(TrackListMsg::ReloadList);
         Ok(())
@@ -80,18 +80,18 @@ impl MprisPlayer {
 
     pub async fn play_album(&self, id: String, index: Option<usize>) -> Result<(), Box<dyn Error>> {
         {
-            let mut guard = self.track_list().write().await;
+            let mut guard = self.track_list().borrow_mut();
             guard.clear();
         }
         self.queue_album(id).await?;
         if let Some(index) = index {
-            let mut guard = self.track_list().write().await;
+            let mut guard = self.track_list().borrow_mut();
             guard.set_current(index);
         }
         self.properties_changed([
             Property::Metadata(self.current_song_metadata().await),
             Property::PlaybackStatus(self.player_ref.playback_status())
-        ]).await?;
+        ]);
 
         Ok(())
     }
@@ -103,7 +103,7 @@ impl MprisPlayer {
         self.properties_changed([
             Property::Metadata(self.current_song_metadata().await),
             Property::PlaybackStatus(self.player_ref.playback_status())
-        ]).await?;
+        ]);
         Ok(())
     }
     
@@ -112,22 +112,22 @@ impl MprisPlayer {
         self.send_tl_msg(TrackListMsg::ReloadList);
         self.track_list_emit(TrackListSignal::TrackRemoved {
             track_id: e.dbus_obj()
-        }).await?;
+        });
         self.send_cs_msg(CurrentSongMsg::SongUpdate(Some(e)));
         self.properties_changed([
             Property::Metadata(self.current_song_metadata().await),
-        ]).await?;
+        ]);
         Ok(())
     }
     
     pub async fn move_item(&self, index: usize, direction: MoveDirection) -> Result<(), Box<dyn Error>> {
-        let mut guard = self.track_list().write().await;
+        let mut guard = self.track_list().borrow_mut();
         let new_i = guard.move_song(index, direction);
         if let Some(new_i) = new_i {
             let moved = guard.song_at_index(new_i).ok_or("No song found at moved index")?;
             self.track_list_emit(TrackListSignal::TrackRemoved {
                 track_id: moved.dbus_obj(),
-            }).await?;
+            });
             self.track_list_emit(TrackListSignal::TrackAdded {
                 metadata: get_song_metadata(Some(moved), self.client.clone()).await,
                 after_track: if index != 0 && let Some(prev) = guard.song_at_index(index-1) {
@@ -135,7 +135,7 @@ impl MprisPlayer {
                 } else {
                     TrackId::NO_TRACK
                 },
-            }).await?;
+            });
             self.send_tl_msg(TrackListMsg::TrackChanged(None));
         }
         Ok(())
@@ -147,7 +147,7 @@ impl LocalTrackListInterface for MprisPlayer{
         &self,
         tracks_in: Vec<TrackId>,
     ) -> fdo::Result<Vec<Metadata>> {
-        let track_list = self.track_list().read().await;
+        let track_list = self.track_list().borrow();
         let mut songs_refs: Vec<&SongEntry> = Vec::new();
         let loaded_songs = track_list.get_songs();
         for x in tracks_in {
@@ -171,7 +171,7 @@ impl LocalTrackListInterface for MprisPlayer{
             if after_track.as_str() == "/org/mpris/MediaPlayer2/TrackList/NoTrack" {
                 Some(0)
             } else {
-                let track_list = self.track_list().read().await;
+                let track_list = self.track_list().borrow();
                 track_list
                     .get_songs()
                     .iter()
@@ -184,7 +184,7 @@ impl LocalTrackListInterface for MprisPlayer{
 
     async fn remove_track(&self, track_id: TrackId) -> fdo::Result<()> {
         let index: usize = {
-            let track_list = self.track_list().read().await;
+            let track_list = self.track_list().borrow();
             track_list
                 .get_songs()
                 .iter()
@@ -197,7 +197,7 @@ impl LocalTrackListInterface for MprisPlayer{
 
     async fn go_to(&self, track_id: TrackId) -> fdo::Result<()> {
         let index: usize = {
-            let track_list = self.track_list().read().await;
+            let track_list = self.track_list().borrow();
             track_list
                 .get_songs()
                 .iter()
@@ -209,7 +209,7 @@ impl LocalTrackListInterface for MprisPlayer{
     }
 
     async fn tracks(&self) -> fdo::Result<Vec<TrackId>> {
-        let track_list = self.track_list().read().await;
+        let track_list = self.track_list().borrow();
         Ok(track_list
             .get_songs()
             .iter()

@@ -6,9 +6,11 @@ use relm4::adw::gtk::prelude::*;
 use relm4::prelude::*;
 use relm4::adw::{gdk, glib, gtk};
 use relm4::gtk::{Align, Justification, Orientation};
+use uuid::Uuid;
 use crate::dbus::player::MprisPlayer;
 use crate::icon_names;
 use crate::opensonic::types::Song;
+use crate::player::SongEntry;
 use crate::ui::app::Init;
 use crate::ui::cover_picture::{CoverPicture, CoverSize};
 use crate::ui::current_song::CurrentSongMsg;
@@ -18,8 +20,6 @@ pub struct BottomBar {
 
     // UI data
     song_info: Option<Rc<Song>>,
-    playback_state_icon: &'static str,
-    loop_status_icon: &'static str,
     playback_position: f64,
     playback_rate: f64,
     previous_progress_check: SystemTime,
@@ -101,7 +101,11 @@ impl AsyncComponent for BottomBar {
                     #[name = "play_pause"]
                     gtk::Button {
                         #[watch]
-                        set_icon_name: model.playback_state_icon,
+                        set_icon_name: match model.mpris_player.imp().info().playback_status() {
+                            PlaybackStatus::Paused => icon_names::PLAY,
+                            PlaybackStatus::Playing => icon_names::PAUSE,
+                            PlaybackStatus::Stopped => icon_names::STOP,
+                        },
                         connect_clicked => CurrentSongMsg::PlayPause,
                         add_css_class: "track-action-btn",
                         add_css_class: "track-playpause-btn"
@@ -162,11 +166,12 @@ impl AsyncComponent for BottomBar {
 
                 #[name = "volume_btn"]
                 gtk::ScaleButton {
+                    #[watch]
+                    set_value: model.mpris_player.imp().info().volume(),
                     set_icons: &[icon_names::SPEAKER_0, icon_names::SPEAKER_3, icon_names::SPEAKER_1, icon_names::SPEAKER_2],
                     set_adjustment: &gtk::Adjustment::new(1.0, 0.0, 1.0, 0.05, 0.0, 0.0),
-                    set_value: model.mpris_player.imp().volume().await.unwrap(),
-                    connect_value_changed[sender] => move |_btn, val| {
-                        sender.input(CurrentSongMsg::VolumeChanged(val));
+                    connect_value_changed[mplayer] => move |_btn, val| {
+                                mplayer.imp().set_volume(val);
                     },
                 },
 
@@ -175,8 +180,8 @@ impl AsyncComponent for BottomBar {
                     set_enable_search: false,
                     set_model: Some(&gtk::StringList::new(&["0.5x", "0.75x", "1.0x", "1.25x", "1.5x", "1.75x", "2x"])),
                     set_selected: 2,
-                    connect_selected_notify[sender] => move |dd| {
-                        sender.input(CurrentSongMsg::RateChangeUI(match dd.selected() { // Rates from string list above
+                    connect_selected_notify[mplayer] => move |dd| {
+                        mplayer.imp().set_rate(match dd.selected() { // Rates from string list above
                             0 => 0.5,
                             1 => 0.75,
                             2 => 1.0,
@@ -185,7 +190,7 @@ impl AsyncComponent for BottomBar {
                             5 => 1.75,
                             6 => 2.0,
                             _ => 1.0,
-                        }));
+                        });
                     }
                 },
             }
@@ -199,8 +204,6 @@ impl AsyncComponent for BottomBar {
     ) -> AsyncComponentParts<Self> {
         let model = Self {
             mpris_player: init.6,
-            playback_state_icon: icon_names::PLAY,
-            loop_status_icon: icon_names::PLAYLIST_CONSECUTIVE,
             song_info: Default::default(),
             playback_position: 0.0,
             playback_rate: 1.0,
@@ -208,7 +211,19 @@ impl AsyncComponent for BottomBar {
         };
         model.mpris_player.imp().bb_sender.replace(Some(sender.clone()));
 
+        let mplayer = &model.mpris_player;
         let widgets: BottomBarWidgets = view_output!();
+
+        {
+            let track_list = model.mpris_player.imp().track_list().borrow();
+            match track_list.current() {
+                None => Default::default(),
+                Some(song) => sender.input(CurrentSongMsg::SongUpdate(Some(SongEntry(
+                    Uuid::new_v4(),
+                    song.1.clone(),
+                )))),
+            };
+        }
 
         let gesture = gtk::GestureClick::new();
         gesture.connect_released(clone!(
@@ -256,11 +271,6 @@ impl AsyncComponent for BottomBar {
             CurrentSongMsg::PlayPause => player.play_pause().await.unwrap(),
             CurrentSongMsg::Next => player.next().await.unwrap(),
             CurrentSongMsg::Previous => player.previous().await.unwrap(),
-            CurrentSongMsg::PlaybackStateChange(new_state) => match new_state {
-                PlaybackStatus::Paused => self.playback_state_icon = icon_names::PLAY,
-                PlaybackStatus::Playing => self.playback_state_icon = icon_names::PAUSE,
-                PlaybackStatus::Stopped => self.playback_state_icon = icon_names::STOP,
-            },
             CurrentSongMsg::SongUpdate(info) => {
                 self.playback_position = Duration::from_micros(player.position().await.unwrap().as_micros() as u64)
                     .as_secs_f64();
@@ -275,15 +285,9 @@ impl AsyncComponent for BottomBar {
                 };
 
                 self.previous_progress_check = SystemTime::now();
-                sender.input(CurrentSongMsg::PlaybackStateChange(
-                    player.playback_status().await.unwrap(),
-                ));
             }
-            CurrentSongMsg::VolumeChanged(v) => player.set_volume(v).await.unwrap(),
-            CurrentSongMsg::VolumeChangedExternal(v) => widgets.volume_btn.set_value(v),
             CurrentSongMsg::ProgressUpdate => {
-                if self.playback_state_icon == icon_names::PAUSE {
-                    // If icon is PAUSE, then its currently playing
+                if player.info().playback_status() == PlaybackStatus::Playing {
                     self.playback_position += SystemTime::now()
                         .duration_since(self.previous_progress_check)
                         .expect("Error calculating progress tiem")
@@ -305,7 +309,6 @@ impl AsyncComponent for BottomBar {
                 self.playback_rate = rate;
                 sender.input(CurrentSongMsg::ProgressUpdateSync(None));
             }
-            CurrentSongMsg::RateChangeUI(r) => player.set_rate(r).await.unwrap(),
             _ => {},
         }
         self.update_view(widgets, sender);

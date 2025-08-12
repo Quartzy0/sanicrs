@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use crate::opensonic::cache::SongCache;
 use crate::opensonic::client::OpenSubsonicClient;
 use crate::opensonic::types::{InvalidResponseError, Song};
@@ -19,7 +20,6 @@ use std::time::Duration;
 use stream_download::async_read::AsyncReadStreamParams;
 use stream_download::storage::memory::MemoryStorageProvider;
 use stream_download::StreamDownload;
-use tokio::sync::RwLock;
 use tokio_util::io::StreamReader;
 use uuid::Uuid;
 
@@ -68,53 +68,52 @@ impl PlayerSettings {
 pub struct PlayerInfo {
     client: Rc<OpenSubsonicClient>,
     sink: Sink,
-    track_list: RwLock<TrackList>,
+    track_list: RefCell<TrackList>,
     cmd_channel: Arc<Sender<PlayerCommand>>,
 
-    settings: RwLock<PlayerSettings>,
+    settings: RefCell<PlayerSettings>,
 }
 
 impl PlayerInfo {
     pub fn new(
         client: Rc<OpenSubsonicClient>,
         stream_handle: &OutputStream,
-        track_list: RwLock<TrackList>,
+        track_list: TrackList,
         cmd_channel: Arc<Sender<PlayerCommand>>,
     ) -> Self {
         PlayerInfo {
             client,
             sink: Sink::connect_new(stream_handle.mixer()),
-            track_list,
+            track_list: RefCell::new(track_list),
             cmd_channel,
-            settings: RwLock::new(Default::default())
+            settings: RefCell::default()
         }
     }
 
-    pub fn track_list(&self) -> &RwLock<TrackList> {
+    pub fn track_list(&self) -> &RefCell<TrackList> {
         &self.track_list
     }
 
-    pub fn load_settings_blocking(&self, settings: &Settings) -> Result<(), Box<dyn Error>>{
-        let mut s = self.settings.blocking_write();
+    pub fn load_settings(&self, settings: &Settings) -> Result<(), Box<dyn Error>>{
+        let mut s = self.settings.borrow_mut();
         s.load_settings(settings)
     }
 
-    pub async fn load_settings(&self, settings: &Settings) -> Result<(), Box<dyn Error>>{
-        let mut s = self.settings.write().await;
-        s.load_settings(settings)
+    pub fn loop_status(&self) -> LoopStatus {
+        self.track_list.borrow().loop_status
     }
 
-    pub async fn loop_status(&self) -> LoopStatus {
-        self.track_list.read().await.loop_status
+    pub fn set_loop_status(&self, loop_status: LoopStatus) {
+        self.track_list.borrow_mut().loop_status = loop_status;
     }
 
     pub async fn goto(&self, index: usize) -> Result<Option<SongEntry>, Box<dyn Error>> {
-        self.track_list.write().await.set_current(index);
+        self.track_list.borrow_mut().set_current(index);
         self.start_current().await
     }
 
     pub async fn remove_song(&self, index: usize) -> Result<SongEntry, Box<dyn Error>> {
-        let mut guard = self.track_list.write().await;
+        let mut guard = self.track_list.borrow_mut();
         let c = guard.current_index();
         let e = guard.remove_song(index);
         if c != guard.current_index() {
@@ -144,7 +143,7 @@ impl PlayerInfo {
     }
 
     pub async fn start_current(&self) -> Result<Option<SongEntry>, Box<dyn Error>> {
-        let track_list = self.track_list.read().await;
+        let track_list = self.track_list.borrow();
         let song = match track_list.current() {
             None => {return Ok(None)}
             Some(s) => s
@@ -195,8 +194,8 @@ impl PlayerInfo {
         self.sink.append(callback_source);
         self.sink.play();
 
-        let v = self.settings.read().await.volume;
-        let mul = v * 10.0_f64.powf(self.gain_from_track(Some(song)).await/20.0);
+        let v = self.settings.borrow().volume;
+        let mul = v * 10.0_f64.powf(self.gain_from_track(Some(song))/20.0);
         self.sink.set_volume(mul as f32);
 
         Ok(Some(song.clone()))
@@ -205,7 +204,7 @@ impl PlayerInfo {
     pub async fn next(&self) -> Option<SongEntry> {
         let over;
         {
-            let mut track_list = self.track_list.write().await;
+            let mut track_list = self.track_list.borrow_mut();
             over = track_list.next();
         }
         if over {
@@ -219,7 +218,7 @@ impl PlayerInfo {
 
     pub async fn previous(&self) -> Option<SongEntry> {
         {
-            let mut track_list = self.track_list.write().await;
+            let mut track_list = self.track_list.borrow_mut();
             track_list.previous();
         }
         self.start_current()
@@ -227,16 +226,16 @@ impl PlayerInfo {
             .expect("Error starting next track")
     }
 
-    pub async fn stop(&self) {
+    pub fn stop(&self) {
         self.sink.clear();
-        let mut track_list = self.track_list.write().await;
+        let mut track_list = self.track_list.borrow_mut();
         track_list.clear();
     }
 
-    pub async fn set_position(&self, position: Duration) -> Result<(), Box<dyn Error>> {
+    pub fn set_position(&self, position: Duration) -> Result<(), Box<dyn Error>> {
         let position = position;
         {
-            let track_list = self.track_list.read().await;
+            let track_list = self.track_list.borrow();
             let song = match track_list.current() {
                 Some(t) => t,
                 None => return Ok(())
@@ -249,8 +248,8 @@ impl PlayerInfo {
         Ok(())
     }
 
-    pub async fn gain_from_track(&self, song: Option<&SongEntry>) -> f64 {
-        match self.settings.read().await.replay_gain_mode {
+    pub fn gain_from_track(&self, song: Option<&SongEntry>) -> f64 {
+        match self.settings.borrow().replay_gain_mode {
             ReplayGainMode::None => 0.0,
             ReplayGainMode::Track => match song {
                 Some(entry) => entry.1.replay_gain.as_ref().and_then(|x| x.track_gain).unwrap_or(0.0) as f64,
@@ -263,26 +262,26 @@ impl PlayerInfo {
         }
     }
 
-    pub async fn gain(&self) -> f64 {
-        self.gain_from_track(self.track_list.read().await.current()).await
+    pub fn gain(&self) -> f64 {
+        self.gain_from_track(self.track_list.borrow().current())
     }
 
-    async fn set_set_volume(&self) {
-        let v = self.settings.read().await.volume;
-        let mul = v * 10.0_f64.powf(self.gain().await/20.0);
+    fn set_set_volume(&self) {
+        let v = self.settings.borrow().volume;
+        let mul = v * 10.0_f64.powf(self.gain()/20.0);
         self.sink.set_volume(mul as f32);
     }
 
-    pub async fn volume(&self) -> f64 {
-        self.settings.read().await.volume
+    pub fn volume(&self) -> f64 {
+        self.settings.borrow().volume
     }
 
-    pub async fn set_volume(&self, volume: f64) {
+    pub fn set_volume(&self, volume: f64) {
         {
-            let mut settings = self.settings.write().await;
+            let mut settings = self.settings.borrow_mut();
             settings.volume = volume;
         }
-        self.set_set_volume().await;
+        self.set_set_volume();
     }
 
     pub fn playback_status(&self) -> PlaybackStatus {
@@ -321,8 +320,12 @@ impl PlayerInfo {
         (self.sink.get_pos().as_micros() as f64 /* * self.sink.speed() as f64*/) as i64
     }
 
-    pub async fn shuffled(&self) -> bool {
-        self.track_list.read().await.shuffled
+    pub fn shuffled(&self) -> bool {
+        self.track_list.borrow().shuffled
+    }
+
+    pub fn set_shuffled(&self, shuffled: bool) {
+        self.track_list.borrow_mut().set_shuffle(shuffled);
     }
 }
 

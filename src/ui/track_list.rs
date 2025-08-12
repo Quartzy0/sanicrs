@@ -252,12 +252,12 @@ impl AsyncComponent for TrackListWidget {
         let player = self.mpris_player.imp();
         match message {
             TrackListMsg::TrackActivated(i) => {
-                player.send_res(player.goto(i).await).await;
+                player.send_res(player.goto(i).await);
             },
             TrackListMsg::TrackChanged(pos) => {
                 let pos = match pos {
                     Some(p) => p,
-                    None => player.track_list().read().await.current_index().unwrap_or(0),
+                    None => player.track_list().borrow().current_index().unwrap_or(0),
                 };
 
                 let model = widgets.list.model();
@@ -281,7 +281,7 @@ impl AsyncComponent for TrackListWidget {
                 }
             },
             TrackListMsg::ReloadList => {
-                let guard = player.track_list().read().await;
+                let guard = player.track_list().borrow();
                 let pos = guard.current_index().unwrap_or(0);
                 let list_store = ListStore::from_iter(guard.get_songs().iter().enumerate().map(|x1| {
                     SongObject::new(x1.1.clone(), if x1.0 < pos {
@@ -306,7 +306,7 @@ impl AsyncComponent for TrackListWidget {
                                 MoveDirection::Up => -1,
                                 MoveDirection::Down => 1i32,
                             }) as u32, &item);
-                            player.send_res(player.move_item(index as usize, direction).await).await;
+                            player.send_res(player.move_item(index as usize, direction).await);
                         }
                     }
                 }

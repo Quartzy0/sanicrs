@@ -204,7 +204,7 @@ impl AsyncComponent for BrowsePageWidget {
                     .list
                     .set_model(Some(&gtk::NoSelection::new(Some(newest_store))));
             },
-            Err(err) => model.mpris_player.imp().send_error(err).await,
+            Err(err) => model.mpris_player.imp().send_error(err),
         };
 
         let highest = model
@@ -219,7 +219,7 @@ impl AsyncComponent for BrowsePageWidget {
                     .list
                     .set_model(Some(&gtk::NoSelection::new(Some(highest_store))));
             },
-            Err(err) => model.mpris_player.imp().send_error(err).await,
+            Err(err) => model.mpris_player.imp().send_error(err),
         }
 
         let explore = model
@@ -234,7 +234,7 @@ impl AsyncComponent for BrowsePageWidget {
                     .list
                     .set_model(Some(&gtk::NoSelection::new(Some(explore_store))));
             },
-            Err(err) => model.mpris_player.imp().send_error(err).await,
+            Err(err) => model.mpris_player.imp().send_error(err),
         }
 
         AsyncComponentParts { model, widgets }

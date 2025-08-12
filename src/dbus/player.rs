@@ -12,7 +12,6 @@ use mpris_server::{LocalPlayerInterface, Metadata, Time, TrackId, LoopStatus, Pl
 use relm4::adw::gio::Settings;
 use relm4::adw::prelude::SettingsExt;
 use relm4::AsyncComponentSender;
-use tokio::sync::RwLock;
 use crate::opensonic::cache::{AlbumCache, SongCache};
 use crate::ui::app::{AppMsg, Model};
 use crate::ui::bottom_bar::BottomBar;
@@ -111,43 +110,44 @@ impl MprisPlayer {
         }
     }
 
-    pub async fn properties_changed(&self, properties: impl IntoIterator<Item = Property>) -> zbus::Result<()>{
-        if let Some(server) = self.server.borrow().as_ref() {
-            server.properties_changed(properties).await
-        } else {
-            Ok(())
+    pub fn properties_changed(&self, properties: impl IntoIterator<Item = Property>){
+        if let Some(server) = self.server.borrow().clone() {
+            let properties: Vec<Property> = properties.into_iter().collect();
+            relm4::spawn_local(async move {
+                let _ = server.properties_changed(properties).await;
+            });
         }
     }
     
-    pub async fn send_error(&self, error: Box<dyn Error>) {
+    pub fn send_error(&self, error: Box<dyn Error>) {
         self.send_app_msg(AppMsg::ShowError(format!("{}", error), format!("{:?}", error)));
     }
 
-    pub async fn send_res(&self, result: Result<(), Box<dyn Error>>) {
+    pub fn send_res(&self, result: Result<(), Box<dyn Error>>) {
         if let Err(error) = result {
             self.send_app_msg(AppMsg::ShowError(format!("{}", error), format!("{:?}", error)));
         }
     }
 
-    pub async fn send_res_fdo(&self, result: fdo::Result<()>) {
+    pub fn send_res_fdo(&self, result: fdo::Result<()>) {
         if let Err(error) = result {
             self.send_app_msg(AppMsg::ShowError(format!("{}", error), format!("{:?}", error)));
         }
     }
 
-    pub async fn track_list_emit(&self, signal: TrackListSignal) -> zbus::Result<()> {
-        if let Some(server) = self.server.borrow().as_ref() {
-            server.track_list_emit(signal).await
-        } else {
-            Ok(())
+    pub fn track_list_emit(&self, signal: TrackListSignal) {
+        if let Some(server) = self.server.borrow().clone() {
+            relm4::spawn_local(async move {
+                let _ = server.track_list_emit(signal).await;
+            });
         }
     }
     
-    pub async fn emit(&self, signal: Signal) -> zbus::Result<()> {
-        if let Some(server) = self.server.borrow().as_ref() {
-            server.emit(signal).await
-        } else {
-            Ok(())
+    pub fn emit(&self, signal: Signal) {
+        if let Some(server) = self.server.borrow().clone() {
+            relm4::spawn_local(async move { 
+                let _ = server.emit(signal).await;
+            });
         }
     }
 
@@ -167,26 +167,94 @@ impl MprisPlayer {
         }
     }
     
-    pub async fn set_position(&self, p: Duration) -> Result<(), Box<dyn Error>> {
-        self.player_ref.set_position(p).await?;
+    pub fn set_position(&self, p: Duration) -> Result<(), Box<dyn Error>> {
+        self.player_ref.set_position(p)?;
         self.send_cs_msg(CurrentSongMsg::ProgressUpdateSync(Some(p.as_secs_f64())));
         self.emit(Signal::Seeked {
             position: Time::from_micros(p.as_micros() as i64),
-        }).await?;
+        });
         Ok(())
     }
     
-    pub async fn reload_settings(&self) -> Result<(), Box<dyn Error>> {
-        self.player_ref.load_settings(&self.settings).await
+    pub fn reload_settings(&self) -> Result<(), Box<dyn Error>> {
+        self.player_ref.load_settings(&self.settings)
     }
 
     pub async fn current_song_metadata(&self) -> Metadata {
-        let guard = self.track_list().read().await;
+        let guard = self.track_list().borrow();
         get_song_metadata(guard.current(), self.client.clone()).await
     }
     
-    pub fn track_list(&self) -> &RwLock<TrackList> {
+    pub fn track_list(&self) -> &RefCell<TrackList> {
         self.player_ref.track_list()
+    }
+
+    pub fn info(&self) -> &PlayerInfo {
+        &self.player_ref
+    }
+}
+
+
+// Non-async version of DBus function which don't need to be async
+impl MprisPlayer {
+    pub fn pause(&self){
+        self.player_ref.pause();
+        self.send_cs_msg(CurrentSongMsg::Update);
+        self.properties_changed([
+            Property::PlaybackStatus(self.player_ref.playback_status())
+        ]);
+    }
+
+    pub fn stop(&self) {
+        self.player_ref.stop();
+        self.send_cs_msg(CurrentSongMsg::Update);
+        self.properties_changed([
+            Property::PlaybackStatus(self.player_ref.playback_status())
+        ]);
+    }
+
+    pub fn set_loop_status(&self, loop_status: LoopStatus){
+        self.player_ref.set_loop_status(loop_status);
+        self.send_cs_msg(CurrentSongMsg::Update);
+        self.properties_changed([
+            Property::LoopStatus(loop_status)
+        ]);
+    }
+
+    pub fn set_rate(&self, rate: f64)  {
+        let rate = if rate > MAX_PLAYBACK_RATE {
+            MAX_PLAYBACK_RATE
+        } else if rate < MIN_PLAYBACK_RATE {
+            MIN_PLAYBACK_RATE
+        } else {
+            rate
+        };
+        if rate == 0.0 {
+            self.pause();
+        } else {
+            self.player_ref.set_rate(rate);
+            self.send_cs_msg(CurrentSongMsg::RateChange(rate));
+            self.properties_changed([
+                Property::Rate(rate)
+            ]);
+        }
+    }
+
+    pub fn set_shuffle(&self, shuffle: bool) {
+        self.player_ref.set_shuffled(shuffle);
+        self.send_cs_msg(CurrentSongMsg::Update);
+        self.properties_changed([
+            Property::Shuffle(shuffle)
+        ]);
+    }
+
+    pub fn set_volume(&self, v: f64) {
+        self.player_ref.set_volume(v);
+        self.send_res_fdo(self.settings.set_double("volume", v).map_err(|e| fdo::Error::Failed(e.to_string())));
+        self.send_cs_msg(CurrentSongMsg::Update);
+        self.properties_changed([
+            Property::Volume(v)
+        ]);
     }
 }
 
@@ -194,14 +262,14 @@ impl LocalPlayerInterface for MprisPlayer {
     async fn next(&self) -> fdo::Result<()> {
         let s = self.player_ref.next().await;
         if s.is_none() { // Track list over
-            self.pause().await?;
+            self.pause();
         }
         self.send_cs_msg(CurrentSongMsg::SongUpdate(s));
         self.send_tl_msg(TrackListMsg::TrackChanged(None));
         self.properties_changed([
             Property::Metadata(self.current_song_metadata().await),
             Property::PlaybackStatus(self.player_ref.playback_status())
-        ]).await?;
+        ]);
         Ok(())
     }
 
@@ -212,43 +280,35 @@ impl LocalPlayerInterface for MprisPlayer {
         self.properties_changed([
             Property::Metadata(self.current_song_metadata().await),
             Property::PlaybackStatus(self.player_ref.playback_status())
-        ]).await?;
+        ]);
         Ok(())
     }
 
     async fn pause(&self) -> fdo::Result<()> {
-        self.player_ref.pause();
-        self.send_cs_msg(CurrentSongMsg::PlaybackStateChange(self.player_ref.playback_status()));
-        self.properties_changed([
-            Property::PlaybackStatus(self.player_ref.playback_status())
-        ]).await?;
+        self.pause();
         Ok(())
     }
 
     async fn play_pause(&self) -> fdo::Result<()> {
         self.player_ref.playpause().await;
-        self.send_cs_msg(CurrentSongMsg::PlaybackStateChange(self.player_ref.playback_status()));
+        self.send_cs_msg(CurrentSongMsg::Update);
         self.properties_changed([
             Property::PlaybackStatus(self.player_ref.playback_status())
-        ]).await?;
+        ]);
         Ok(())
     }
 
     async fn stop(&self) -> fdo::Result<()> {
-        self.player_ref.stop().await;
-        self.send_cs_msg(CurrentSongMsg::PlaybackStateChange(self.player_ref.playback_status()));
-        self.properties_changed([
-            Property::PlaybackStatus(self.player_ref.playback_status())
-        ]).await?;
+        self.stop();
         Ok(())
     }
 
     async fn play(&self) -> fdo::Result<()> {
         self.player_ref.play().await;
-        self.send_cs_msg(CurrentSongMsg::PlaybackStateChange(self.player_ref.playback_status()));
+        self.send_cs_msg(CurrentSongMsg::Update);
         self.properties_changed([
             Property::PlaybackStatus(self.player_ref.playback_status())
-        ]).await?;
+        ]);
         Ok(())
     }
 
@@ -261,7 +321,7 @@ impl LocalPlayerInterface for MprisPlayer {
         };
         let mut seek_next = false;
         {
-            let track_list = self.track_list().read().await;
+            let track_list = self.track_list().borrow();
             let song = match track_list.current() {
                 Some(t) => &t.1,
                 None => return Ok(())
@@ -274,7 +334,7 @@ impl LocalPlayerInterface for MprisPlayer {
         if seek_next {
             self.next().await?;
         } else {
-            self.set_position(new_positon).await.map_err(|e| fdo::Error::Failed(e.to_string()))?;
+            self.set_position(new_positon).map_err(|e| fdo::Error::Failed(e.to_string()))?;
         }
         Ok(())
     }
@@ -285,7 +345,7 @@ impl LocalPlayerInterface for MprisPlayer {
         }
         let position = Duration::from_micros(position.as_micros() as u64);
         {
-            let track_list = self.track_list().read().await;
+            let track_list = self.track_list().borrow();
             let song = match track_list.current() {
                 Some(t) => t,
                 None => return Ok(())
@@ -297,7 +357,7 @@ impl LocalPlayerInterface for MprisPlayer {
                 return Ok(());
             }
         }
-        self.set_position(position).await.map_err(|e| fdo::Error::Failed(e.to_string()))?;
+        self.set_position(position).map_err(|e| fdo::Error::Failed(e.to_string()))?;
         Ok(())
     }
 
@@ -311,18 +371,11 @@ impl LocalPlayerInterface for MprisPlayer {
     }
 
     async fn loop_status(&self) -> fdo::Result<LoopStatus> {
-        Ok(self.track_list().read().await.loop_status)
+        Ok(self.player_ref.loop_status())
     }
 
     async fn set_loop_status(&self, loop_status: LoopStatus) -> Result<(), zbus::Error> {
-        {
-            let mut guard = self.track_list().write().await;
-            guard.loop_status = loop_status;
-        }
-        self.send_cs_msg(CurrentSongMsg::SetLoopStatus(loop_status));
-        self.properties_changed([
-            Property::LoopStatus(loop_status)
-        ]).await?;
+        self.set_loop_status(loop_status);
         Ok(())
     }
 
@@ -331,58 +384,30 @@ impl LocalPlayerInterface for MprisPlayer {
     }
 
     async fn set_rate(&self, rate: f64) -> zbus::Result<()> {
-        let rate = if rate > MAX_PLAYBACK_RATE {
-            MAX_PLAYBACK_RATE
-        } else if rate < MIN_PLAYBACK_RATE {
-            MIN_PLAYBACK_RATE
-        } else {
-            rate
-        };
-        if rate == 0.0 {
-            self.pause().await?;
-        } else {
-            self.player_ref.set_rate(rate);
-            self.send_cs_msg(CurrentSongMsg::RateChange(rate));
-            self.properties_changed([
-                Property::Rate(rate)
-            ]).await?;
-        }
+        self.set_rate(rate);
         Ok(())
     }
 
     async fn shuffle(&self) -> fdo::Result<bool> {
-        let track_list = self.track_list().read().await;
-        Ok(track_list.is_suffled())
+        Ok(self.player_ref.shuffled())
     }
 
     async fn set_shuffle(&self, shuffle: bool) -> zbus::Result<()> {
-        {
-            let mut guard = self.track_list().write().await;
-            guard.set_shuffle(shuffle);
-        }
-        self.send_cs_msg(CurrentSongMsg::SetShuffle(shuffle));
-        self.properties_changed([
-            Property::Shuffle(shuffle)
-        ]).await?;
+        self.set_shuffle(shuffle);
         Ok(())
     }
 
     async fn metadata(&self) -> Result<Metadata, fdo::Error> {
-        let track_list = self.track_list().read().await;
+        let track_list = self.track_list().borrow();
         Ok(get_song_metadata(track_list.current(), self.client.clone()).await)
     }
 
     async fn volume(&self) -> fdo::Result<f64> {
-        Ok(self.player_ref.volume().await)
+        Ok(self.player_ref.volume())
     }
 
     async fn set_volume(&self, v: f64) -> zbus::Result<()> {
-        self.player_ref.set_volume(v).await;
-        self.settings.set_double("volume", v).map_err(|e| fdo::Error::Failed(e.to_string()))?;
-        self.send_cs_msg(CurrentSongMsg::VolumeChangedExternal(v));
-        self.properties_changed([
-            Property::Volume(v)
-        ]).await?;
+        self.set_volume(v);
         Ok(())
     }
 

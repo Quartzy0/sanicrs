@@ -26,7 +26,6 @@ use std::sync::Arc;
 use std::{env, io};
 use relm4::prelude::AsyncController;
 use tokio::runtime::Handle;
-use tokio::sync::RwLock;
 use zbus::blocking;
 
 mod dbus;
@@ -157,8 +156,6 @@ fn main() -> Result<(), Box<dyn Error>> {
             .open_stream()
             .expect("Error opening output stream");
 
-        let track_list = TrackList::new();
-        let track_list = RwLock::new(track_list);
 
         let (command_send, command_recv) = async_channel::unbounded::<PlayerCommand>();
         let (restart_send, restart_recv) = async_channel::bounded::<bool>(1);
@@ -172,10 +169,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         let player_inner = PlayerInfo::new(
             client.clone(),
             &stream,
-            track_list,
+            TrackList::new(),
             command_send.clone()
         );
-        player_inner.load_settings_blocking(&settings).expect("Error loading player settings");
+        player_inner.load_settings(&settings).expect("Error loading player settings");
         let player = MprisPlayer {
             client: client.clone(),
             cmd_channel: command_send.clone(),
@@ -232,23 +229,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 restart_send.send(restart).await.expect("Error sending restart message");
             }
         ));
-        /*glib::spawn_future_local(clone!(
-            #[strong]
-            payload,
-            #[strong]
-            controller_cell,
-            async move {
-                let restart = app_main(command_recv,
-                   player,
-                   payload,
-                   mpris_send,
-                    controller_cell
-                ).await.expect("Error");
-                restart_send.send(restart).await.expect("Error sending restart message");
-            }
-        ));*/
 
-        // app.run_async::<Model>(payload);
         run_async(payload, controller_cell);
 
         should_restart = restart_recv.try_recv().unwrap_or(false);
@@ -306,7 +287,7 @@ async fn handle_command(
                     mpris_send.send(server.clone()).await.expect("Error sending MPRIS server instance to app");
                 }
             },
-            PlayerCommand::TrackOver => server.imp().send_res_fdo(server.imp().next().await).await,
+            PlayerCommand::TrackOver => server.imp().send_res_fdo(server.imp().next().await),
         }
     }
 }
