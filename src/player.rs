@@ -23,9 +23,6 @@ use stream_download::StreamDownload;
 use tokio_util::io::StreamReader;
 use uuid::Uuid;
 
-pub const MAX_PLAYBACK_RATE: f64 = 10.0;
-pub const MIN_PLAYBACK_RATE: f64 = 0.0;
-
 #[derive(Debug, Default)]
 #[repr(u8)]
 pub enum ReplayGainMode {
@@ -300,7 +297,8 @@ impl PlayerInfo {
         self.sink.speed() as f64
     }
 
-    pub fn set_rate(&self, rate: f64) {
+    // See comment in dbus/player.rs on set_rate function
+    /*pub fn set_rate(&self, rate: f64) {
         let rate = if rate > MAX_PLAYBACK_RATE {
             MAX_PLAYBACK_RATE
         } else if rate < MIN_PLAYBACK_RATE {
@@ -312,12 +310,11 @@ impl PlayerInfo {
             self.pause();
         } else {
             self.sink.set_speed(rate as f32);
-            // self.send_signal(CurrentSongMsg::RateChange(rate));
         }
-    }
+    }*/
 
     pub fn position(&self) -> i64 {
-        (self.sink.get_pos().as_micros() as f64 /* * self.sink.speed() as f64*/) as i64
+        self.sink.get_pos().mul_f64(self.rate()).as_micros() as i64
     }
 
     pub fn shuffled(&self) -> bool {

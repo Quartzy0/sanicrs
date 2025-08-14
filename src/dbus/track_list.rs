@@ -42,12 +42,16 @@ impl MprisPlayer {
         Ok(())
     }
 
-    pub async fn queue_songs(&self, songs: Vec<Rc<Song>>) -> Result<(), Box<dyn Error>> {
+    pub async fn queue_songs(&self, songs: Vec<Rc<Song>>, set_index: Option<usize>) -> Result<(), Box<dyn Error>> {
         let was_empty;
         {
             let mut guard = self.track_list().borrow_mut();
-            was_empty = guard.empty();
+            let len = guard.get_songs().len();
+            was_empty = len==0;
             guard.add_songs(songs);
+            if let Some(index) = set_index {
+                guard.set_current(len+index);
+            }
         }
         if was_empty {
             let song = self.player_ref.start_current().await?;
@@ -66,33 +70,20 @@ impl MprisPlayer {
     pub async fn queue_random(&self, size: u32, genre: Option<String>, from_year: Option<u32>, to_year: Option<u32>) -> Result<(), Box<dyn Error>> {
         let songs = self.song_cache.get_random_songs(Some(size), genre.as_deref(), from_year, to_year, None).await?;
         println!("Added {} random songs", songs.len());
-        self.queue_songs(songs).await
+        self.queue_songs(songs, None).await
     }
 
-    pub async fn queue_album(&self, id: String) -> Result<(), Box<dyn Error>> {
+    pub async fn queue_album(&self, id: String, index: Option<usize>) -> Result<(), Box<dyn Error>> {
         let album = self.album_cache.get_album(id.as_str()).await?;
         if let Some(songs) = album.get_songs() {
-            self.queue_songs(songs).await
-        } else {
-            Ok(())
+            self.queue_songs(songs, index).await?;
+            if index.is_some() {
+                self.properties_changed([
+                    Property::Metadata(self.current_song_metadata().await),
+                    Property::PlaybackStatus(self.player_ref.playback_status())
+                ]);
+            }
         }
-    }
-
-    pub async fn play_album(&self, id: String, index: Option<usize>) -> Result<(), Box<dyn Error>> {
-        {
-            let mut guard = self.track_list().borrow_mut();
-            guard.clear();
-        }
-        self.queue_album(id).await?;
-        if let Some(index) = index {
-            let mut guard = self.track_list().borrow_mut();
-            guard.set_current(index);
-        }
-        self.properties_changed([
-            Property::Metadata(self.current_song_metadata().await),
-            Property::PlaybackStatus(self.player_ref.playback_status())
-        ]);
-
         Ok(())
     }
     

@@ -246,7 +246,7 @@ impl AsyncComponent for ViewAlbumWidget {
         let player = self.mpris_player.imp();
         match message {
             ViewAlbumMsg::PlayAlbum(index) => {
-                player.send_res(player.play_album(self.album.id(), index).await);
+                player.send_res(player.queue_album(self.album.id(), index).await);
             },
             ViewAlbumMsg::SetAlbum(album) => {
                 if self.album.id() == album.id(){
@@ -274,7 +274,7 @@ impl AsyncComponent for ViewAlbumWidget {
                 store.splice(0, store.n_items(), &songs);
             },
             ViewAlbumMsg::QueueAlbum => {
-                player.send_res(player.queue_album(self.album.id()).await);
+                player.send_res(player.queue_album(self.album.id(), None).await);
             }
         };
         self.update_view(widgets, sender);

@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::error::Error;
 use crate::opensonic::client::OpenSubsonicClient;
-use crate::player::{PlayerInfo, SongEntry, TrackList, MAX_PLAYBACK_RATE, MIN_PLAYBACK_RATE};
+use crate::player::{PlayerInfo, SongEntry, TrackList};
 use crate::PlayerCommand;
 use std::ops::Add;
 use std::rc::Rc;
@@ -221,7 +221,10 @@ impl MprisPlayer {
         ]);
     }
 
-    pub fn set_rate(&self, rate: f64)  {
+    // Changing the rate is currently unsupported because of issues in Rodio's API
+    // https://github.com/RustAudio/rodio/issues/638
+    // https://github.com/RustAudio/rodio/pull/768 (maybe will fix this)
+    /*pub fn set_rate(&self, rate: f64)  {
         let rate = if rate > MAX_PLAYBACK_RATE {
             MAX_PLAYBACK_RATE
         } else if rate < MIN_PLAYBACK_RATE {
@@ -238,7 +241,7 @@ impl MprisPlayer {
                 Property::Rate(rate)
             ]);
         }
-    }
+    }*/
 
     pub fn set_shuffle(&self, shuffle: bool) {
         self.player_ref.set_shuffled(shuffle);
@@ -383,9 +386,10 @@ impl LocalPlayerInterface for MprisPlayer {
         Ok(self.player_ref.rate())
     }
 
-    async fn set_rate(&self, rate: f64) -> zbus::Result<()> {
-        self.set_rate(rate);
-        Ok(())
+    async fn set_rate(&self, _rate: f64) -> zbus::Result<()> {
+        Err(zbus::Error::Unsupported)
+        /*self.set_rate(rate);
+        Ok(())*/
     }
 
     async fn shuffle(&self) -> fdo::Result<bool> {
@@ -416,11 +420,11 @@ impl LocalPlayerInterface for MprisPlayer {
     }
 
     async fn minimum_rate(&self) -> fdo::Result<f64> {
-        Ok(MIN_PLAYBACK_RATE)
+        Ok(1.0)
     }
 
     async fn maximum_rate(&self) -> fdo::Result<f64> {
-        Ok(MAX_PLAYBACK_RATE)
+        Ok(1.0)
     }
 
     async fn can_go_next(&self) -> fdo::Result<bool> {

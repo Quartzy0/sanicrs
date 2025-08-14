@@ -1,6 +1,6 @@
 use std::rc::Rc;
 use std::time::{Duration, SystemTime};
-use mpris_server::{LocalPlayerInterface, LocalServer, PlaybackStatus, Time};
+use mpris_server::{LocalPlayerInterface, LocalServer, PlaybackStatus};
 use relm4::adw::glib::{clone, Propagation};
 use relm4::adw::gtk::prelude::*;
 use relm4::prelude::*;
@@ -175,7 +175,7 @@ impl AsyncComponent for BottomBar {
                     },
                 },
 
-                #[name = "rate_dropdown"]
+                /*#[name = "rate_dropdown"]
                 gtk::DropDown {
                     set_enable_search: false,
                     set_model: Some(&gtk::StringList::new(&["0.5x", "0.75x", "1.0x", "1.25x", "1.5x", "1.75x", "2x"])),
@@ -192,7 +192,7 @@ impl AsyncComponent for BottomBar {
                             _ => 1.0,
                         });
                     }
-                },
+                },*/
             }
         }
     }
@@ -264,7 +264,7 @@ impl AsyncComponent for BottomBar {
         widgets: &mut Self::Widgets,
         message: Self::Input,
         sender: AsyncComponentSender<Self>,
-        root: &gtk::CenterBox,
+        _root: &gtk::CenterBox,
     ) {
         let player = self.mpris_player.imp();
         match message {
@@ -304,11 +304,11 @@ impl AsyncComponent for BottomBar {
                         .as_secs_f64();
                 }
             }
-            CurrentSongMsg::Seek(pos) => player.seek(Time::from_micros(Duration::from_secs_f64(pos).as_micros() as i64)).await.unwrap(),
-            CurrentSongMsg::RateChange(rate) => {
+            CurrentSongMsg::Seek(pos) => player.send_res(player.set_position(Duration::from_secs_f64(pos))),
+            /*CurrentSongMsg::RateChange(rate) => {
                 self.playback_rate = rate;
                 sender.input(CurrentSongMsg::ProgressUpdateSync(None));
-            }
+            }*/
             _ => {},
         }
         self.update_view(widgets, sender);

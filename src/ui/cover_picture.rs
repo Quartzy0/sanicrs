@@ -172,12 +172,27 @@ mod imp {
                 let ratio = cover.intrinsic_aspect_ratio();
                 let w;
                 let h;
-                if ratio > 1.0 {
+                if ratio < 1.0 {
                     w = width;
                     h = width / ratio;
                 } else {
                     w = height * ratio;
                     h = height;
+                }
+                let xoffset;
+                let yoffset;
+                let wclip;
+                let hclip;
+                if width > height {
+                    wclip = h;
+                    hclip = h;
+                    xoffset = (w-h)/2.0;
+                    yoffset = 0.0;
+                } else {
+                    wclip = w;
+                    hclip = w;
+                    xoffset = 0.0;
+                    yoffset = (h-w)/2.0;
                 }
 
                 let x = (width - w.ceil()) / 2.0;
@@ -194,7 +209,7 @@ mod imp {
                 snapshot.scale(1.0 / scale_factor as f32, 1.0 / scale_factor as f32);
                 snapshot.translate(&Point::new(x as f32, y as f32));
                 snapshot.push_rounded_clip(&gsk::RoundedRect::new(
-                    bounds,
+                    Rect::new(xoffset as f32, yoffset as f32, wclip as f32, hclip as f32),
                     Size::new(border_radius, border_radius),
                     Size::new(border_radius, border_radius),
                     Size::new(border_radius, border_radius),

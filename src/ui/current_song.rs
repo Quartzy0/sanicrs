@@ -9,7 +9,7 @@ use crate::ui::random_songs_dialog::RandomSongsDialog;
 use crate::ui::song_object::PositionState;
 use crate::icon_names;
 use color_thief::Color;
-use mpris_server::{LocalPlayerInterface, Time};
+use mpris_server::{LocalPlayerInterface};
 use mpris_server::{LocalServer, LoopStatus, PlaybackStatus};
 use relm4::adw::gio::ListStore;
 use relm4::adw::glib as glib;
@@ -50,7 +50,7 @@ pub enum CurrentSongMsg {
     SongUpdate(Option<SongEntry>),
     ProgressUpdate,
     ProgressUpdateSync(Option<f64>),
-    RateChange(f64),
+    // RateChange(f64),
     Seek(f64),
     ToggleLyrics,
     ShowRandomSongsDialog,
@@ -264,7 +264,7 @@ impl AsyncComponent for CurrentSong {
                                 LoopStatus::Playlist => icon_names::PLAYLIST_REPEAT,
                             },
                             set_tooltip_text: Some("Cycle loop status"),
-                            connect_clicked[mplayer] => move |this| {
+                            connect_clicked[mplayer] => move |_this| {
                                 let loop_status = mplayer.imp().info().loop_status();
                                 let new_status = match loop_status {
                                     LoopStatus::None => LoopStatus::Playlist,
@@ -302,7 +302,7 @@ impl AsyncComponent for CurrentSong {
                             },
                         },
 
-                        #[name = "rate_dropdown"]
+                        /*#[name = "rate_dropdown"]
                         gtk::DropDown {
                             set_enable_search: false,
                             set_model: Some(&gtk::StringList::new(&["0.5x", "0.75x", "1.0x", "1.25x", "1.5x", "1.75x", "2x"])),
@@ -319,7 +319,7 @@ impl AsyncComponent for CurrentSong {
                                     _ => 1.0,
                                 });
                             }
-                        },
+                        },*/
                     }
                 }
             }
@@ -483,10 +483,10 @@ impl AsyncComponent for CurrentSong {
                 }
                 self.previous_progress_check = SystemTime::now();
             }
-            CurrentSongMsg::RateChange(rate) => {
+            /*CurrentSongMsg::RateChange(rate) => {
                 self.playback_rate = rate;
                 sender.input(CurrentSongMsg::ProgressUpdateSync(None));
-            }
+            }*/
             CurrentSongMsg::ProgressUpdateSync(pos) => {
                 if let Some(pos) = pos {
                     self.playback_position = pos;
@@ -496,7 +496,7 @@ impl AsyncComponent for CurrentSong {
                     .as_secs_f64();
                 }
             }
-            CurrentSongMsg::Seek(pos) => player.seek(Time::from_micros(Duration::from_secs_f64(pos).as_micros() as i64)).await.unwrap(),
+            CurrentSongMsg::Seek(pos) => player.send_res(player.set_position(Duration::from_secs_f64(pos))),
             CurrentSongMsg::ToggleLyrics => {
                 self.show_lyrics = !self.show_lyrics;
                 self.update_lyrics(&widgets.lyrics_list);
