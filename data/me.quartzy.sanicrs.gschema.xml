@@ -25,5 +25,13 @@
         <default>nothing</default>
         <summary>Base URL of the OpenSubsonic server.</summary>
     </key>
+    <key name="should-scrobble" type="b">
+        <default>true</default>
+        <summary>Should the client report the current playing song to the server.</summary>
+    </key>
+    <key name="random-songs-prefill" type="u">
+        <default>0</default>
+        <summary>The amount of random songs to add that is prefilled in the entry field in the random songs dialog.</summary>
+    </key>
   </schema>
 </schemalist>

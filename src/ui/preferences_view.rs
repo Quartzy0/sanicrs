@@ -59,6 +59,11 @@ impl AsyncComponent for PreferencesWidget {
                     adw::SwitchRow {
                         set_title: "Remain open in background"
                     },
+                     #[name = "scrobble"]
+                    adw::SwitchRow {
+                        set_title: "Should scrobble",
+                        set_subtitle: "Should the client report playback of the current song to the server"
+                    },
                 }
             },
             add = &adw::PreferencesPage {
@@ -117,6 +122,7 @@ impl AsyncComponent for PreferencesWidget {
         model.settings.bind("should-cache-covers", &widgets.cache_albums, "active").build();
         widgets.replay_gain.set_selected(model.settings.value("replay-gain-mode").get::<u8>().unwrap() as u32);
         model.settings.bind("stay-in-background", &widgets.open_in_bg, "active").build();
+        model.settings.bind("should-scrobble", &widgets.scrobble, "active").build();
 
         AsyncComponentParts { model, widgets }
     }

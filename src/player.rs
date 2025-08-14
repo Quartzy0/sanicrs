@@ -35,12 +35,13 @@ pub enum ReplayGainMode {
 #[derive(Debug)]
 pub struct PlayerSettings {
     replay_gain_mode: ReplayGainMode,
-    volume: f64
+    volume: f64,
+    should_scrobble: bool,
 }
 
 impl Default for PlayerSettings {
     fn default() -> Self {
-        Self { replay_gain_mode: Default::default(), volume: 1.0 }
+        Self { replay_gain_mode: Default::default(), volume: 1.0, should_scrobble: true }
     }
 }
 
@@ -57,6 +58,7 @@ impl PlayerSettings {
             }
         };
         self.volume = settings.value("volume").try_get()?;
+        self.should_scrobble = settings.boolean("should-scrobble");
 
         Ok(())
     }
@@ -194,6 +196,10 @@ impl PlayerInfo {
         let v = self.settings.borrow().volume;
         let mul = v * 10.0_f64.powf(self.gain_from_track(Some(song))/20.0);
         self.sink.set_volume(mul as f32);
+        
+        if self.settings.borrow().should_scrobble {
+            self.client.scrobble(song.1.id.as_str(), Some(false)).await?;
+        }
 
         Ok(Some(song.clone()))
     }

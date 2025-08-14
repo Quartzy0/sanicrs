@@ -170,6 +170,8 @@ impl AsyncComponent for BottomBar {
                     set_value: model.mpris_player.imp().info().volume(),
                     set_icons: &[icon_names::SPEAKER_0, icon_names::SPEAKER_3, icon_names::SPEAKER_1, icon_names::SPEAKER_2],
                     set_adjustment: &gtk::Adjustment::new(1.0, 0.0, 1.0, 0.05, 0.0, 0.0),
+                    set_valign: Align::Center,
+                    set_halign: Align::Center,
                     connect_value_changed[mplayer] => move |_btn, val| {
                                 mplayer.imp().set_volume(val);
                     },

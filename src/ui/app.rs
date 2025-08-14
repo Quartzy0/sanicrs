@@ -4,7 +4,6 @@ use crate::ui::browse::BrowseWidget;
 use crate::ui::current_song::{CurrentSong, CurrentSongOut};
 use crate::ui::preferences_view::{PreferencesOut, PreferencesWidget};
 use crate::ui::track_list::TrackListWidget;
-use crate::icon_names;
 use async_channel::Receiver;
 use color_thief::Color;
 use gtk::prelude::GtkWindowExt;
@@ -23,6 +22,7 @@ use relm4::prelude::*;
 use relm4::{adw, component::{AsyncComponent, AsyncComponentParts, AsyncComponentSender}};
 use std::rc::Rc;
 use crate::ui::bottom_bar::{BottomBar, BottomBarOut};
+use crate::ui::header_bar::HeaderBar;
 
 pub struct Model {
     current_song: AsyncController<CurrentSong>,
@@ -104,20 +104,20 @@ impl AsyncComponent for Model {
                 add_css_class: "no-bg",
                 set_collapsed: true,
 
+                #[local_ref]
                 #[wrap(Some)]
-                set_content = &adw::ToolbarView {
-                    #[local_ref]
-                    #[wrap(Some)]
-                    set_content = toast_overlay -> adw::ToastOverlay {
-                        set_vexpand: true,
+                set_content = toast_overlay -> adw::ToastOverlay {
+                    set_vexpand: true,
 
-                        #[name = "nav_view"]
-                        adw::NavigationView {
-                            adw::NavigationPage {
-                                set_title: "Browse",
-                                set_tag: Some("base"),
+                    #[name = "nav_view"]
+                    adw::NavigationView {
+                        adw::NavigationPage {
+                            set_title: "Browse",
+                            set_tag: Some("base"),
+                            #[wrap(Some)]
+                            set_child = &adw::ToolbarView {
                                 #[wrap(Some)]
-                                set_child = &gtk::Box {
+                                set_content = &gtk::Box {
                                     set_orientation: gtk::Orientation::Vertical,
                                     set_hexpand: true,
 
@@ -127,27 +127,23 @@ impl AsyncComponent for Model {
                                     },
                                     append = model.bottom_bar_connector.widget(),
                                 },
-                            },
-                            adw::NavigationPage {
-                                set_title: "Current song",
-                                set_tag: Some("current"),
-                                #[wrap(Some)]
-                                set_child = model.current_song.widget(),
+
+                                #[template]
+                                add_top_bar = &HeaderBar{}
                             },
                         },
-                    },
-
-                    #[name = "header_bar"]
-                    add_top_bar = &adw::HeaderBar {
-                        set_show_end_title_buttons: true,
-                        pack_end = &gtk::MenuButton {
-                            set_icon_name: icon_names::MENU,
-
+                        adw::NavigationPage {
+                            set_title: "Current song",
+                            set_tag: Some("current"),
                             #[wrap(Some)]
-                            set_menu_model = &gio::Menu {
-                                append_item = &gio::MenuItem::new(Some("Preferences"), Some("win.preferences")),
-                            }
-                        }
+                            set_child = &adw::ToolbarView {
+                                #[wrap(Some)]
+                                set_content = model.current_song.widget(),
+
+                                #[template]
+                                add_top_bar = &HeaderBar{}
+                            },
+                        },
                     },
                 },
 

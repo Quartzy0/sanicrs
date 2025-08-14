@@ -42,18 +42,25 @@ impl MprisPlayer {
         Ok(())
     }
 
-    pub async fn queue_songs(&self, songs: Vec<Rc<Song>>, set_index: Option<usize>) -> Result<(), Box<dyn Error>> {
-        let was_empty;
+    pub async fn queue_songs(&self, songs: Vec<Rc<Song>>, set_index: Option<usize>, clear_previous: bool) -> Result<(), Box<dyn Error>> {
+        let song_changed;
         {
             let mut guard = self.track_list().borrow_mut();
-            let len = guard.get_songs().len();
-            was_empty = len==0;
+            let len = if clear_previous {
+                guard.clear();
+                0
+            } else {
+                guard.get_songs().len()
+            };
             guard.add_songs(songs);
             if let Some(index) = set_index {
                 guard.set_current(len+index);
+                song_changed = true;
+            } else {
+                song_changed = len==0;
             }
         }
-        if was_empty {
+        if song_changed {
             let song = self.player_ref.start_current().await?;
             self.send_cs_msg(CurrentSongMsg::SongUpdate(song));
             self.properties_changed([
@@ -67,16 +74,16 @@ impl MprisPlayer {
         Ok(())
     }
 
-    pub async fn queue_random(&self, size: u32, genre: Option<String>, from_year: Option<u32>, to_year: Option<u32>) -> Result<(), Box<dyn Error>> {
+    pub async fn queue_random(&self, size: u32, genre: Option<String>, from_year: Option<u32>, to_year: Option<u32>, clear_previous: bool) -> Result<(), Box<dyn Error>> {
         let songs = self.song_cache.get_random_songs(Some(size), genre.as_deref(), from_year, to_year, None).await?;
         println!("Added {} random songs", songs.len());
-        self.queue_songs(songs, None).await
+        self.queue_songs(songs, None, clear_previous).await
     }
 
-    pub async fn queue_album(&self, id: String, index: Option<usize>) -> Result<(), Box<dyn Error>> {
+    pub async fn queue_album(&self, id: String, index: Option<usize>, clear_previous: bool) -> Result<(), Box<dyn Error>> {
         let album = self.album_cache.get_album(id.as_str()).await?;
         if let Some(songs) = album.get_songs() {
-            self.queue_songs(songs, index).await?;
+            self.queue_songs(songs, index, clear_previous).await?;
             if index.is_some() {
                 self.properties_changed([
                     Property::Metadata(self.current_song_metadata().await),

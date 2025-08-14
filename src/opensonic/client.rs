@@ -628,4 +628,29 @@ impl OpenSubsonicClient {
 
         Ok(resp)
     }
+
+    pub async fn scrobble(
+        &self,
+        id: &str,
+        submission: Option<bool>
+    ) -> Result<(), Box<dyn Error>> {
+        let submission = submission.unwrap_or(true).to_string();
+        let params = vec![
+            ("id", id),
+            ("submission", submission.as_str())
+        ];
+        
+
+        let body = self
+            .get_action_request("scrobble", params)
+            .await?
+            .text()
+            .await?;
+        let response: Value = serde_json::from_str(&body)?;
+        if response["subsonic-response"]["status"] != "ok" {
+            return Err(SubsonicError::from_response(response));
+        }
+
+        Ok(())
+    }
 }

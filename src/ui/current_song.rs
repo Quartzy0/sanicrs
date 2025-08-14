@@ -11,7 +11,7 @@ use crate::icon_names;
 use color_thief::Color;
 use mpris_server::{LocalPlayerInterface};
 use mpris_server::{LocalServer, LoopStatus, PlaybackStatus};
-use relm4::adw::gio::ListStore;
+use relm4::adw::gio::{ListStore, Settings};
 use relm4::adw::glib as glib;
 use relm4::adw::glib::closure_local;
 use relm4::adw::gtk::glib::Propagation;
@@ -34,6 +34,7 @@ pub struct CurrentSong {
     show_lyrics: bool,
     has_lyrics: bool,
     random_songs_dialog: Option<AsyncConnector<RandomSongsDialog>>,
+    settings: Settings,
 
     // UI data
     song_info: Option<Rc<Song>>,
@@ -343,6 +344,7 @@ impl AsyncComponent for CurrentSong {
             show_lyrics: false,
             has_lyrics: false,
             random_songs_dialog: None,
+            settings: init.3,
         };
         
         let mplayer = &model.mpris_player;
@@ -502,7 +504,7 @@ impl AsyncComponent for CurrentSong {
                 self.update_lyrics(&widgets.lyrics_list);
             },
             CurrentSongMsg::ShowRandomSongsDialog => {
-                let dialog = RandomSongsDialog::builder().launch(self.mpris_player.clone());
+                let dialog = RandomSongsDialog::builder().launch((self.mpris_player.clone(), self.settings.clone()));
                 dialog.widget().present(Some(root));
                 self.random_songs_dialog = Some(dialog);
             }
