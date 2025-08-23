@@ -113,9 +113,10 @@ impl PlayerInfo {
 
     pub async fn remove_song(&self, index: usize) -> Result<SongEntry, Box<dyn Error>> {
         let mut guard = self.track_list.borrow_mut();
-        let c = guard.current_index();
+        let c = guard.current().and_then(|s| Some(s.0.clone()));
         let e = guard.remove_song(index);
-        if c != guard.current_index() {
+        if let Some(c) = c && c == e.0 { // Check if previously playing entry is the same as the removed one
+            drop(guard);
             self.start_current().await?;
         }
         Ok(e)
@@ -423,7 +424,7 @@ impl TrackList {
     }
 
     pub fn remove_song(&mut self, index: usize) -> SongEntry {
-        if self.current < index && self.current != 0 {
+        if self.current > index && self.current != 0 {
             self.current -= 1;
         }
         self.songs.remove(index)

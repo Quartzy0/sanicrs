@@ -12,6 +12,7 @@ use relm4::adw::{glib, gtk};
 use relm4::gtk::pango::EllipsizeMode;
 use relm4::prelude::*;
 use std::rc::Rc;
+use std::time::Duration;
 
 pub struct TrackListWidget {
     mpris_player: Rc<LocalServer<MprisPlayer>>,
@@ -30,7 +31,9 @@ pub enum TrackListMsg {
     TrackActivated(usize),
     TrackChanged(Option<usize>),
     ReloadList,
-    MoveItem{index: u32, direction: MoveDirection}
+    MoveItem{index: u32, direction: MoveDirection},
+    ClearList,
+    RemoveTrack(u32),
 }
 
 #[relm4::component(pub async)]
@@ -55,6 +58,23 @@ impl AsyncComponent for TrackListWidget {
                     set_label: "Song Queue",
                     add_css_class: "bold"
                 },
+                gtk::CenterBox {
+                    set_orientation: Orientation::Horizontal,
+
+                    #[wrap(Some)]
+                    set_start_widget = &gtk::Label {
+                        set_label: "Duration:"
+                    },
+                    #[name = "duration"]
+                    #[wrap(Some)]
+                    set_end_widget = &gtk::Label {}
+                },
+                gtk::Button {
+                    set_label: "Clear",
+                    add_css_class: "destructive-action",
+                    set_halign: Align::Center,
+                    connect_clicked => TrackListMsg::ClearList,
+                }
             },
             gtk::Separator {
                 set_orientation: Orientation::Horizontal,
@@ -138,6 +158,12 @@ impl AsyncComponent for TrackListWidget {
             hbox.append(&picture);
             hbox.append(&vbox);
 
+            let btn_hbox = gtk::Box::builder()
+                .orientation(Orientation::Horizontal)
+                .valign(Align::Center)
+                .halign(Align::End)
+                .spacing(5)
+                .build();
             let btn_vbox = gtk::Box::builder()
                 .orientation(Orientation::Vertical)
                 .valign(Align::Start)
@@ -149,15 +175,33 @@ impl AsyncComponent for TrackListWidget {
             down_btn.add_css_class("no-bg");
             btn_vbox.append(&up_btn);
             btn_vbox.append(&down_btn);
+            let del_btn = gtk::Button::from_icon_name(icon_names::CROSS_SMALL_CIRCLE_OUTLINE);
+            del_btn.add_css_class("destructive-action");
+            del_btn.add_css_class("osd");
+            del_btn.add_css_class("circular");
+            del_btn.set_valign(Align::Center);
+            del_btn.set_halign(Align::Center);
+            btn_hbox.append(&btn_vbox);
+            btn_hbox.append(&del_btn);
 
             center_box.set_start_widget(Some(&hbox));
-            center_box.set_end_widget(Some(&btn_vbox));
+            center_box.set_end_widget(Some(&btn_hbox));
 
             let list_item = list_item
                 .downcast_ref::<ListItem>()
                 .expect("Needs to be ListItem");
             list_item
                 .set_child(Some(&center_box));
+
+            del_btn.connect_clicked(clone!(
+                #[strong]
+                sender,
+                #[weak]
+                list_item,
+                move |_| {
+                    sender.input(TrackListMsg::RemoveTrack(list_item.position()));
+                }
+            ));
 
             up_btn.connect_clicked(clone!(
                 #[strong]
@@ -228,7 +272,7 @@ impl AsyncComponent for TrackListWidget {
                     move |list_view: Option<gtk::ListView>, pos: u32| {
                         if let Some(list_view) = list_view {
                             if let Some(model) = list_view.model() {
-                                return pos != model.n_items()-1
+                                return model.n_items() != 0 && pos != model.n_items()-1
                             }
                         }
                         false
@@ -283,17 +327,45 @@ impl AsyncComponent for TrackListWidget {
             TrackListMsg::ReloadList => {
                 let guard = player.track_list().borrow();
                 let pos = guard.current_index().unwrap_or(0);
-                let list_store = ListStore::from_iter(guard.get_songs().iter().enumerate().map(|x1| {
-                    SongObject::new(x1.1.clone(), if x1.0 < pos {
-                        PositionState::Passed
-                    } else if x1.0 > pos {
-                        PositionState::Upcoming
-                    } else {
-                        PositionState::Current
-                    })
-                }));
+                let songs = guard.get_songs();
+                if songs.len() == 0 {
+                    if let Some(model) = widgets.list.model() {
+                        if let Some(model) = model.downcast::<gtk::NoSelection>().expect("Should be no selection").model(){
+                            model.downcast::<ListStore>().expect("Should be ListStore").remove_all();
+                        }
+                    }
+                    widgets.duration.set_label("");
+                } else {
+                    let list_store = ListStore::from_iter(songs.iter().enumerate().map(|x1| {
+                        SongObject::new(x1.1.clone(), if x1.0 < pos {
+                            PositionState::Passed
+                        } else if x1.0 > pos {
+                            PositionState::Upcoming
+                        } else {
+                            PositionState::Current
+                        })
+                    }));
+                    let mut secs: u64 = songs.iter().map(|x| x.1.duration.unwrap_or(Duration::ZERO).as_secs()).sum();
+                    let mut mins = secs / 60;
+                    let hrs = mins / 60;
+                    mins = mins % 60;
+                    secs = secs % 60;
+                    let mut str = String::new();
+                    if hrs != 0 {
+                        str.push_str(&hrs.to_string());
+                        str.push_str("h ");
+                        str.push_str(&mins.to_string());
+                        str.push_str("m ");
+                    } else if mins != 0 {
+                        str.push_str(&mins.to_string());
+                        str.push_str("m ");
+                    }
+                    str.push_str(&secs.to_string());
+                    str.push_str("s");
+                    widgets.duration.set_label(&str);
 
-                widgets.list.set_model(Some(&gtk::NoSelection::new(Some(list_store))));
+                    widgets.list.set_model(Some(&gtk::NoSelection::new(Some(list_store))));
+                }
             },
             TrackListMsg::MoveItem { index, direction } => {
                 if let Some(model) = widgets.list.model() {
@@ -310,6 +382,12 @@ impl AsyncComponent for TrackListWidget {
                         }
                     }
                 }
+            },
+            TrackListMsg::ClearList => {
+                player.stop().await;
+            },
+            TrackListMsg::RemoveTrack(index) => {
+                player.send_res(player.remove(index as usize).await);
             }
         };
         self.update_view(widgets, sender);

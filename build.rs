@@ -79,7 +79,8 @@ fn main() {
             "music-note-single",
             "subtitles2",
             "down-small",
-            "up-small"
+            "up-small",
+            "cross-small-circle-outline"
         ],
     );
     compile_schemas(

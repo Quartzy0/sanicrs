@@ -129,7 +129,7 @@ impl MprisPlayer {
         self.track_list_emit(TrackListSignal::TrackRemoved {
             track_id: e.dbus_obj()
         });
-        self.send_cs_msg(CurrentSongMsg::SongUpdate(Some(e)));
+        self.send_cs_msg(CurrentSongMsg::SongUpdate(self.track_list().borrow().current().cloned()));
         self.properties_changed([
             Property::Metadata(self.current_song_metadata().await),
         ]);

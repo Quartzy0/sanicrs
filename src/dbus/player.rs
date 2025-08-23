@@ -28,7 +28,7 @@ pub struct MprisPlayer {
     pub cs_sender: RefCell<Option<AsyncComponentSender<CurrentSong>>>,
     pub bb_sender: RefCell<Option<AsyncComponentSender<BottomBar>>>,
     pub server: RefCell<Option<Rc<LocalServer<MprisPlayer>>>>,
-    
+
     pub song_cache: SongCache,
     pub album_cache: AlbumCache,
     pub settings: Settings,
@@ -118,7 +118,7 @@ impl MprisPlayer {
             });
         }
     }
-    
+
     pub fn send_error(&self, error: Box<dyn Error>) {
         self.send_app_msg(AppMsg::ShowError(format!("{}", error), format!("{:?}", error)));
     }
@@ -142,10 +142,10 @@ impl MprisPlayer {
             });
         }
     }
-    
+
     pub fn emit(&self, signal: Signal) {
         if let Some(server) = self.server.borrow().clone() {
-            relm4::spawn_local(async move { 
+            relm4::spawn_local(async move {
                 let _ = server.emit(signal).await;
             });
         }
@@ -166,7 +166,7 @@ impl MprisPlayer {
             Ok(())
         }
     }
-    
+
     pub fn set_position(&self, p: Duration) -> Result<(), Box<dyn Error>> {
         self.player_ref.set_position(p)?;
         self.send_cs_msg(CurrentSongMsg::ProgressUpdateSync(Some(p.as_secs_f64())));
@@ -175,7 +175,7 @@ impl MprisPlayer {
         });
         Ok(())
     }
-    
+
     pub fn reload_settings(&self) -> Result<(), Box<dyn Error>> {
         self.player_ref.load_settings(&self.settings)
     }
@@ -184,7 +184,7 @@ impl MprisPlayer {
         let guard = self.track_list().borrow();
         get_song_metadata(guard.current(), self.client.clone()).await
     }
-    
+
     pub fn track_list(&self) -> &RefCell<TrackList> {
         self.player_ref.track_list()
     }
@@ -205,11 +205,13 @@ impl MprisPlayer {
         ]);
     }
 
-    pub fn stop(&self) {
+    pub async fn stop(&self) {
         self.player_ref.stop();
-        self.send_cs_msg(CurrentSongMsg::Update);
+        self.send_cs_msg(CurrentSongMsg::SongUpdate(None));
+        self.send_tl_msg(TrackListMsg::ReloadList);
         self.properties_changed([
-            Property::PlaybackStatus(self.player_ref.playback_status())
+            Property::PlaybackStatus(self.player_ref.playback_status()),
+            Property::Metadata(self.current_song_metadata().await),
         ]);
     }
 
@@ -302,7 +304,7 @@ impl LocalPlayerInterface for MprisPlayer {
     }
 
     async fn stop(&self) -> fdo::Result<()> {
-        self.stop();
+        self.stop().await;
         Ok(())
     }
 
