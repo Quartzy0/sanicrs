@@ -1,6 +1,7 @@
 use crate::opensonic::client::OpenSubsonicClient;
-use crate::opensonic::types::{AlbumListType, LyricsList, Song};
+use crate::opensonic::types::{Album, AlbumListType, LyricsList, Song};
 use crate::ui::album_object::AlbumObject;
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::error::Error;
 use std::rc::Rc;
@@ -20,6 +21,19 @@ impl SongCache {
         Self {
             client,
             cache: Rc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    pub async fn get_song_cached(&self, song: Song) -> Rc<Song> {
+        let mut cache_w = self.cache.write().await;
+
+        match cache_w.entry(song.id.clone()) {
+            Entry::Occupied(occupied_entry) => occupied_entry.get().clone(),
+            Entry::Vacant(vacant_entry) => {
+                let song = Rc::new(song);
+                vacant_entry.insert(song.clone());
+                song
+            },
         }
     }
 
@@ -66,6 +80,15 @@ impl SongCache {
     ) -> Result<Vec<Rc<Song>>, Box<dyn Error>> {
         let songs = self.client.get_random_songs(size, genre, from_year, to_year, music_folder_id).await?;
         Ok(self.add_songs(songs).await)
+    }
+
+    pub async fn search(&self, query: &str, count: u32, offset: Option<u32>) -> Result<Vec<Rc<Song>>, Box<dyn Error>> {
+        let res = self.client.search3(query, Some(0), None, Some(0), None, Some(count), offset, None).await?;
+        if let Some(songs) = res.song {
+            Ok(self.add_songs(songs).await)
+        } else {
+            Err("No songs found".into())
+        }
     }
 }
 
@@ -142,6 +165,30 @@ impl AlbumCache {
                 cache_w.insert(album.id(), album.clone());
                 Ok(album)
             }
+        }
+    }
+
+    pub async fn add_albums(&self, albums: Vec<Album>) -> Vec<AlbumObject> {
+        let mut cache_w = self.cache.write().await;
+
+        albums
+            .into_iter()
+            .map(|s| {
+                cache_w.get(&s.id).cloned().unwrap_or_else(|| {
+                    let s1 = AlbumObject::new(s);
+                    cache_w.insert(s1.id().clone(), s1.clone());
+                    s1
+                })
+            })
+            .collect()
+    }
+
+    pub async fn search(&self, query: &str, count: u32, offset: Option<u32>) -> Result<Vec<AlbumObject>, Box<dyn Error>> {
+        let res = self.client.search3(query, Some(0), None, Some(count), offset, Some(0), None, None).await?;
+        if let Some(albums) = res.album {
+            Ok(self.add_albums(albums).await)
+        } else {
+            Err("No albums found".into())
         }
     }
 }

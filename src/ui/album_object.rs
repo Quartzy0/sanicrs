@@ -88,6 +88,7 @@ mod imp {
                     ParamSpecString::builder("artist").build(),
                     ParamSpecString::builder("song-count").build(),
                     ParamSpecString::builder("cover-art-id").build(),
+                    ParamSpecString::builder("duration").build(),
                 ]
             });
             PROPERTIES.as_ref()
@@ -109,6 +110,27 @@ mod imp {
                     "artist" => album.artists().to_value(),
                     "cover-art-id" => album.cover_art.to_value(),
                     "song-count" => album.song_count.to_value(),
+                    "duration" => {
+                        let mut secs = album.duration.as_secs();
+                        let mut mins = secs / 60;
+                        let hrs = mins / 60;
+                        mins = mins % 60;
+                        secs = secs % 60;
+                        let mut str = String::new();
+                        if hrs != 0 {
+                            str.push_str(&hrs.to_string());
+                            str.push_str("h ");
+                            str.push_str(&mins.to_string());
+                            str.push_str("m ");
+                        } else if mins != 0 {
+                            str.push_str(&mins.to_string());
+                            str.push_str("m ");
+                        }
+                        str.push_str(&secs.to_string());
+                        str.push_str("s");
+
+                        str.to_value()
+                    },
                     _ => unimplemented!(),
                 }
             } else {
@@ -118,6 +140,7 @@ mod imp {
                     "artist" => None::<String>.to_value(),
                     "cover-art-id" => None::<String>.to_value(),
                     "song-count" => None::<String>.to_value(),
+                    "duration" => None::<String>.to_value(),
                     _ => unimplemented!(),
                 }
             }

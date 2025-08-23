@@ -1,6 +1,7 @@
 use crate::dbus::player::MprisPlayer;
 use crate::opensonic::cache::{AlbumCache, CoverCache, LyricsCache, SongCache};
-use crate::ui::browse::BrowseWidget;
+use crate::ui::browse::search::SearchType;
+use crate::ui::browse::{BrowseMsg, BrowseWidget};
 use crate::ui::current_song::{CurrentSong, CurrentSongOut};
 use crate::ui::preferences_view::{PreferencesOut, PreferencesWidget};
 use crate::ui::track_list::TrackListWidget;
@@ -18,6 +19,7 @@ use relm4::adw::prelude::*;
 use relm4::adw::{gdk};
 use relm4::component::AsyncConnector;
 use relm4::gtk::gio::{self, Settings};
+use relm4::gtk::Orientation;
 use relm4::prelude::*;
 use relm4::{adw, component::{AsyncComponent, AsyncComponentParts, AsyncComponentSender}};
 use std::rc::Rc;
@@ -50,6 +52,7 @@ pub enum AppMsg {
     PlayPause,
     CloseRequest,
     ShowSong,
+    Search
 }
 
 pub type Init = (
@@ -129,7 +132,32 @@ impl AsyncComponent for Model {
                                 },
 
                                 #[template]
-                                add_top_bar = &HeaderBar{}
+                                add_top_bar = &HeaderBar{
+                                    #[template_child]
+                                    header_bar {
+                                        #[name = "search_bar"]
+                                        #[wrap(Some)]
+                                        set_title_widget = &gtk::SearchBar {
+                                            #[wrap(Some)]
+                                            set_child = &gtk::Box {
+                                                set_orientation: Orientation::Horizontal,
+                                                set_spacing: 5,
+
+                                                #[name = "search_type"]
+                                                gtk::DropDown {
+                                                    set_enable_search: false,
+                                                    set_selected: 0,
+                                                    set_model: Some(&gtk::StringList::new(&["Song", "Album", "Artist"])),
+                                                    connect_selected_notify => AppMsg::Search,
+                                                },
+                                                #[name = "search_entry"]
+                                                gtk::SearchEntry {
+                                                    connect_activate => AppMsg::Search
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             },
                         },
                         adw::NavigationPage {
@@ -143,7 +171,7 @@ impl AsyncComponent for Model {
                                 #[template]
                                 add_top_bar = &HeaderBar{}
                             },
-                        },
+                        }
                     },
                 },
 
@@ -278,6 +306,9 @@ impl AsyncComponent for Model {
         group.add_action(playpause_action);
         group.register_for_widget(&root);
 
+        widgets.search_bar.connect_entry(&widgets.search_entry);
+        widgets.search_bar.set_key_capture_widget(Some(&root));
+
         AsyncComponentParts { model, widgets }
     }
 
@@ -288,6 +319,7 @@ impl AsyncComponent for Model {
         sender: AsyncComponentSender<Self>,
         root: &adw::ApplicationWindow,
     ) {
+        let player = self.mpris_player.imp();
         match message {
             AppMsg::ColorschemeChange(colors) => {
                 let mut css = String::from(":root {");
@@ -311,7 +343,7 @@ impl AsyncComponent for Model {
                 widgets.split_view.set_show_sidebar(true);
             },
             AppMsg::Quit => {
-                self.mpris_player.imp().quit_no_app().await;
+                player.quit_no_app().await;
                 if let Some(app) = root.application() {
                     app.quit();
                 }
@@ -349,10 +381,10 @@ impl AsyncComponent for Model {
                 ));
             },
             AppMsg::Restart => {
-                self.mpris_player.imp().restart().await;
+                player.restart().await;
             }
             AppMsg::ReloadPlayer => {
-                let err = self.mpris_player.imp().reload_settings();
+                let err = player.reload_settings();
                 if err.is_err() {
                     let err = err.err().unwrap();
                     sender.input(AppMsg::ShowError(err.to_string(), format!("{:?}", err)))
@@ -379,18 +411,30 @@ impl AsyncComponent for Model {
                 self.toaster.add_toast(toast);
             },
             AppMsg::PlayPause => {
-                self.mpris_player.imp().play_pause().await.unwrap();
+                player.play_pause().await.unwrap();
             },
             AppMsg::CloseRequest => {
                 if !self.settings.boolean("stay-in-background") {
                     sender.input(AppMsg::Quit);
                 } {
-                    self.mpris_player.imp().close().await;
+                    player.close().await;
 
                 }
             },
             AppMsg::ShowSong => {
                 widgets.nav_view.push_by_tag("current");
+            },
+            AppMsg::Search => {
+                let search_type = match widgets.search_type.selected() {
+                    0 => SearchType::Song,
+                    1 => SearchType::Album,
+                    2 => SearchType::Artist,
+                    _ => {
+                        player.send_error("Invalid search type".into());
+                        SearchType::Song
+                    },
+                };
+                self.browse_connector.emit(BrowseMsg::Search(widgets.search_entry.text().into(), search_type));
             },
         };
         self.update_view(widgets, sender);

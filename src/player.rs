@@ -196,7 +196,7 @@ impl PlayerInfo {
         let v = self.settings.borrow().volume;
         let mul = v * 10.0_f64.powf(self.gain_from_track(Some(song))/20.0);
         self.sink.set_volume(mul as f32);
-        
+
         if self.settings.borrow().should_scrobble {
             self.client.scrobble(song.1.id.as_str(), Some(false)).await?;
         }
@@ -410,7 +410,7 @@ impl TrackList {
             return result.err();
         }
         let song = result.unwrap();
-        self.add_song(song, index);
+        self.insert_song(song, index);
         None
     }
 
@@ -490,12 +490,17 @@ impl TrackList {
         }
     }
 
-    pub fn add_song(&mut self, song: Rc<Song>, index: Option<usize>) {
-        let index = index.unwrap_or(self.songs.len());
-        if index <= self.current {
-            self.current += 1;
-        }
-        self.songs.insert(index, (Uuid::new_v4(), song).into());
+    pub fn insert_song(&mut self, song: Rc<Song>, index: Option<usize>) {
+        let index = if let Some(index) = index {
+            if index <= self.current {
+                self.current += 1;
+            }
+            self.songs.insert(index, (Uuid::new_v4(), song).into());
+            index
+        } else {
+            self.songs.push((Uuid::new_v4(), song).into());
+            self.songs.len()-1
+        };
         if self.shuffled {
             let mut rng = rand::rng();
             self.shuffled_order.insert(rng.random_range(self.current..=self.songs.len()), index);

@@ -6,6 +6,7 @@ use crate::icon_names;
 #[relm4::widget_template(pub)]
 impl WidgetTemplate for HeaderBar {
     view! {
+        #[name = "header_bar"]
         adw::HeaderBar {
             set_show_end_title_buttons: true,
             set_show_back_button: true,

@@ -47,84 +47,91 @@ impl AsyncComponent for ViewAlbumWidget {
             set_tag: Some("view-album"),
             set_title: "View album",
 
-            adw::ToolbarView{
-                add_top_bar = &adw::HeaderBar {
-                    set_show_title: false,
-                    set_show_end_title_buttons: false,
-                },
+            gtk::ScrolledWindow {
+                set_hscrollbar_policy: gtk::PolicyType::Never,
+                set_vexpand: true,
+                set_vexpand_set: true,
+                set_valign: Align::Fill,
 
-                gtk::Box {
-                    set_orientation: Orientation::Vertical,
-                    add_css_class: "padded",
-                    set_spacing: 5,
+                adw::ToolbarView{
+                    add_top_bar = &adw::HeaderBar {
+                        set_show_title: false,
+                        set_show_end_title_buttons: false,
+                    },
 
-                    gtk::CenterBox {
-                        set_orientation: Orientation::Horizontal,
+                    gtk::Box {
+                        set_orientation: Orientation::Vertical,
                         add_css_class: "padded",
+                        set_spacing: 5,
 
-                        #[wrap(Some)]
-                        set_start_widget = &gtk::Box {
-                            CoverPicture{
-                                set_cover_size: CoverSize::Large,
-                                set_cache: init.2.clone(),
-                                #[watch]
-                                set_cover_id: model.album.cover_art_id(),
+                        gtk::CenterBox {
+                            set_orientation: Orientation::Horizontal,
+                            add_css_class: "padded",
+
+                            #[wrap(Some)]
+                            set_start_widget = &gtk::Box {
+                                CoverPicture{
+                                    set_cover_size: CoverSize::Large,
+                                    set_cache: init.2.clone(),
+                                    #[watch]
+                                    set_cover_id: model.album.cover_art_id(),
+                                },
+                                gtk::Box {
+                                    set_orientation: Orientation::Vertical,
+                                    set_spacing: 5,
+                                    set_valign: Align::End,
+
+                                    gtk::Label {
+                                        #[watch]
+                                        set_label: model.album.name().as_str(),
+                                        add_css_class: "bold",
+                                        add_css_class: "t0",
+                                        set_halign: Align::Start,
+                                    },
+                                    gtk::Label {
+                                        #[watch]
+                                        set_label: model.album.artist().as_str(),
+                                        add_css_class: "t1",
+                                        set_halign: Align::Start,
+                                    },
+                                    gtk::Label {
+                                        #[watch]
+                                        set_label: format!("{} songs", model.album.song_count()).as_str(),
+                                        add_css_class: "t1",
+                                        set_halign: Align::Start,
+                                    },
+                                }
                             },
-                            gtk::Box {
-                                set_orientation: Orientation::Vertical,
-                                set_spacing: 5,
-                                set_valign: Align::End,
 
-                                gtk::Label {
-                                    #[watch]
-                                    set_label: model.album.name().as_str(),
-                                    add_css_class: "bold",
-                                    add_css_class: "t0",
-                                    set_halign: Align::Start,
+                            #[wrap(Some)]
+                            set_end_widget = &gtk::Box{
+                                set_orientation: Orientation::Horizontal,
+                                set_valign: Align::Center,
+                                set_vexpand: false,
+                                set_vexpand_set: false,
+                                set_spacing: 10,
+
+                                gtk::Button{
+                                    set_valign: Align::Center,
+                                    set_halign: Align::Center,
+                                    set_icon_name: icon_names::PLAY,
+                                    connect_clicked => ViewAlbumMsg::PlayAlbum(None),
+                                    add_css_class: "album-play-btn"
                                 },
-                                gtk::Label {
-                                    #[watch]
-                                    set_label: model.album.artist().as_str(),
-                                    add_css_class: "t1",
-                                    set_halign: Align::Start,
-                                },
-                                gtk::Label {
-                                    #[watch]
-                                    set_label: format!("{} songs", model.album.song_count()).as_str(),
-                                    add_css_class: "t1",
-                                    set_halign: Align::Start,
-                                },
+                                gtk::Button {
+                                    set_valign: Align::Center,
+                                    set_halign: Align::Center,
+                                    set_icon_name: icon_names::ADD_REGULAR,
+                                    connect_clicked => ViewAlbumMsg::QueueAlbum,
+                                    add_css_class: "album-play-btn"
+                                }
                             }
                         },
-
-                        #[wrap(Some)]
-                        set_end_widget = &gtk::Box{
-                            set_orientation: Orientation::Horizontal,
-                            set_valign: Align::Center,
-                            set_vexpand: false,
-                            set_vexpand_set: false,
-                            set_spacing: 10,
-
-                            gtk::Button{
-                                set_valign: Align::Center,
-                                set_halign: Align::Center,
-                                set_icon_name: icon_names::PLAY,
-                                connect_clicked => ViewAlbumMsg::PlayAlbum(None),
-                                add_css_class: "album-play-btn"
-                            },
-                            gtk::Button {
-                                set_valign: Align::Center,
-                                set_halign: Align::Center,
-                                set_icon_name: icon_names::ADD_REGULAR,
-                                connect_clicked => ViewAlbumMsg::QueueAlbum,
-                                add_css_class: "album-play-btn"
-                            }
+                        gtk::Separator{},
+                        #[name = "song_list"]
+                        gtk::ListView {
+                            set_factory: Some(&model.song_list_factory),
                         }
-                    },
-                    gtk::Separator{},
-                    #[name = "song_list"]
-                    gtk::ListView {
-                        set_factory: Some(&model.song_list_factory),
                     }
                 }
             }

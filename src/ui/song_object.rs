@@ -1,3 +1,6 @@
+use std::rc::Rc;
+
+use crate::opensonic::types::Song;
 use crate::player::SongEntry;
 use relm4::adw::glib;
 use relm4::adw::glib::Object;
@@ -48,9 +51,13 @@ impl SongObject {
     pub fn cover_art_id(&self) -> Option<String> {
         self.property("cover-art-id")
     }
-    
+
     pub fn duration(&self) -> u64 {
         self.property("duration")
+    }
+
+    pub fn get_entry(&self) -> Option<Rc<Song>> {
+        self.imp().song.borrow().as_ref().and_then(|s| Some(s.1.clone()))
     }
 }
 

@@ -42,6 +42,24 @@ impl MprisPlayer {
         Ok(())
     }
 
+    pub async fn set_song(&self, song: Rc<Song>) -> Result<(), Box<dyn Error>> {
+        {
+            let mut guard = self.track_list().borrow_mut();
+            guard.clear();
+            guard.insert_song(song, None);
+        }
+        let song = self.player_ref.start_current().await?;
+        self.send_cs_msg(CurrentSongMsg::SongUpdate(song));
+        self.properties_changed([
+            Property::Metadata(self.current_song_metadata().await),
+            Property::PlaybackStatus(self.player_ref.playback_status())
+        ]);
+        let guard = self.track_list().borrow();
+        self.track_list_replaced(guard.get_songs(), guard.current_index()).await?;
+        self.send_tl_msg(TrackListMsg::ReloadList);
+        Ok(())
+    }
+
     pub async fn queue_songs(&self, songs: Vec<Rc<Song>>, set_index: Option<usize>, clear_previous: bool) -> Result<(), Box<dyn Error>> {
         let song_changed;
         {
@@ -93,7 +111,7 @@ impl MprisPlayer {
         }
         Ok(())
     }
-    
+
     pub async fn goto(&self, i: usize) -> Result<(), Box<dyn Error>>{
         let song = self.player_ref.goto(i).await?;
         self.send_tl_msg(TrackListMsg::TrackChanged(Some(i)));
@@ -104,7 +122,7 @@ impl MprisPlayer {
         ]);
         Ok(())
     }
-    
+
     pub async fn remove(&self, i: usize) -> Result<(), Box<dyn Error>> {
         let e = self.player_ref.remove_song(i).await?;
         self.send_tl_msg(TrackListMsg::ReloadList);
@@ -117,7 +135,7 @@ impl MprisPlayer {
         ]);
         Ok(())
     }
-    
+
     pub async fn move_item(&self, index: usize, direction: MoveDirection) -> Result<(), Box<dyn Error>> {
         let mut guard = self.track_list().borrow_mut();
         let new_i = guard.move_song(index, direction);

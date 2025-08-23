@@ -10,7 +10,7 @@ use relm4::adw::gio::ListStore;
 use relm4::adw::glib::clone;
 use relm4::adw::gtk::Orientation;
 use relm4::adw::prelude::*;
-use relm4::gtk::{ListItem, SignalListItemFactory, Widget};
+use relm4::gtk::{Align, ListItem, SignalListItemFactory, Widget};
 use relm4::prelude::*;
 use relm4::AsyncComponentSender;
 use std::rc::Rc;
@@ -46,93 +46,100 @@ impl AsyncComponent for BrowsePageWidget {
             set_tag: Some("browse"),
             set_title: "Browse",
 
-            gtk::Box {
-                set_orientation: Orientation::Vertical,
-                add_css_class: "padded",
+            gtk::ScrolledWindow {
+                set_hscrollbar_policy: gtk::PolicyType::Never,
+                set_vexpand: true,
+                set_vexpand_set: true,
+                set_valign: Align::Fill,
 
-                #[template]
-                #[name = "newest_list"]
-                AlbumList {
-                    #[template_child]
-                    top_label {
-                        set_label: "Newest"
-                    },
-                    #[template_child]
-                    back_btn {
-                        connect_clicked => BrowsePageMsg::ScrollNewest(-100)
-                    },
-                    #[template_child]
-                    forward_btn {
-                        connect_clicked => BrowsePageMsg::ScrollNewest(100)
-                    },
-                    #[template_child]
-                    list {
-                        set_factory: Some(&model.album_factory),
-                        connect_activate[sender] => move |view, index| {
-                            if let Some(model) = view.model() {
-                                let album: AlbumObject = model.item(index)
-                                    .expect("Item at index clicked expected to exist")
-                                    .downcast::<AlbumObject>()
-                                    .expect("Item expected to be AlbumObject");
-                                sender.output(BrowsePageOut::ViewAlbum(album)).expect("Error sending output");
+                gtk::Box {
+                    set_orientation: Orientation::Vertical,
+                    add_css_class: "padded",
+
+                    #[template]
+                    #[name = "newest_list"]
+                    AlbumList {
+                        #[template_child]
+                        top_label {
+                            set_label: "Newest"
+                        },
+                        #[template_child]
+                        back_btn {
+                            connect_clicked => BrowsePageMsg::ScrollNewest(-100)
+                        },
+                        #[template_child]
+                        forward_btn {
+                            connect_clicked => BrowsePageMsg::ScrollNewest(100)
+                        },
+                        #[template_child]
+                        list {
+                            set_factory: Some(&model.album_factory),
+                            connect_activate[sender] => move |view, index| {
+                                if let Some(model) = view.model() {
+                                    let album: AlbumObject = model.item(index)
+                                        .expect("Item at index clicked expected to exist")
+                                        .downcast::<AlbumObject>()
+                                        .expect("Item expected to be AlbumObject");
+                                    sender.output(BrowsePageOut::ViewAlbum(album)).expect("Error sending output");
+                                }
                             }
                         }
-                    }
-                },
-                #[template]
-                #[name = "highest_list"]
-                AlbumList {
-                    #[template_child]
-                    top_label {
-                        set_label: "Most played"
                     },
-                    #[template_child]
-                    back_btn {
-                        connect_clicked => BrowsePageMsg::ScrollHighest(-100)
-                    },
-                    #[template_child]
-                    forward_btn {
-                        connect_clicked => BrowsePageMsg::ScrollHighest(100)
-                    },
-                    #[template_child]
-                    list {
-                        set_factory: Some(&model.album_factory),
-                        connect_activate[sender] => move |view, index| {
-                            if let Some(model) = view.model() {
-                                let album: AlbumObject = model.item(index)
-                                    .expect("Item at index clicked expected to exist")
-                                    .downcast::<AlbumObject>()
-                                    .expect("Item expected to be AlbumObject");
-                                sender.output(BrowsePageOut::ViewAlbum(album)).expect("Error sending output");
+                    #[template]
+                    #[name = "highest_list"]
+                    AlbumList {
+                        #[template_child]
+                        top_label {
+                            set_label: "Most played"
+                        },
+                        #[template_child]
+                        back_btn {
+                            connect_clicked => BrowsePageMsg::ScrollHighest(-100)
+                        },
+                        #[template_child]
+                        forward_btn {
+                            connect_clicked => BrowsePageMsg::ScrollHighest(100)
+                        },
+                        #[template_child]
+                        list {
+                            set_factory: Some(&model.album_factory),
+                            connect_activate[sender] => move |view, index| {
+                                if let Some(model) = view.model() {
+                                    let album: AlbumObject = model.item(index)
+                                        .expect("Item at index clicked expected to exist")
+                                        .downcast::<AlbumObject>()
+                                        .expect("Item expected to be AlbumObject");
+                                    sender.output(BrowsePageOut::ViewAlbum(album)).expect("Error sending output");
+                                }
                             }
                         }
-                    }
-                },
-                #[template]
-                #[name = "explore_list"]
-                AlbumList {
-                    #[template_child]
-                    top_label {
-                        set_label: "Explore"
                     },
-                    #[template_child]
-                    back_btn {
-                        connect_clicked => BrowsePageMsg::ScrollExplore(-100)
-                    },
-                    #[template_child]
-                    forward_btn {
-                        connect_clicked => BrowsePageMsg::ScrollExplore(100)
-                    },
-                    #[template_child]
-                    list {
-                        set_factory: Some(&model.album_factory),
-                        connect_activate[sender] => move |view, index| {
-                            if let Some(model) = view.model() {
-                                let album: AlbumObject = model.item(index)
-                                    .expect("Item at index clicked expected to exist")
-                                    .downcast::<AlbumObject>()
-                                    .expect("Item expected to be AlbumObject");
-                                sender.output(BrowsePageOut::ViewAlbum(album)).expect("Error sending output");
+                    #[template]
+                    #[name = "explore_list"]
+                    AlbumList {
+                        #[template_child]
+                        top_label {
+                            set_label: "Explore"
+                        },
+                        #[template_child]
+                        back_btn {
+                            connect_clicked => BrowsePageMsg::ScrollExplore(-100)
+                        },
+                        #[template_child]
+                        forward_btn {
+                            connect_clicked => BrowsePageMsg::ScrollExplore(100)
+                        },
+                        #[template_child]
+                        list {
+                            set_factory: Some(&model.album_factory),
+                            connect_activate[sender] => move |view, index| {
+                                if let Some(model) = view.model() {
+                                    let album: AlbumObject = model.item(index)
+                                        .expect("Item at index clicked expected to exist")
+                                        .downcast::<AlbumObject>()
+                                        .expect("Item expected to be AlbumObject");
+                                    sender.output(BrowsePageOut::ViewAlbum(album)).expect("Error sending output");
+                                }
                             }
                         }
                     }

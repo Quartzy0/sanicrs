@@ -164,6 +164,7 @@ pub struct RecordLabel {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Albums(pub Vec<Album>);
 
+#[serde_as]
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Album {
@@ -174,7 +175,8 @@ pub struct Album {
     pub artist_id: Option<String>,
     pub cover_art: Option<String>,
     pub song_count: u32,
-    pub duration: u32,
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub duration: Duration,
     pub play_count: Option<u64>,
     pub created: String,
     pub starred: Option<String>,
