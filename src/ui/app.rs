@@ -1,5 +1,6 @@
 use crate::dbus::player::MprisPlayer;
 use crate::opensonic::cache::{AlbumCache, CoverCache, LyricsCache, SongCache};
+use crate::ui::album_object::AlbumObject;
 use crate::ui::browse::search::SearchType;
 use crate::ui::browse::{BrowseMsg, BrowseWidget};
 use crate::ui::current_song::{CurrentSong, CurrentSongOut};
@@ -52,7 +53,8 @@ pub enum AppMsg {
     PlayPause,
     CloseRequest,
     ShowSong,
-    Search
+    Search,
+    ViewAlbum(AlbumObject)
 }
 
 pub type Init = (
@@ -197,6 +199,7 @@ impl AsyncComponent for Model {
                 .forward(sender.input_sender(), |msg| match msg {
                     CurrentSongOut::ColorSchemeChange(colors) => AppMsg::ColorschemeChange(colors),
                     CurrentSongOut::ToggleSidebar => AppMsg::ToggleSidebar,
+                    CurrentSongOut::ViewAlbum(album) => AppMsg::ViewAlbum(album),
                 });
         let track_list_connector = TrackListWidget::builder().launch(into_init(&init, server.clone()));
         let browse_connector = BrowseWidget::builder().launch(into_init(&init, server.clone()));
@@ -436,6 +439,10 @@ impl AsyncComponent for Model {
                 };
                 self.browse_connector.emit(BrowseMsg::Search(widgets.search_entry.text().into(), search_type));
             },
+            AppMsg::ViewAlbum(album) => {
+                widgets.nav_view.pop_to_tag("base");
+                self.browse_connector.emit(BrowseMsg::ViewAlbum(album));
+            }
         };
         self.update_view(widgets, sender);
     }

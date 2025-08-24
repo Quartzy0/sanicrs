@@ -70,6 +70,9 @@ impl AsyncComponent for ViewAlbumWidget {
 
                             #[wrap(Some)]
                             set_start_widget = &gtk::Box {
+                                set_orientation: Orientation::Horizontal,
+                                set_spacing: 10,
+
                                 CoverPicture{
                                     set_cover_size: CoverSize::Large,
                                     set_cache: init.2.clone(),
@@ -97,6 +100,12 @@ impl AsyncComponent for ViewAlbumWidget {
                                     gtk::Label {
                                         #[watch]
                                         set_label: format!("{} songs", model.album.song_count()).as_str(),
+                                        add_css_class: "t1",
+                                        set_halign: Align::Start,
+                                    },
+                                    gtk::Label {
+                                        #[watch]
+                                        set_label: format!("Duration: {}", model.album.duration()).as_str(),
                                         add_css_class: "t1",
                                         set_halign: Align::Start,
                                     },

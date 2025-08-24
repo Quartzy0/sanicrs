@@ -89,7 +89,11 @@ impl AsyncComponent for BrowseWidget {
             BrowseMsg::ViewAlbum(album) => {
                 if let Some(view_album_page) = &self.view_album_page {
                     view_album_page.sender().send(ViewAlbumMsg::SetAlbum(album)).expect("Error sending message to album view");
-                    widgets.navigation_view.push_by_tag("view-album");
+                    if widgets.navigation_view.visible_page()
+                        .and_then(|p| p.tag().and_then(|t| Some(t!="view-album")))
+                        .unwrap_or(true) {
+                        widgets.navigation_view.push_by_tag("view-album");
+                    }
                 } else {
                     let view_album_page = ViewAlbumWidget::builder()
                         .launch((album, self.mpris_player.clone(), self.cover_cache.clone(), self.album_cache.clone()));

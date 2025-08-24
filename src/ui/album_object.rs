@@ -52,6 +52,10 @@ impl AlbumObject {
     pub fn id(&self) -> String {
         self.property("id")
     }
+
+    pub fn duration(&self) -> String {
+        self.property("duration")
+    }
 }
 
 mod imp {

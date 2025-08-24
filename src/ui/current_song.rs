@@ -1,7 +1,8 @@
 use crate::dbus::player::MprisPlayer;
-use crate::opensonic::cache::LyricsCache;
+use crate::opensonic::cache::{AlbumCache, LyricsCache};
 use crate::opensonic::types::Song;
 use crate::player::SongEntry;
+use crate::ui::album_object::AlbumObject;
 use crate::ui::app::Init;
 use crate::ui::cover_picture::{CoverPicture, CoverSize};
 use crate::ui::lyrics_line::{self, LyricsLine};
@@ -35,6 +36,7 @@ pub struct CurrentSong {
     has_lyrics: bool,
     random_songs_dialog: Option<AsyncConnector<RandomSongsDialog>>,
     settings: Settings,
+    album_cache: AlbumCache,
 
     // UI data
     song_info: Option<Rc<Song>>,
@@ -56,12 +58,14 @@ pub enum CurrentSongMsg {
     ToggleLyrics,
     ShowRandomSongsDialog,
     Update,
+    OpenAlbum
 }
 
 #[derive(Debug)]
 pub enum CurrentSongOut {
     ColorSchemeChange(Option<Vec<Color>>),
     ToggleSidebar,
+    ViewAlbum(AlbumObject)
 }
 
 #[relm4::component(pub async)]
@@ -150,10 +154,17 @@ impl AsyncComponent for CurrentSong {
                 },
                 append = &gtk::Label {
                     #[watch]
-                    set_label: &model.song_info.as_ref()
-                                    .and_then(|x| Some(x.album.clone().unwrap_or("Unknown artist".to_string())))
+                    set_markup: &model.song_info.as_ref()
+                                    .and_then(|x| Some(
+                                        format!("<a href=\"test\" title=\"View album\" class=\"normal-link\">{}</a>",
+                                            x.album.clone().unwrap_or("Unknown album".to_string()))
+                                    ))
                                     .unwrap_or("".to_string()),
                     add_css_class: "italic",
+                    connect_activate_link[sender] => move |_, _| {
+                        sender.input(CurrentSongMsg::OpenAlbum);
+                        glib::Propagation::Stop
+                    },
                 },
 
                 append = &gtk::Box {
@@ -345,8 +356,9 @@ impl AsyncComponent for CurrentSong {
             has_lyrics: false,
             random_songs_dialog: None,
             settings: init.3,
+            album_cache: init.2,
         };
-        
+
         let mplayer = &model.mpris_player;
         let widgets: Self::Widgets = view_output!();
         model.mpris_player.imp().cs_sender.replace(Some(sender.clone()));
@@ -509,6 +521,14 @@ impl AsyncComponent for CurrentSong {
                 self.random_songs_dialog = Some(dialog);
             }
             CurrentSongMsg::Update => {} // A message sent just to update all values with #[watch] macro
+            CurrentSongMsg::OpenAlbum => {
+                if let Some(song) = self.song_info.as_ref() && let Some(album_id) = song.album_id.as_ref() {
+                    match self.album_cache.get_album(album_id).await {
+                        Ok(album) => sender.output(CurrentSongOut::ViewAlbum(album)).expect("Error sending album out"),
+                        Err(err) => player.send_error(err),
+                    };
+                }
+            }
         }
         self.update_view(widgets, sender);
     }

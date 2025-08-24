@@ -57,8 +57,8 @@ fn main() {
         None::<&str>,
         // List of icons to include
         [
-            "music-note",
-            "explore2",
+            // "music-note",
+            // "explore2",
             "play",
             "pause",
             "next-regular",
