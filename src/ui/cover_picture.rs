@@ -43,7 +43,6 @@ mod imp {
     use relm4::gtk::graphene::{Point, Rect};
     use relm4::once_cell::sync::Lazy;
     use zbus::export::futures_core::FusedFuture;
-    use zvariant::NoneValue;
     use crate::opensonic::cache::CoverCache;
 
     const HUGE_SIZE: i32 = 512;
@@ -55,7 +54,7 @@ mod imp {
         pub cover_id: RefCell<Option<String>>,
         pub handle: Cell<Option<JoinHandle<()>>>,
         pub cover_size: Cell<CoverSize>,
-        pub cache: RefCell<CoverCache>,
+        pub cache: RefCell<Option<CoverCache>>,
     }
 
     impl Default for CoverPicture {
@@ -65,7 +64,7 @@ mod imp {
                 cover_id: RefCell::new(None),
                 handle: Cell::new(None),
                 cover_size: Cell::new(CoverSize::default()),
-                cache: RefCell::null_value(),
+                cache: RefCell::new(None),
             }
         }
     }
@@ -327,9 +326,9 @@ impl CoverPicture {
     pub fn new_uninit() -> Self {
         Self::default()
     }
-    
+
     pub fn set_cache(&self, cache: CoverCache) {
-        self.imp().cache.replace(cache);
+        self.imp().cache.replace(Some(cache));
     }
 
     pub fn cover(&self) -> Option<gdk::Texture> {
@@ -371,7 +370,7 @@ impl CoverPicture {
                     #[strong(rename_to = cache)]
                     self.imp().cache.borrow(),
                     async move {
-                        match cache.get_cover_texture(cover_id.as_str()).await {
+                        match cache.expect("No CoverCache set").get_cover_texture(cover_id.as_str()).await {
                             Ok(resp) => {
                                 cover_widget.set_cover(Some(&resp));
                             }

@@ -13,11 +13,11 @@ use tokio::sync::RwLock;
 #[derive(Clone, Debug)]
 pub struct SongCache {
     cache: Rc<RwLock<HashMap<String, Rc<Song>>>>,
-    client: Rc<OpenSubsonicClient>,
+    client: &'static OpenSubsonicClient,
 }
 
 impl SongCache {
-    pub fn new(client: Rc<OpenSubsonicClient>) -> Self {
+    pub fn new(client: &'static OpenSubsonicClient) -> Self {
         Self {
             client,
             cache: Rc::new(RwLock::new(HashMap::new())),
@@ -95,12 +95,12 @@ impl SongCache {
 #[derive(Clone, Debug)]
 pub struct AlbumCache {
     cache: Rc<RwLock<HashMap<String, AlbumObject>>>,
-    client: Rc<OpenSubsonicClient>,
+    client: &'static OpenSubsonicClient,
     song_cache: SongCache,
 }
 
 impl AlbumCache {
-    pub fn new(client: Rc<OpenSubsonicClient>, song_cache: SongCache) -> Self {
+    pub fn new(client: &'static OpenSubsonicClient, song_cache: SongCache) -> Self {
         Self {
             client,
             cache: Rc::new(RwLock::new(HashMap::new())),
@@ -193,14 +193,14 @@ impl AlbumCache {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct CoverCache {
     cache: Rc<RwLock<HashMap<String, Texture>>>,
-    client: Rc<OpenSubsonicClient>,
+    client: &'static OpenSubsonicClient,
 }
 
 impl CoverCache {
-    pub fn new(client: Rc<OpenSubsonicClient>) -> Self {
+    pub fn new(client: &'static OpenSubsonicClient) -> Self {
         Self {
             client,
             cache: Rc::new(RwLock::new(HashMap::new())),
@@ -224,14 +224,14 @@ impl CoverCache {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct LyricsCache {
     cache: Rc<RwLock<HashMap<String, Arc<Vec<LyricsList>>>>>,
-    client: Rc<OpenSubsonicClient>,
+    client: &'static OpenSubsonicClient,
 }
 
 impl LyricsCache {
-    pub fn new(client: Rc<OpenSubsonicClient>) -> Self {
+    pub fn new(client: &'static OpenSubsonicClient) -> Self {
         Self {
             client,
             cache: Rc::new(RwLock::new(HashMap::new())),

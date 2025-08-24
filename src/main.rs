@@ -22,7 +22,7 @@ use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::Command;
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::{env, io};
 use relm4::prelude::AsyncController;
 use tokio::runtime::Handle;
@@ -47,7 +47,7 @@ pub enum PlayerCommand {
     Close,
 }
 
-fn do_setup(settings: &Settings, secret_schema: &Schema) -> Rc<OpenSubsonicClient> {
+fn do_setup(settings: &Settings, secret_schema: &Schema) -> OpenSubsonicClient {
     let setup_app: RelmApp<SetupMsg> = RelmApp::new(APP_ID);
     let (setup_send, setup_recv) = async_channel::bounded::<SetupOut>(1);
     relm4_icons::initialize_icons(icon_names::GRESOURCE_BYTES, icon_names::RESOURCE_PREFIX);
@@ -59,11 +59,10 @@ fn do_setup(settings: &Settings, secret_schema: &Schema) -> Rc<OpenSubsonicClien
     client
 }
 
-fn make_client_from_saved(settings: &Settings, secret_schema: &Schema) -> Result<Rc<OpenSubsonicClient>, String> {
+fn make_client_from_saved(settings: &Settings, secret_schema: &Schema) -> Result<OpenSubsonicClient, String> {
     let host: String = settings.value("server-url").as_maybe().ok_or("Server-url not set".to_string())?.get().ok_or("Should be string".to_string())?;
     let username: String = settings.value("username").as_maybe().ok_or("Username not set".to_string())?.get().ok_or("Should be string".to_string())?;
-    Ok(Rc::new(
-        OpenSubsonicClient::new(
+    Ok(OpenSubsonicClient::new(
             host.as_str(),
             username.as_str(),
             password_lookup_sync(Some(&secret_schema), HashMap::new(), Cancellable::NONE)
@@ -72,7 +71,7 @@ fn make_client_from_saved(settings: &Settings, secret_schema: &Schema) -> Result
             "Sanic-rs",
             if settings.boolean("should-cache-covers") {client::get_default_cache_dir()} else {None},
         ).map_err(|e| format!("{:?}", e))?
-    ))
+    )
 }
 
 fn make_window(app: &Application, payload: &StartInit) -> AsyncController<Model> {
@@ -134,19 +133,34 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         let secret_schema = Schema::new(APP_ID, SchemaFlags::NONE, HashMap::new());
 
-        let client: Rc<OpenSubsonicClient>;
-        if settings.value("server-url").as_maybe().is_none() {
-            client = do_setup(&settings, &secret_schema);
-        } else {
-            match make_client_from_saved(&settings, &secret_schema) {
-                Ok(c) => client = c,
-                Err(e) => {
-                    eprintln!("Error when trying to make client: {}", e);
-                    client = do_setup(&settings, &secret_schema);
+        static CLIENT: LazyLock<OpenSubsonicClient> = LazyLock::new(|| {
+            println!("initializing");
+            let path = env::var("XDG_DATA_HOME");
+            let settings_schema = match path {
+                Ok(path) => SettingsSchemaSource::from_directory(Path::new(path.as_str()).join("glib-2.0/schemas").as_path(), SettingsSchemaSource::default().as_ref(), false).expect("Error getting settings scheme source"),
+                Err(_) => SettingsSchemaSource::default().expect("No default settings scheme source")
+            };
+            let schema = settings_schema.lookup(APP_ID, false).expect(format!("No settings schema found for '{}'", APP_ID).as_str());
+            let settings = Settings::new_full(&schema, None::<&SettingsBackend>, None);
+
+            let secret_schema = Schema::new(APP_ID, SchemaFlags::NONE, HashMap::new());
+            if settings.value("server-url").as_maybe().is_none() {
+                do_setup(&settings, &secret_schema)
+            } else {
+                match make_client_from_saved(&settings, &secret_schema) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        eprintln!("Error when trying to make client: {}", e);
+                        do_setup(&settings, &secret_schema)
+                    }
                 }
             }
-            relm4_icons::initialize_icons(icon_names::GRESOURCE_BYTES, icon_names::RESOURCE_PREFIX);
-        }
+        });
+        let song_cache = SongCache::new(&CLIENT);
+        let album_cache = AlbumCache::new(&CLIENT, song_cache.clone());
+        let cover_cache = CoverCache::new(&CLIENT);
+        let lyrics_cache = LyricsCache::new(&CLIENT);
+        relm4_icons::initialize_icons(icon_names::GRESOURCE_BYTES, icon_names::RESOURCE_PREFIX);
         let adw_app = Application::new(Some(APP_ID), ApplicationFlags::empty());
         let _app: RelmApp<AppMsg> = RelmApp::from_app(adw_app);
         let controller_cell: Rc<RefCell<Option<AsyncController<Model>>>> = Rc::new(RefCell::new(None));
@@ -161,20 +175,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         let (restart_send, restart_recv) = async_channel::bounded::<bool>(1);
         let command_send = Arc::new(command_send);
 
-        let song_cache = SongCache::new(client.clone());
-        let album_cache = AlbumCache::new(client.clone(), song_cache.clone());
-        let cover_cache = CoverCache::new(client.clone());
-        let lyrics_cache = LyricsCache::new(client.clone());
-
         let player_inner = PlayerInfo::new(
-            client.clone(),
+            &CLIENT,
             &stream,
             TrackList::new(),
             command_send.clone()
         );
         player_inner.load_settings(&settings).expect("Error loading player settings");
         let player = MprisPlayer {
-            client: client.clone(),
+            client: &CLIENT,
             cmd_channel: command_send.clone(),
             player_ref: player_inner,
             app_sender: RefCell::new(None),

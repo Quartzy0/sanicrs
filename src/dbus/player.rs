@@ -19,7 +19,7 @@ use crate::ui::current_song::{CurrentSong, CurrentSongMsg};
 use crate::ui::track_list::{TrackListMsg, TrackListWidget};
 
 pub struct MprisPlayer {
-    pub client: Rc<OpenSubsonicClient>,
+    pub client: &'static OpenSubsonicClient,
     pub cmd_channel: Arc<Sender<PlayerCommand>>,
     pub player_ref: PlayerInfo,
 
@@ -34,7 +34,7 @@ pub struct MprisPlayer {
     pub settings: Settings,
 }
 
-pub async fn get_song_metadata<'a>(song: Option<&SongEntry>, client: Rc<OpenSubsonicClient>) -> Metadata {
+pub async fn get_song_metadata<'a>(song: Option<&SongEntry>, client: &'static OpenSubsonicClient) -> Metadata {
     let mut map: Metadata = Metadata::new();
     if song.is_none() {
         map.set_trackid(Some(TrackId::NO_TRACK));
@@ -182,7 +182,7 @@ impl MprisPlayer {
 
     pub async fn current_song_metadata(&self) -> Metadata {
         let guard = self.track_list().borrow();
-        get_song_metadata(guard.current(), self.client.clone()).await
+        get_song_metadata(guard.current(), self.client).await
     }
 
     pub fn track_list(&self) -> &RefCell<TrackList> {
@@ -405,7 +405,7 @@ impl LocalPlayerInterface for MprisPlayer {
 
     async fn metadata(&self) -> Result<Metadata, fdo::Error> {
         let track_list = self.track_list().borrow();
-        Ok(get_song_metadata(track_list.current(), self.client.clone()).await)
+        Ok(get_song_metadata(track_list.current(), self.client).await)
     }
 
     async fn volume(&self) -> fdo::Result<f64> {

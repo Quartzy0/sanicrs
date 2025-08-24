@@ -18,7 +18,7 @@ impl MprisPlayer {
                 let songs = track_list_guard.get_songs();
                 let new_i = index.unwrap_or(songs.len() - 1);
                 self.track_list_emit(TrackListSignal::TrackAdded {
-                    metadata: get_song_metadata(Some(&songs[new_i]), self.client.clone()).await,
+                    metadata: get_song_metadata(Some(&songs[new_i]), self.client).await,
                     after_track: if new_i == 0 {
                         TrackId::NO_TRACK
                     } else {
@@ -145,7 +145,7 @@ impl MprisPlayer {
                 track_id: moved.dbus_obj(),
             });
             self.track_list_emit(TrackListSignal::TrackAdded {
-                metadata: get_song_metadata(Some(moved), self.client.clone()).await,
+                metadata: get_song_metadata(Some(moved), self.client).await,
                 after_track: if index != 0 && let Some(prev) = guard.song_at_index(index-1) {
                     prev.dbus_obj()
                 } else {
@@ -176,7 +176,7 @@ impl LocalTrackListInterface for MprisPlayer{
 
         let mut map: Vec<Metadata> = Vec::new();
         for x in songs_refs {
-            map.push(get_song_metadata(Some(&x), self.client.clone()).await);
+            map.push(get_song_metadata(Some(&x), self.client).await);
         }
 
         Ok(map)

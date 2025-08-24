@@ -65,7 +65,7 @@ impl PlayerSettings {
 }
 
 pub struct PlayerInfo {
-    client: Rc<OpenSubsonicClient>,
+    client: &'static OpenSubsonicClient,
     sink: Sink,
     track_list: RefCell<TrackList>,
     cmd_channel: Arc<Sender<PlayerCommand>>,
@@ -75,7 +75,7 @@ pub struct PlayerInfo {
 
 impl PlayerInfo {
     pub fn new(
-        client: Rc<OpenSubsonicClient>,
+        client: &'static OpenSubsonicClient,
         stream_handle: &OutputStream,
         track_list: TrackList,
         cmd_channel: Arc<Sender<PlayerCommand>>,
