@@ -28,6 +28,7 @@ pub struct BottomBar {
 #[derive(Debug)]
 pub enum BottomBarOut {
     ShowSong,
+    ShowRandomSongsDialog
 }
 
 #[relm4::component(pub async)]
@@ -164,6 +165,14 @@ impl AsyncComponent for BottomBar {
                 set_halign: Align::End,
                 set_spacing: 5,
 
+                gtk::Button {
+                    set_icon_name: icon_names::ADD_REGULAR,
+                    set_valign: Align::Center,
+                    set_halign: Align::Center,
+                    connect_clicked[sender] => move |_| {
+                        sender.output(BottomBarOut::ShowRandomSongsDialog).expect("Error sending message out");
+                    }
+                },
                 #[name = "volume_btn"]
                 gtk::ScaleButton {
                     #[watch]

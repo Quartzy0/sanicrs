@@ -6,20 +6,19 @@ use crate::ui::album_object::AlbumObject;
 use crate::ui::app::Init;
 use crate::ui::cover_picture::{CoverPicture, CoverSize};
 use crate::ui::lyrics_line::{self, LyricsLine};
-use crate::ui::random_songs_dialog::RandomSongsDialog;
 use crate::ui::song_object::PositionState;
 use crate::icon_names;
 use color_thief::Color;
 use mpris_server::{LocalPlayerInterface};
 use mpris_server::{LocalServer, LoopStatus, PlaybackStatus};
-use relm4::adw::gio::{ListStore, Settings};
+use relm4::adw::gio::ListStore;
 use relm4::adw::glib as glib;
 use relm4::adw::glib::closure_local;
 use relm4::adw::gtk::glib::Propagation;
 use relm4::adw::gtk::prelude::OrientableExt;
 use relm4::adw::gtk::{Align, Orientation};
 use relm4::adw::prelude::*;
-use relm4::component::{AsyncComponent, AsyncComponentParts, AsyncComponentSender, AsyncConnector};
+use relm4::component::{AsyncComponent, AsyncComponentParts, AsyncComponentSender};
 use relm4::gtk::glib::{clone, closure, Object};
 use relm4::gtk::{Justification, ListItem, ListScrollFlags, SignalListItemFactory, Widget};
 use relm4::prelude::*;
@@ -34,8 +33,6 @@ pub struct CurrentSong {
     synced_lyrics: bool,
     show_lyrics: bool,
     has_lyrics: bool,
-    random_songs_dialog: Option<AsyncConnector<RandomSongsDialog>>,
-    settings: Settings,
     album_cache: AlbumCache,
 
     // UI data
@@ -56,7 +53,6 @@ pub enum CurrentSongMsg {
     // RateChange(f64),
     Seek(f64),
     ToggleLyrics,
-    ShowRandomSongsDialog,
     Update,
     OpenAlbum
 }
@@ -65,7 +61,8 @@ pub enum CurrentSongMsg {
 pub enum CurrentSongOut {
     ColorSchemeChange(Option<Vec<Color>>),
     ToggleSidebar,
-    ViewAlbum(AlbumObject)
+    ViewAlbum(AlbumObject),
+    ShowRandomSongsDialog,
 }
 
 #[relm4::component(pub async)]
@@ -258,7 +255,9 @@ impl AsyncComponent for CurrentSong {
                         gtk::Button {
                             set_icon_name: icon_names::ADD_REGULAR,
                             set_tooltip_text: Some("Add random songs"),
-                            connect_clicked => CurrentSongMsg::ShowRandomSongsDialog,
+                            connect_clicked[sender] => move |_| {
+                                sender.output(CurrentSongOut::ShowRandomSongsDialog).expect("Error sending message out");
+                            },
                         }
                     },
 
@@ -354,8 +353,6 @@ impl AsyncComponent for CurrentSong {
             synced_lyrics: false,
             show_lyrics: false,
             has_lyrics: false,
-            random_songs_dialog: None,
-            settings: init.3,
             album_cache: init.2,
         };
 
@@ -444,7 +441,7 @@ impl AsyncComponent for CurrentSong {
         widgets: &mut Self::Widgets,
         message: Self::Input,
         sender: AsyncComponentSender<Self>,
-        root: &Self::Root,
+        _root: &Self::Root,
     ) {
         let player = self.mpris_player.imp();
         match message {
@@ -515,11 +512,6 @@ impl AsyncComponent for CurrentSong {
                 self.show_lyrics = !self.show_lyrics;
                 self.update_lyrics(&widgets.lyrics_list);
             },
-            CurrentSongMsg::ShowRandomSongsDialog => {
-                let dialog = RandomSongsDialog::builder().launch((self.mpris_player.clone(), self.settings.clone()));
-                dialog.widget().present(Some(root));
-                self.random_songs_dialog = Some(dialog);
-            }
             CurrentSongMsg::Update => {} // A message sent just to update all values with #[watch] macro
             CurrentSongMsg::OpenAlbum => {
                 if let Some(song) = self.song_info.as_ref() && let Some(album_id) = song.album_id.as_ref() {

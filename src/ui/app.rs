@@ -5,6 +5,7 @@ use crate::ui::browse::search::SearchType;
 use crate::ui::browse::{BrowseMsg, BrowseWidget};
 use crate::ui::current_song::{CurrentSong, CurrentSongOut};
 use crate::ui::preferences_view::{PreferencesOut, PreferencesWidget};
+use crate::ui::random_songs_dialog::RandomSongsDialog;
 use crate::ui::track_list::TrackListWidget;
 use async_channel::Receiver;
 use color_thief::Color;
@@ -38,6 +39,7 @@ pub struct Model {
     preferences_view: Option<AsyncController<PreferencesWidget>>,
     toaster: Toaster,
     mpris_player: Rc<LocalServer<MprisPlayer>>,
+    random_songs_dialog: AsyncConnector<RandomSongsDialog>,
 }
 
 #[derive(Debug)]
@@ -54,7 +56,8 @@ pub enum AppMsg {
     CloseRequest,
     ShowSong,
     Search,
-    ViewAlbum(AlbumObject)
+    ViewAlbum(AlbumObject),
+    ShowRandomSongsDialog,
 }
 
 pub type Init = (
@@ -200,19 +203,23 @@ impl AsyncComponent for Model {
                     CurrentSongOut::ColorSchemeChange(colors) => AppMsg::ColorschemeChange(colors),
                     CurrentSongOut::ToggleSidebar => AppMsg::ToggleSidebar,
                     CurrentSongOut::ViewAlbum(album) => AppMsg::ViewAlbum(album),
+                    CurrentSongOut::ShowRandomSongsDialog => AppMsg::ShowRandomSongsDialog
                 });
         let track_list_connector = TrackListWidget::builder().launch(into_init(&init, server.clone()));
         let browse_connector = BrowseWidget::builder().launch(into_init(&init, server.clone()));
         let bottom_bar_connector= BottomBar::builder()
             .launch(into_init(&init, server.clone()))
             .forward(sender.input_sender(), |msg| match msg {
-                BottomBarOut::ShowSong => AppMsg::ShowSong
+                BottomBarOut::ShowSong => AppMsg::ShowSong,
+                BottomBarOut::ShowRandomSongsDialog => AppMsg::ShowRandomSongsDialog,
             });
+        let random_songs_dialog = RandomSongsDialog::builder().launch((server.clone(), init.3.clone()));
         let model = Model {
             current_song,
             track_list_connector,
             browse_connector,
             bottom_bar_connector,
+            random_songs_dialog,
             provider: CssProvider::new(),
             settings: init.3,
             schema: init.4,
@@ -442,6 +449,9 @@ impl AsyncComponent for Model {
             AppMsg::ViewAlbum(album) => {
                 widgets.nav_view.pop_to_tag("base");
                 self.browse_connector.emit(BrowseMsg::ViewAlbum(album));
+            },
+            AppMsg::ShowRandomSongsDialog => {
+                self.random_songs_dialog.widget().present(Some(root));
             }
         };
         self.update_view(widgets, sender);
