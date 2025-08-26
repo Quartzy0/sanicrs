@@ -3,20 +3,25 @@ use std::time::{Duration, SystemTime};
 use mpris_server::{LocalPlayerInterface, LocalServer, PlaybackStatus};
 use relm4::adw::glib::{clone, Propagation};
 use relm4::adw::gtk::prelude::*;
+use relm4::gtk::glib::{closure, Object};
 use relm4::prelude::*;
 use relm4::adw::{gdk, glib, gtk};
-use relm4::gtk::{Align, Justification, Orientation};
+use relm4::gtk::{Align, Justification, Orientation, Widget};
 use uuid::Uuid;
 use crate::dbus::player::MprisPlayer;
 use crate::icon_names;
+use crate::opensonic::cache::{AlbumCache, SongCache};
 use crate::opensonic::types::Song;
 use crate::player::SongEntry;
+use crate::ui::album_object::AlbumObject;
 use crate::ui::app::Init;
 use crate::ui::cover_picture::{CoverPicture, CoverSize};
 use crate::ui::current_song::CurrentSongMsg;
 
 pub struct BottomBar {
     mpris_player: Rc<LocalServer<MprisPlayer>>,
+    song_cache: SongCache,
+    album_cache: AlbumCache,
 
     // UI data
     song_info: Option<Rc<Song>>,
@@ -28,7 +33,8 @@ pub struct BottomBar {
 #[derive(Debug)]
 pub enum BottomBarOut {
     ShowSong,
-    ShowRandomSongsDialog
+    ShowRandomSongsDialog,
+    ViewAlbum(AlbumObject)
 }
 
 #[relm4::component(pub async)]
@@ -81,6 +87,29 @@ impl AsyncComponent for BottomBar {
                         set_justify: Justification::Left,
                         set_halign: Align::Start,
                     },
+                    gtk::Label {
+                        #[watch]
+                        set_markup: &model.song_info.as_ref()
+                                        .and_then(|x| x.album.as_ref().and_then(|a|
+                                            Some(format!("<a href=\"test\" title=\"View album\" class=\"normal-link\">{}</a>", a))
+                                        ))
+                                        .unwrap_or("".to_string()),
+                        add_css_class: "italic",
+                        set_justify: Justification::Left,
+                        set_halign: Align::Start,
+                        connect_activate_link[sender] => move |_, _| {
+                            sender.input(CurrentSongMsg::OpenAlbum);
+                            glib::Propagation::Stop
+                        },
+                    }
+                },
+                #[name = "like_btn"]
+                gtk::ToggleButton {
+                    #[watch]
+                    set_active: model.song_info.as_ref().and_then(|s| Some(s.is_starred())).unwrap_or(false),
+                    add_css_class: "flat",
+                    connect_clicked => CurrentSongMsg::ToggleStarred,
+                    set_valign: Align::Center,
                 }
             },
 
@@ -219,6 +248,8 @@ impl AsyncComponent for BottomBar {
             playback_position: 0.0,
             playback_rate: 1.0,
             previous_progress_check: SystemTime::now(),
+            song_cache: init.1,
+            album_cache: init.2,
         };
         model.mpris_player.imp().bb_sender.replace(Some(sender.clone()));
 
@@ -266,6 +297,19 @@ impl AsyncComponent for BottomBar {
                 }
             }
         ));
+
+        widgets.like_btn
+            .property_expression("active")
+            .chain_closure::<String>(closure!(
+                move |_: Option<Object>, active: bool| {
+                    if active {
+                        icon_names::HEART_FILLED
+                    } else {
+                        icon_names::HEART_OUTLINE_THIN
+                    }
+                }
+            ))
+            .bind(&widgets.like_btn, "icon-name", Widget::NONE);
 
         AsyncComponentParts { model, widgets }
     }
@@ -320,6 +364,20 @@ impl AsyncComponent for BottomBar {
                 self.playback_rate = rate;
                 sender.input(CurrentSongMsg::ProgressUpdateSync(None));
             }*/
+            CurrentSongMsg::OpenAlbum => {
+                if let Some(song) = self.song_info.as_ref() && let Some(album_id) = song.album_id.as_ref() {
+                    match self.album_cache.get_album(album_id).await {
+                        Ok(album) => sender.output(BottomBarOut::ViewAlbum(album)).expect("Error sending album out"),
+                        Err(err) => player.send_error(err),
+                    };
+                }
+            },
+            CurrentSongMsg::ToggleStarred => {
+                if self.song_info.is_some() {
+                    let song = self.song_info.as_ref().unwrap();
+                    player.send_res(self.song_cache.toggle_starred(song).await);
+                }
+            }
             _ => {},
         }
         self.update_view(widgets, sender);

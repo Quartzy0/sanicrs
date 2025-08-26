@@ -90,6 +90,17 @@ impl SongCache {
             Err("No songs found".into())
         }
     }
+
+    pub async fn toggle_starred(&self, song: &Rc<Song>) -> Result<(), Box<dyn Error>> {
+        if song.is_starred() {
+            self.client.unstar(vec![&song.id], Vec::new(), Vec::new()).await?;
+            song.starred.replace(None);
+        } else {
+            self.client.star(vec![&song.id], Vec::new(), Vec::new()).await?;
+            song.starred.replace(Some("yes".into()));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug)]

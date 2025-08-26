@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_with::DurationSeconds;
 use serde_with::serde_as;
+use std::cell::RefCell;
 use std::error::Error;
 use std::fmt;
 use std::fmt::Debug;
@@ -232,7 +233,7 @@ pub struct Song {
     pub play_count: Option<u64>,
     pub disc_number: Option<u32>,
     pub created: Option<String>,
-    pub starred: Option<String>,
+    pub starred: RefCell<Option<String>>,
     pub album_id: Option<String>,
     pub artist_id: Option<String>,
     pub r#type: Option<String>, // 'type'
@@ -294,6 +295,10 @@ impl Song {
             Some(a) => a.clone(),
         }
     }
+
+    pub fn is_starred(&self) -> bool {
+        self.starred.borrow().is_some()
+    }
 }
 
 impl Album {
@@ -312,6 +317,10 @@ impl Album {
             },
             Some(a) => a.clone(),
         }
+    }
+
+    pub fn is_starred(&self) -> bool {
+        self.starred.is_some()
     }
 }
 

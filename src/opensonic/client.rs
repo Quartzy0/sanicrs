@@ -639,10 +639,76 @@ impl OpenSubsonicClient {
             ("id", id),
             ("submission", submission.as_str())
         ];
-        
+
 
         let body = self
             .get_action_request("scrobble", params)
+            .await?
+            .text()
+            .await?;
+        let response: Value = serde_json::from_str(&body)?;
+        if response["subsonic-response"]["status"] != "ok" {
+            return Err(SubsonicError::from_response(response));
+        }
+
+        Ok(())
+    }
+
+    pub async fn star(
+        &self,
+        id: Vec<&str>,
+        album_id: Vec<&str>,
+        artist_id: Vec<&str>
+    ) -> Result<(), Box<dyn Error>> {
+        let mut params = vec![];
+        for id in id {
+            params.push(("id", id));
+        }
+        for album_id in album_id {
+            params.push(("albumId", album_id));
+        }
+        for artist_id in artist_id {
+            params.push(("artistId", artist_id));
+        }
+        if params.len() == 0 {
+            return Err("No song, album or artist specified to be starred".into());
+        }
+
+        let body = self
+            .get_action_request("star", params)
+            .await?
+            .text()
+            .await?;
+        let response: Value = serde_json::from_str(&body)?;
+        if response["subsonic-response"]["status"] != "ok" {
+            return Err(SubsonicError::from_response(response));
+        }
+
+        Ok(())
+    }
+
+    pub async fn unstar(
+        &self,
+        id: Vec<&str>,
+        album_id: Vec<&str>,
+        artist_id: Vec<&str>
+    ) -> Result<(), Box<dyn Error>> {
+        let mut params = vec![];
+        for id in id {
+            params.push(("id", id));
+        }
+        for album_id in album_id {
+            params.push(("albumId", album_id));
+        }
+        for artist_id in artist_id {
+            params.push(("artistId", artist_id));
+        }
+        if params.len() == 0 {
+            return Err("No song, album or artist specified to be unstarred".into());
+        }
+
+        let body = self
+            .get_action_request("unstar", params)
             .await?
             .text()
             .await?;

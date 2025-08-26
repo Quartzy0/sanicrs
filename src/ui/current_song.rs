@@ -1,5 +1,5 @@
 use crate::dbus::player::MprisPlayer;
-use crate::opensonic::cache::{AlbumCache, LyricsCache};
+use crate::opensonic::cache::{AlbumCache, LyricsCache, SongCache};
 use crate::opensonic::types::Song;
 use crate::player::SongEntry;
 use crate::ui::album_object::AlbumObject;
@@ -33,6 +33,7 @@ pub struct CurrentSong {
     synced_lyrics: bool,
     show_lyrics: bool,
     has_lyrics: bool,
+    song_cache: SongCache,
     album_cache: AlbumCache,
 
     // UI data
@@ -54,7 +55,8 @@ pub enum CurrentSongMsg {
     Seek(f64),
     ToggleLyrics,
     Update,
-    OpenAlbum
+    OpenAlbum,
+    ToggleStarred
 }
 
 #[derive(Debug)]
@@ -152,9 +154,8 @@ impl AsyncComponent for CurrentSong {
                 append = &gtk::Label {
                     #[watch]
                     set_markup: &model.song_info.as_ref()
-                                    .and_then(|x| Some(
-                                        format!("<a href=\"test\" title=\"View album\" class=\"normal-link\">{}</a>",
-                                            x.album.clone().unwrap_or("Unknown album".to_string()))
+                                    .and_then(|x| x.album.as_ref().and_then(|a|
+                                        Some(format!("<a href=\"test\" title=\"View album\" class=\"normal-link\">{}</a>", a))
                                     ))
                                     .unwrap_or("".to_string()),
                     add_css_class: "italic",
@@ -331,6 +332,13 @@ impl AsyncComponent for CurrentSong {
                                 });
                             }
                         },*/
+                        #[name = "like_btn"]
+                        gtk::ToggleButton {
+                            #[watch]
+                            set_active: model.song_info.as_ref().and_then(|s| Some(s.is_starred())).unwrap_or(false),
+                            add_css_class: "flat",
+                            connect_clicked => CurrentSongMsg::ToggleStarred
+                        }
                     }
                 }
             }
@@ -354,6 +362,7 @@ impl AsyncComponent for CurrentSong {
             show_lyrics: false,
             has_lyrics: false,
             album_cache: init.2,
+            song_cache: init.1,
         };
 
         let mplayer = &model.mpris_player;
@@ -432,6 +441,19 @@ impl AsyncComponent for CurrentSong {
                     .bind(&label, "css-classes", Widget::NONE);
             }
         ));
+
+        widgets.like_btn
+            .property_expression("active")
+            .chain_closure::<String>(closure!(
+                move |_: Option<Object>, active: bool| {
+                    if active {
+                        icon_names::HEART_FILLED
+                    } else {
+                        icon_names::HEART_OUTLINE_THIN
+                    }
+                }
+            ))
+            .bind(&widgets.like_btn, "icon-name", Widget::NONE);
 
         AsyncComponentParts { model, widgets }
     }
@@ -519,6 +541,12 @@ impl AsyncComponent for CurrentSong {
                         Ok(album) => sender.output(CurrentSongOut::ViewAlbum(album)).expect("Error sending album out"),
                         Err(err) => player.send_error(err),
                     };
+                }
+            },
+            CurrentSongMsg::ToggleStarred => {
+                if self.song_info.is_some() {
+                    let song = self.song_info.as_ref().unwrap();
+                    player.send_res(self.song_cache.toggle_starred(song).await);
                 }
             }
         }

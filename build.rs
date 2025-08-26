@@ -80,7 +80,9 @@ fn main() {
             "subtitles2",
             "down-small",
             "up-small",
-            "cross-small-circle-outline"
+            "cross-small-circle-outline",
+            "heart-filled",
+            "heart-outline-thin"
         ],
     );
     compile_schemas(

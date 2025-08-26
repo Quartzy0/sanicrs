@@ -212,6 +212,7 @@ impl AsyncComponent for Model {
             .forward(sender.input_sender(), |msg| match msg {
                 BottomBarOut::ShowSong => AppMsg::ShowSong,
                 BottomBarOut::ShowRandomSongsDialog => AppMsg::ShowRandomSongsDialog,
+                BottomBarOut::ViewAlbum(album) => AppMsg::ViewAlbum(album),
             });
         let random_songs_dialog = RandomSongsDialog::builder().launch((server.clone(), init.3.clone()));
         let preferences_view: LazyCell<AsyncController<PreferencesWidget>, Box<dyn FnOnce() -> AsyncController<PreferencesWidget>>>
