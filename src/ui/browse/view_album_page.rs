@@ -14,6 +14,7 @@ use relm4::prelude::*;
 use std::rc::Rc;
 use uuid::Uuid;
 
+#[derive(Debug)]
 pub struct ViewAlbumWidget {
     mpris_player: Rc<LocalServer<MprisPlayer>>,
     song_list_factory: SignalListItemFactory,

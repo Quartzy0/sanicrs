@@ -1,5 +1,6 @@
 use relm4::adw::prelude::NavigationPageExt;
 use relm4::component::{AsyncComponentController, AsyncConnector};
+use std::cell::OnceCell;
 use std::rc::Rc;
 mod album_list;
 mod browse_page;
@@ -25,7 +26,7 @@ pub struct BrowseWidget {
 
     browse_page: AsyncController<BrowsePageWidget>,
     search_controller: AsyncController<SearchWidget>,
-    view_album_page: Option<AsyncConnector<ViewAlbumWidget>>
+    view_album_page: OnceCell<AsyncConnector<ViewAlbumWidget>>
 }
 
 #[derive(Debug)]
@@ -69,7 +70,7 @@ impl AsyncComponent for BrowseWidget {
             cover_cache: init.0,
             album_cache: init.2,
             browse_page,
-            view_album_page: None,
+            view_album_page: OnceCell::new(),
             search_controller
         };
 
@@ -87,19 +88,22 @@ impl AsyncComponent for BrowseWidget {
     ) {
         match message {
             BrowseMsg::ViewAlbum(album) => {
-                if let Some(view_album_page) = &self.view_album_page {
-                    view_album_page.sender().send(ViewAlbumMsg::SetAlbum(album)).expect("Error sending message to album view");
-                    if widgets.navigation_view.visible_page()
-                        .and_then(|p| p.tag().and_then(|t| Some(t!="view-album")))
-                        .unwrap_or(true) {
-                        widgets.navigation_view.push_by_tag("view-album");
-                    }
-                } else {
-                    let view_album_page = ViewAlbumWidget::builder()
-                        .launch((album, self.mpris_player.clone(), self.cover_cache.clone(), self.album_cache.clone()));
-                    widgets.navigation_view.add(view_album_page.widget());
-                    widgets.navigation_view.push(view_album_page.widget());
-                    self.view_album_page = Some(view_album_page);
+                match self.view_album_page.get() {
+                    Some(view_album_page) => {
+                        view_album_page.sender().send(ViewAlbumMsg::SetAlbum(album)).expect("Error sending message to album view");
+                        if widgets.navigation_view.visible_page()
+                            .and_then(|p| p.tag().and_then(|t| Some(t!="view-album")))
+                            .unwrap_or(true) {
+                            widgets.navigation_view.push_by_tag("view-album");
+                        }
+                    },
+                    None => {
+                        let view_album_page = ViewAlbumWidget::builder()
+                            .launch((album, self.mpris_player.clone(), self.cover_cache.clone(), self.album_cache.clone()));
+                        widgets.navigation_view.add(view_album_page.widget());
+                        widgets.navigation_view.push(view_album_page.widget());
+                        self.view_album_page.set(view_album_page).expect("Error setting OnceCell for album page");
+                    },
                 }
             },
             BrowseMsg::Search(query, search_type) => {

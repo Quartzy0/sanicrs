@@ -24,6 +24,7 @@ use relm4::gtk::gio::{self, Settings};
 use relm4::gtk::Orientation;
 use relm4::prelude::*;
 use relm4::{adw, component::{AsyncComponent, AsyncComponentParts, AsyncComponentSender}};
+use std::cell::LazyCell;
 use std::rc::Rc;
 use crate::ui::bottom_bar::{BottomBar, BottomBarOut};
 use crate::ui::header_bar::HeaderBar;
@@ -35,8 +36,7 @@ pub struct Model {
     browse_connector: AsyncConnector<BrowseWidget>,
     provider: CssProvider,
     settings: Settings,
-    schema: Schema,
-    preferences_view: Option<AsyncController<PreferencesWidget>>,
+    preferences_view: LazyCell<AsyncController<PreferencesWidget>, Box<dyn FnOnce() -> AsyncController<PreferencesWidget>>>,
     toaster: Toaster,
     mpris_player: Rc<LocalServer<MprisPlayer>>,
     random_songs_dialog: AsyncConnector<RandomSongsDialog>,
@@ -214,6 +214,26 @@ impl AsyncComponent for Model {
                 BottomBarOut::ShowRandomSongsDialog => AppMsg::ShowRandomSongsDialog,
             });
         let random_songs_dialog = RandomSongsDialog::builder().launch((server.clone(), init.3.clone()));
+        let preferences_view: LazyCell<AsyncController<PreferencesWidget>, Box<dyn FnOnce() -> AsyncController<PreferencesWidget>>>
+            = LazyCell::new(Box::new(clone!(
+                #[strong(rename_to=settings)]
+                init.3,
+                #[strong(rename_to=schema)]
+                init.4,
+                #[strong]
+                sender,
+                move || {
+            PreferencesWidget::builder()
+                .launch((settings, schema))
+                .forward(sender.input_sender(), move |msg| {
+                    match msg {
+                        PreferencesOut::Restart => AppMsg::RestartRequest(
+                            "In order for the changes to take effect, the app needs to be restarted.".to_string()
+                        ),
+                        PreferencesOut::ReloadPlayer => AppMsg::ReloadPlayer
+                    }
+                })
+        })));
         let model = Model {
             current_song,
             track_list_connector,
@@ -222,8 +242,7 @@ impl AsyncComponent for Model {
             random_songs_dialog,
             provider: CssProvider::new(),
             settings: init.3,
-            schema: init.4,
-            preferences_view: None,
+            preferences_view,
             toaster: Toaster::default(),
             mpris_player: server,
         };
@@ -359,20 +378,7 @@ impl AsyncComponent for Model {
                 }
             },
             AppMsg::ShowPreferences => {
-                if self.preferences_view.is_none() {
-                    let view = PreferencesWidget::builder()
-                        .launch((self.settings.clone(), self.schema.clone()))
-                        .forward(sender.input_sender(), move |msg| {
-                            match msg {
-                                PreferencesOut::Restart => AppMsg::RestartRequest(
-                                    "In order for the changes to take effect, the app needs to be restarted.".to_string()
-                                ),
-                                PreferencesOut::ReloadPlayer => AppMsg::ReloadPlayer
-                            }
-                        });
-                    self.preferences_view = Some(view);
-                }
-                self.preferences_view.as_ref().unwrap().widget().present(Some(root));
+                self.preferences_view.widget().present(Some(root));
             },
             AppMsg::RestartRequest(reason) => {
                 let dialog = adw::AlertDialog::new(Some("Restart required"), Some(reason.as_str()));
