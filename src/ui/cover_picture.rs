@@ -22,6 +22,14 @@ pub enum CoverSize {
     Small = 2,
 }
 
+#[derive(Clone, Copy, Debug, glib::Enum, PartialEq, Default)]
+#[enum_type(name = "SanicCoverType")]
+pub enum CoverType {
+    #[default]
+    Square = 0,
+    Round = 1,
+}
+
 impl AsRef<str> for CoverSize {
     fn as_ref(&self) -> &str {
         match self {
@@ -54,6 +62,7 @@ mod imp {
         pub cover_id: RefCell<Option<String>>,
         pub handle: Cell<Option<JoinHandle<()>>>,
         pub cover_size: Cell<CoverSize>,
+        pub cover_type: Cell<CoverType>,
         pub cache: RefCell<Option<CoverCache>>,
     }
 
@@ -64,6 +73,7 @@ mod imp {
                 cover_id: RefCell::new(None),
                 handle: Cell::new(None),
                 cover_size: Cell::new(CoverSize::default()),
+                cover_type: Cell::new(CoverType::default()),
                 cache: RefCell::new(None),
             }
         }
@@ -109,6 +119,7 @@ mod imp {
                 vec![
                     ParamSpecObject::builder::<gdk::Texture>("cover").build(),
                     ParamSpecEnum::builder::<CoverSize>("cover-size").build(),
+                    ParamSpecEnum::builder::<CoverType>("cover-type").build(),
                     ParamSpecString::builder("cover-id").build(),
                 ]
             });
@@ -119,6 +130,7 @@ mod imp {
             match pspec.name() {
                 "cover" => self.cover.borrow().to_value(),
                 "cover-size" => self.cover_size.get().to_value(),
+                "cover-type" => self.cover_type.get().to_value(),
                 "cover-id" => self.cover_id.borrow().to_value(),
                 _ => unimplemented!(),
             }
@@ -132,6 +144,9 @@ mod imp {
                 "cover-size" => self
                     .obj()
                     .set_cover_size(value.get::<CoverSize>().expect("Required CoverSize")),
+                "cover-type" => self
+                    .obj()
+                    .set_cover_type(value.get::<CoverType>().expect("Required CoverSize")),
                 "cover-id" => self.obj().set_cover_id(
                     value
                         .get::<Option<String>>()
@@ -198,10 +213,13 @@ mod imp {
                 let y = (height - h).floor() / 2.0;
                 let bounds = Rect::new(0.0, 0.0, w as f32, h as f32);
 
-                let border_radius: f32 = match self.cover_size.get() {
-                    CoverSize::Huge => 10.0,
-                    CoverSize::Large => 5.0,
-                    CoverSize::Small => 3.0,
+                let border_radius: f32 = match self.cover_type.get() {
+                    CoverType::Square => match self.cover_size.get() {
+                        CoverSize::Huge => 10.0,
+                        CoverSize::Large => 5.0,
+                        CoverSize::Small => 3.0,
+                    },
+                    CoverType::Round => w as f32 / 2.0_f32,
                 };
 
                 snapshot.save();
@@ -376,6 +394,8 @@ impl CoverPicture {
                             }
                             Err(e) => {
                                 println!("Error getting cover image: {}", e);
+                                cover_widget.queue_draw();
+                                cover_widget.notify("cover");
                             }
                         };
                         cover_widget.emit_by_name::<()>("cover-loaded", &[]);
@@ -390,6 +410,12 @@ impl CoverPicture {
         self.imp().cover_size.replace(cover_size);
         self.queue_resize();
         self.notify("cover-size");
+    }
+
+    pub fn set_cover_type(&self, cover_type: CoverType) {
+        self.imp().cover_type.replace(cover_type);
+        self.queue_resize();
+        self.notify("cover-type");
     }
 
     pub fn get_palette(&self) -> Option<Vec<Color>> {

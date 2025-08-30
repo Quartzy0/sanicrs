@@ -176,6 +176,8 @@ impl AsyncComponent for BrowsePageWidget {
 
                 let name = gtk::Label::builder().css_classes(["bold"]).build();
                 let artist = gtk::Label::new(None);
+                name.set_width_chars(25);
+                artist.set_width_chars(25);
                 vbox.append(&name);
                 vbox.append(&artist);
 

@@ -11,3 +11,4 @@ pub mod preferences_view;
 mod lyrics_line;
 pub mod bottom_bar;
 mod header_bar;
+pub mod artist_object;

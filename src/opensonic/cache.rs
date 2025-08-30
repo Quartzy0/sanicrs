@@ -1,6 +1,7 @@
 use crate::opensonic::client::OpenSubsonicClient;
-use crate::opensonic::types::{Album, AlbumListType, LyricsList, Song};
+use crate::opensonic::types::{Album, AlbumListType, Artist, LyricsList, Song};
 use crate::ui::album_object::AlbumObject;
+use crate::ui::artist_object::ArtistObject;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::error::Error;
@@ -227,8 +228,7 @@ impl CoverCache {
         }
         let resp = self.client.get_cover_image(id, Some("512")).await?;
         let bytes = glib::Bytes::from(&resp);
-        let texture =
-            Texture::from_bytes(&bytes).expect("Error loading textre");
+        let texture = Texture::from_bytes(&bytes)?;
         let mut cache_w = self.cache.write().await;
         cache_w.insert(id.to_string(), texture.clone());
         Ok(texture)
@@ -260,5 +260,70 @@ impl LyricsCache {
         let mut cache_w = self.cache.write().await;
         cache_w.insert(id.to_string(), lyrics.clone());
         Ok(lyrics)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ArtistCache {
+    cache: Rc<RwLock<HashMap<String, ArtistObject>>>,
+    client: &'static OpenSubsonicClient,
+}
+
+impl ArtistCache {
+    pub fn new(client: &'static OpenSubsonicClient) -> Self {
+        Self {
+            client,
+            cache: Rc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    pub async fn get_artist(&self, id: &str) -> Result<ArtistObject, Box<dyn Error>> {
+        {
+            let cache_r = self.cache.read().await;
+            if let Some(artist) = cache_r.get(id) {
+                if !artist.has_albums() {
+                    let artist_new = self.client.get_artist(id).await?;
+                    artist.set_artist(artist_new);
+                }
+                return Ok(artist.clone());
+            }
+        }
+        let artist = self.client.get_artist(id).await?;
+        let artist = ArtistObject::new(artist);
+        let mut cache_w = self.cache.write().await;
+        cache_w.insert(id.to_string(), artist.clone());
+        Ok(artist)
+    }
+
+    pub async fn ensure_albums(&self, artist: ArtistObject) -> Result<ArtistObject, Box<dyn Error>> {
+        if artist.has_albums() {
+            Ok(artist)
+        } else {
+            self.get_artist(&artist.id()).await
+        }
+    }
+
+    pub async fn add_artist(&self, artists: Vec<Artist>) -> Vec<ArtistObject> {
+        let mut cache_w = self.cache.write().await;
+
+        artists
+            .into_iter()
+            .map(|s| {
+                cache_w.get(&s.id).cloned().unwrap_or_else(|| {
+                    let s1 = ArtistObject::new(s);
+                    cache_w.insert(s1.id().clone(), s1.clone());
+                    s1
+                })
+            })
+            .collect()
+    }
+
+    pub async fn search(&self, query: &str, count: u32, offset: Option<u32>) -> Result<Vec<ArtistObject>, Box<dyn Error>> {
+        let res = self.client.search3(query, Some(count), offset, Some(0), None, Some(0), None, None).await?;
+        if let Some(artists) = res.artist {
+            Ok(self.add_artist(artists).await)
+        } else {
+            Err("No artists found".into())
+        }
     }
 }

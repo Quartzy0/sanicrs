@@ -1,5 +1,5 @@
 use crate::dbus::player::MprisPlayer;
-use crate::opensonic::cache::{AlbumCache, CoverCache, LyricsCache, SongCache};
+use crate::opensonic::cache::{AlbumCache, ArtistCache, CoverCache, LyricsCache, SongCache};
 use crate::opensonic::client::{self, OpenSubsonicClient};
 use crate::player::{PlayerInfo, TrackList};
 use crate::ui::app::{AppMsg, Model, StartInit};
@@ -160,6 +160,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         let album_cache = AlbumCache::new(&CLIENT, song_cache.clone());
         let cover_cache = CoverCache::new(&CLIENT);
         let lyrics_cache = LyricsCache::new(&CLIENT);
+        let artist_cache = ArtistCache::new(&CLIENT);
+
         relm4_icons::initialize_icons(icon_names::GRESOURCE_BYTES, icon_names::RESOURCE_PREFIX);
         let adw_app = Application::new(Some(APP_ID), ApplicationFlags::empty());
         let _app: RelmApp<AppMsg> = RelmApp::from_app(adw_app);
@@ -205,7 +207,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             settings.clone(),
             secret_schema,
             lyrics_cache,
-            mpris_receive
+            mpris_receive,
+            artist_cache
         );
 
 

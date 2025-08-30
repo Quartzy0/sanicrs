@@ -102,13 +102,13 @@ pub struct Extension {
     pub versions: Vec<i32>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Genre {
     pub name: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ItemDate {
     pub year: Option<u32>,
@@ -116,7 +116,7 @@ pub struct ItemDate {
     pub day: Option<u32>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Artist {
     pub id: String,
@@ -128,6 +128,8 @@ pub struct Artist {
     pub music_brainz_id: Option<String>,
     pub sort_name: Option<String>,
     pub roles: Option<Vec<String>>,
+    #[serde(rename(serialize = "album", deserialize = "album"))]
+    pub albums: Option<Vec<Album>>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -149,14 +151,14 @@ pub struct ReplayGain {
     pub fallback_gain: Option<f32>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct DiscTitle {
     pub disc: u32,
     pub title: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct RecordLabel {
     pub name: String,
@@ -166,7 +168,7 @@ pub struct RecordLabel {
 pub struct Albums(pub Vec<Album>);
 
 #[serde_as]
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Album {
     pub id: String,

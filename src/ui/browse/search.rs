@@ -5,12 +5,13 @@ use relm4::{adw::{self, prelude::NavigationPageExt}, gtk::{self, gio::{prelude::
 use relm4::adw::glib as glib;
 use uuid::Uuid;
 
-use crate::{dbus::player::MprisPlayer, icon_names, opensonic::{cache::{AlbumCache, CoverCache, SongCache}}, ui::{album_object::AlbumObject, app::Init, cover_picture::{CoverPicture, CoverSize}, song_object::{PositionState, SongObject}}};
+use crate::{dbus::player::MprisPlayer, icon_names, opensonic::cache::{AlbumCache, ArtistCache, CoverCache, SongCache}, ui::{album_object::AlbumObject, app::Init, artist_object::ArtistObject, cover_picture::{CoverPicture, CoverSize, CoverType}, song_object::{PositionState, SongObject}}};
 
 pub struct SearchWidget {
     song_cache: SongCache,
     cover_cache: CoverCache,
     album_cache: AlbumCache,
+    artist_cache: ArtistCache,
     mpris_player: Rc<LocalServer<MprisPlayer>>,
     current_type: SearchType,
 
@@ -35,7 +36,8 @@ pub enum SearchType {
 
 #[derive(Debug)]
 pub enum SearchOut {
-    ViewAlbum(AlbumObject)
+    ViewAlbum(AlbumObject),
+    ViewArtist(ArtistObject)
 }
 
 #[relm4::component(pub async)]
@@ -79,6 +81,7 @@ impl AsyncComponent for SearchWidget {
             song_cache: init.1,
             cover_cache: init.0,
             album_cache: init.2,
+            artist_cache: init.7,
             song_factory: SignalListItemFactory::new(),
             album_factory: SignalListItemFactory::new(),
             artist_factory: SignalListItemFactory::new(),
@@ -235,6 +238,52 @@ impl AsyncComponent for SearchWidget {
             }
         ));
 
+        model.artist_factory.connect_setup(clone!(
+            #[strong(rename_to = cover_cache)]
+            model.cover_cache,
+            #[strong]
+            sender,
+            move |_, list_item| {
+                let hbox = gtk::Box::builder()
+                    .orientation(Orientation::Horizontal)
+                    .build();
+                hbox.add_css_class("album-song-item");
+
+                let picture = CoverPicture::new(cover_cache.clone(), CoverSize::Small);
+                picture.set_cover_type(CoverType::Round);
+                let title = gtk::Label::new(None);
+                hbox.append(&picture);
+                hbox.append(&title);
+
+                let list_item = list_item
+                    .downcast_ref::<ListItem>()
+                    .expect("Needs to be ListItem");
+                list_item.set_child(Some(&hbox));
+
+                let gesture = gtk::GestureClick::new();
+                gesture.connect_released(clone!(
+                    #[strong]
+                    sender,
+                    #[weak]
+                    list_item,
+                    move |_this, _n: i32, _x: f64, _y: f64| {
+                        let item = list_item.position();
+                        sender.input(SearchMsg::ClickRow(item));
+                    }
+                ));
+                hbox.add_controller(gesture);
+
+                list_item
+                    .property_expression("item")
+                    .chain_property::<ArtistObject>("name")
+                    .bind(&title, "label", Widget::NONE);
+                list_item
+                    .property_expression("item")
+                    .chain_property::<ArtistObject>("cover-art-id")
+                    .bind(&picture, "cover-id", Widget::NONE);
+            }
+        ));
+
         AsyncComponentParts { model, widgets }
     }
 
@@ -274,7 +323,10 @@ impl AsyncComponent for SearchWidget {
                             let item = item.downcast::<AlbumObject>().expect("Item should be AlbumObject");
                             sender.output(SearchOut::ViewAlbum(item)).expect("Error sending out Album");
                         },
-                        SearchType::Artist => todo!(),
+                        SearchType::Artist => {
+                            let item = item.downcast::<ArtistObject>().expect("Item should be ArtistObject");
+                            sender.output(SearchOut::ViewArtist(item)).expect("Error sending out Artist");
+                        },
                     }
                 }
             }
@@ -305,7 +357,16 @@ impl AsyncComponent for SearchWidget {
                             widgets.list.set_model(Some(&gtk::NoSelection::new(Some(list_store))));
                         }
                     },
-                    SearchType::Artist => todo!(),
+                    SearchType::Artist => {
+                        let results = self.artist_cache.search(&query, 20, None).await;
+                        if let Err(err) = results {
+                            player.send_error(err);
+                        } else {
+                            let results = results.unwrap();
+                            let list_store = ListStore::from_iter(results);
+                            widgets.list.set_model(Some(&gtk::NoSelection::new(Some(list_store))));
+                        }
+                    },
                 }
             }
         }
