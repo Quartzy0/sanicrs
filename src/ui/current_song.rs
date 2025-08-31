@@ -2,7 +2,7 @@ use crate::dbus::player::MprisPlayer;
 use crate::opensonic::cache::{LyricsCache, SongCache};
 use crate::opensonic::types::Song;
 use crate::player::SongEntry;
-use crate::ui::app::Init;
+use crate::ui::app::{Init, NextAction, PlayPauseAction, PreviousAction};
 use crate::ui::cover_picture::{CoverPicture, CoverSize};
 use crate::ui::lyrics_line::{self, LyricsLine};
 use crate::ui::song_object::PositionState;
@@ -10,6 +10,7 @@ use crate::icon_names;
 use color_thief::Color;
 use mpris_server::{LocalPlayerInterface};
 use mpris_server::{LocalServer, LoopStatus, PlaybackStatus};
+use relm4::actions::ActionablePlus;
 use relm4::adw::gio::ListStore;
 use relm4::adw::glib as glib;
 use relm4::adw::glib::closure_local;
@@ -43,9 +44,6 @@ pub struct CurrentSong {
 
 #[derive(Debug, Clone)]
 pub enum CurrentSongMsg {
-    PlayPause,
-    Next,
-    Previous,
     SongUpdate(Option<SongEntry>),
     ProgressUpdate,
     ProgressUpdateSync(Option<f64>),
@@ -175,8 +173,8 @@ impl AsyncComponent for CurrentSong {
 
                     gtk::Button {
                         set_icon_name: icon_names::PREVIOUS_REGULAR,
-                        connect_clicked => CurrentSongMsg::Previous,
-                        add_css_class: "track-action-btn"
+                        add_css_class: "track-action-btn",
+                        ActionablePlus::set_stateless_action::<PreviousAction>: &(),
                     },
                     #[name = "play_pause"]
                     gtk::Button {
@@ -186,14 +184,14 @@ impl AsyncComponent for CurrentSong {
                             PlaybackStatus::Playing => icon_names::PAUSE,
                             PlaybackStatus::Stopped => icon_names::STOP,
                         },
-                        connect_clicked => CurrentSongMsg::PlayPause,
                         add_css_class: "track-action-btn",
-                        add_css_class: "track-playpause-btn"
+                        add_css_class: "track-playpause-btn",
+                        ActionablePlus::set_stateless_action::<PlayPauseAction>: &(),
                     },
                     gtk::Button {
                         set_icon_name: icon_names::NEXT_REGULAR,
-                        connect_clicked => CurrentSongMsg::Next,
-                        add_css_class: "track-action-btn"
+                        add_css_class: "track-action-btn",
+                        ActionablePlus::set_stateless_action::<NextAction>: &(),
                     }
                 },
 
@@ -469,9 +467,6 @@ impl AsyncComponent for CurrentSong {
     ) {
         let player = self.mpris_player.imp();
         match message {
-            CurrentSongMsg::PlayPause => player.play_pause().await.unwrap(),
-            CurrentSongMsg::Next => player.next().await.unwrap(),
-            CurrentSongMsg::Previous => player.previous().await.unwrap(),
             CurrentSongMsg::SongUpdate(info) => {
                 self.playback_position = Duration::from_micros(player.position().await.unwrap().as_micros() as u64)
                 .as_secs_f64();

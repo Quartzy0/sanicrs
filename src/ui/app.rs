@@ -54,6 +54,8 @@ pub enum AppMsg {
     ReloadPlayer,
     ShowError(String, String),
     PlayPause,
+    Next,
+    Previous,
     CloseRequest,
     ShowSong,
     Search,
@@ -89,11 +91,13 @@ fn into_init(value: &StartInit, server: Rc<LocalServer<MprisPlayer>>) -> Init {
     (value.0, value.1, value.2, value.3, value.4, value.5, server, value.7).into()
 }
 
-relm4::new_action_group!(WindowActionGroup, "win");
+relm4::new_action_group!(pub WindowActionGroup, "win");
 relm4::new_stateless_action!(PreferencesAction, WindowActionGroup, "preferences");
-relm4::new_stateless_action!(PlayPauseAction, WindowActionGroup, "playpause");
-relm4::new_stateful_action!(ViewArtistAction, WindowActionGroup, "artist", String, u8);
-relm4::new_stateful_action!(ViewAlbumAction, WindowActionGroup, "album", String, u8);
+relm4::new_stateless_action!(pub PlayPauseAction, WindowActionGroup, "playpause");
+relm4::new_stateless_action!(pub NextAction, WindowActionGroup, "next");
+relm4::new_stateless_action!(pub PreviousAction, WindowActionGroup, "previous");
+relm4::new_stateful_action!(pub ViewArtistAction, WindowActionGroup, "artist", String, u8);
+relm4::new_stateful_action!(pub ViewAlbumAction, WindowActionGroup, "album", String, u8);
 
 #[relm4::component(pub async)]
 impl AsyncComponent for Model {
@@ -350,12 +354,28 @@ impl AsyncComponent for Model {
                 sender.input(AppMsg::ViewAlbum(value));
             }
         ));
+        let next_action: RelmAction<NextAction> = RelmAction::new_stateless(clone!(
+            #[strong]
+            sender,
+            move |_| {
+                sender.input(AppMsg::Next);
+            }
+        ));
+        let previous_action: RelmAction<PreviousAction> = RelmAction::new_stateless(clone!(
+            #[strong]
+            sender,
+            move |_| {
+                sender.input(AppMsg::Previous);
+            }
+        ));
 
         let mut group = RelmActionGroup::<WindowActionGroup>::new();
         group.add_action(action);
         group.add_action(playpause_action);
         group.add_action(view_artist_action);
         group.add_action(view_album_action);
+        group.add_action(next_action);
+        group.add_action(previous_action);
         group.register_for_widget(&root);
 
         widgets.search_bar.connect_entry(&widgets.search_entry);
@@ -373,6 +393,9 @@ impl AsyncComponent for Model {
     ) {
         let player = self.mpris_player.imp();
         match message {
+            AppMsg::Next => player.next().await.unwrap(),
+            AppMsg::Previous => player.previous().await.unwrap(),
+            AppMsg::PlayPause => player.play_pause().await.unwrap(),
             AppMsg::ColorschemeChange(colors) => {
                 let mut css = String::from(":root {");
                 if let Some(colors) = colors {
@@ -448,9 +471,6 @@ impl AsyncComponent for Model {
                     }
                 ));
                 self.toaster.add_toast(toast);
-            },
-            AppMsg::PlayPause => {
-                player.play_pause().await.unwrap();
             },
             AppMsg::CloseRequest => {
                 if !self.settings.boolean("stay-in-background") {
