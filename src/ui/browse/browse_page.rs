@@ -1,9 +1,8 @@
 use crate::dbus::player::MprisPlayer;
-use crate::opensonic::cache::{AlbumCache, ArtistCache};
+use crate::opensonic::cache::AlbumCache;
 use crate::opensonic::types::AlbumListType;
 use crate::ui::album_object::AlbumObject;
 use crate::ui::app::Init;
-use crate::ui::artist_object::ArtistObject;
 use crate::ui::browse::album_list::AlbumList;
 use crate::ui::cover_picture::{CoverPicture, CoverSize};
 use mpris_server::LocalServer;
@@ -20,7 +19,6 @@ use std::rc::Rc;
 pub struct BrowsePageWidget {
     album_cache: AlbumCache,
     mpris_player: Rc<LocalServer<MprisPlayer>>,
-    artist_cache: ArtistCache,
 
     album_factory: SignalListItemFactory,
 }
@@ -30,20 +28,13 @@ pub enum BrowsePageMsg {
     ScrollNewest(i32),
     ScrollHighest(i32),
     ScrollExplore(i32),
-    OpenArtist(String)
-}
-
-#[derive(Debug)]
-pub enum BrowsePageOut {
-    ViewAlbum(AlbumObject),
-    ViewArtist(ArtistObject)
 }
 
 #[relm4::component(pub async)]
 impl AsyncComponent for BrowsePageWidget {
     type CommandOutput = ();
     type Input = BrowsePageMsg;
-    type Output = BrowsePageOut;
+    type Output = ();
     type Init = Init;
 
     view! {
@@ -79,13 +70,13 @@ impl AsyncComponent for BrowsePageWidget {
                         #[template_child]
                         list {
                             set_factory: Some(&model.album_factory),
-                            connect_activate[sender] => move |view, index| {
+                            connect_activate => move |view, index| {
                                 if let Some(model) = view.model() {
                                     let album: AlbumObject = model.item(index)
                                         .expect("Item at index clicked expected to exist")
                                         .downcast::<AlbumObject>()
                                         .expect("Item expected to be AlbumObject");
-                                    sender.output(BrowsePageOut::ViewAlbum(album)).expect("Error sending output");
+                                    view.activate_action("win.album", Some(&album.id().to_variant())).expect("Error executing action");
                                 }
                             }
                         }
@@ -108,13 +99,13 @@ impl AsyncComponent for BrowsePageWidget {
                         #[template_child]
                         list {
                             set_factory: Some(&model.album_factory),
-                            connect_activate[sender] => move |view, index| {
+                            connect_activate => move |view, index| {
                                 if let Some(model) = view.model() {
                                     let album: AlbumObject = model.item(index)
                                         .expect("Item at index clicked expected to exist")
                                         .downcast::<AlbumObject>()
                                         .expect("Item expected to be AlbumObject");
-                                    sender.output(BrowsePageOut::ViewAlbum(album)).expect("Error sending output");
+                                    view.activate_action("win.album", Some(&album.id().to_variant())).expect("Error executing action");
                                 }
                             }
                         }
@@ -137,13 +128,13 @@ impl AsyncComponent for BrowsePageWidget {
                         #[template_child]
                         list {
                             set_factory: Some(&model.album_factory),
-                            connect_activate[sender] => move |view, index| {
+                            connect_activate => move |view, index| {
                                 if let Some(model) = view.model() {
                                     let album: AlbumObject = model.item(index)
                                         .expect("Item at index clicked expected to exist")
                                         .downcast::<AlbumObject>()
                                         .expect("Item expected to be AlbumObject");
-                                    sender.output(BrowsePageOut::ViewAlbum(album)).expect("Error sending output");
+                                    view.activate_action("win.album", Some(&album.id().to_variant())).expect("Error executing action");
                                 }
                             }
                         }
@@ -162,7 +153,6 @@ impl AsyncComponent for BrowsePageWidget {
             mpris_player: init.6,
             album_cache: init.2,
             album_factory: SignalListItemFactory::new(),
-            artist_cache: init.7,
         };
 
         let widgets: Self::Widgets = view_output!();
@@ -190,14 +180,10 @@ impl AsyncComponent for BrowsePageWidget {
                 vbox.append(&name);
                 vbox.append(&artist);
 
-                artist.connect_activate_link(clone!(
-                    #[strong]
-                    sender,
-                    move |_, url| {
-                        sender.input(BrowsePageMsg::OpenArtist(url.to_string()));
-                        glib::Propagation::Stop
-                    }
-                ));
+                artist.connect_activate_link(move |this, url| {
+                    this.activate_action("win.artist", Some(&url.to_variant())).expect("Error executing action");
+                    glib::Propagation::Stop
+                });
 
                 let list_item = list_item
                     .downcast_ref::<ListItem>()
@@ -295,12 +281,6 @@ impl AsyncComponent for BrowsePageWidget {
                     .scroll
                     .hadjustment()
                     .set_value(widgets.newest_list.scroll.hadjustment().value() + s as f64);
-            },
-            BrowsePageMsg::OpenArtist(id) => {
-                match self.artist_cache.get_artist(&id).await {
-                    Ok(artist) => sender.output(BrowsePageOut::ViewArtist(artist)).expect("Error sending artist out"),
-                    Err(err) => self.mpris_player.imp().send_error(err),
-                };
             },
         };
         self.update_view(widgets, sender);

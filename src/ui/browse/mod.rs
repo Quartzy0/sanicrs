@@ -1,5 +1,5 @@
 use relm4::adw::prelude::NavigationPageExt;
-use relm4::component::AsyncComponentController;
+use relm4::component::{AsyncComponentController, AsyncConnector};
 use std::cell::OnceCell;
 use std::rc::Rc;
 mod album_list;
@@ -13,9 +13,9 @@ use crate::opensonic::cache::{AlbumCache, ArtistCache, CoverCache};
 use crate::ui::album_object::AlbumObject;
 use crate::ui::app::Init;
 use crate::ui::artist_object::ArtistObject;
-use crate::ui::browse::browse_page::{BrowsePageOut, BrowsePageWidget};
+use crate::ui::browse::browse_page::BrowsePageWidget;
 use crate::ui::browse::search::{SearchMsg, SearchOut, SearchType, SearchWidget};
-use crate::ui::browse::view_album_page::{ViewAlbumMsg, ViewAlbumOut, ViewAlbumWidget};
+use crate::ui::browse::view_album_page::{ViewAlbumMsg, ViewAlbumWidget};
 use crate::ui::browse::view_artist_page::{ViewArtistMsg, ViewArtistOut, ViewArtistWidget};
 use mpris_server::LocalServer;
 use relm4::component::AsyncComponentParts;
@@ -28,9 +28,9 @@ pub struct BrowseWidget {
     album_cache: AlbumCache,
     artist_cache: ArtistCache,
 
-    browse_page: AsyncController<BrowsePageWidget>,
+    browse_page: AsyncConnector<BrowsePageWidget>,
     search_controller: AsyncController<SearchWidget>,
-    view_album_page: OnceCell<AsyncController<ViewAlbumWidget>>,
+    view_album_page: OnceCell<AsyncConnector<ViewAlbumWidget>>,
     view_artist_page: OnceCell<AsyncController<ViewArtistWidget>>,
 }
 
@@ -62,11 +62,7 @@ impl AsyncComponent for BrowseWidget {
         sender: AsyncComponentSender<Self>,
     ) -> AsyncComponentParts<Self> {
         let browse_page = BrowsePageWidget::builder()
-            .launch(init.clone())
-            .forward(sender.input_sender(), |msg| match msg {
-                BrowsePageOut::ViewAlbum(a) => BrowseMsg::ViewAlbum(a),
-                BrowsePageOut::ViewArtist(a) => BrowseMsg::ViewArtist(a),
-            });
+            .launch(init.clone());
         let search_controller = SearchWidget::builder()
             .launch(init.clone())
             .forward(sender.input_sender(), |msg| match msg {
@@ -109,10 +105,7 @@ impl AsyncComponent for BrowseWidget {
                     },
                     None => {
                         let view_album_page = ViewAlbumWidget::builder()
-                            .launch((album, self.mpris_player.clone(), self.cover_cache.clone(), self.album_cache.clone(), self.artist_cache.clone()))
-                            .forward(sender.input_sender(), |msg| match msg {
-                                ViewAlbumOut::ViewArtist(artist) => BrowseMsg::ViewArtist(artist),
-                            });
+                            .launch((album, self.mpris_player.clone(), self.cover_cache.clone(), self.album_cache.clone(), self.artist_cache.clone()));
                         widgets.navigation_view.add(view_album_page.widget());
                         widgets.navigation_view.push(view_album_page.widget());
                         self.view_album_page.set(view_album_page).expect("Error setting OnceCell for album page");

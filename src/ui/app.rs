@@ -1,7 +1,5 @@
 use crate::dbus::player::MprisPlayer;
 use crate::opensonic::cache::{AlbumCache, ArtistCache, CoverCache, LyricsCache, SongCache};
-use crate::ui::album_object::AlbumObject;
-use crate::ui::artist_object::ArtistObject;
 use crate::ui::browse::search::SearchType;
 use crate::ui::browse::{BrowseMsg, BrowseWidget};
 use crate::ui::current_song::{CurrentSong, CurrentSongOut};
@@ -41,6 +39,8 @@ pub struct Model {
     toaster: Toaster,
     mpris_player: Rc<LocalServer<MprisPlayer>>,
     random_songs_dialog: AsyncConnector<RandomSongsDialog>,
+    artist_cache: ArtistCache,
+    album_cache: AlbumCache,
 }
 
 #[derive(Debug)]
@@ -57,9 +57,9 @@ pub enum AppMsg {
     CloseRequest,
     ShowSong,
     Search,
-    ViewAlbum(AlbumObject),
+    ViewAlbum(String),
     ShowRandomSongsDialog,
-    ViewArtist(ArtistObject),
+    ViewArtist(String),
 }
 
 pub type Init = (
@@ -92,6 +92,8 @@ fn into_init(value: &StartInit, server: Rc<LocalServer<MprisPlayer>>) -> Init {
 relm4::new_action_group!(WindowActionGroup, "win");
 relm4::new_stateless_action!(PreferencesAction, WindowActionGroup, "preferences");
 relm4::new_stateless_action!(PlayPauseAction, WindowActionGroup, "playpause");
+relm4::new_stateful_action!(ViewArtistAction, WindowActionGroup, "artist", String, u8);
+relm4::new_stateful_action!(ViewAlbumAction, WindowActionGroup, "album", String, u8);
 
 #[relm4::component(pub async)]
 impl AsyncComponent for Model {
@@ -206,9 +208,7 @@ impl AsyncComponent for Model {
                 .forward(sender.input_sender(), |msg| match msg {
                     CurrentSongOut::ColorSchemeChange(colors) => AppMsg::ColorschemeChange(colors),
                     CurrentSongOut::ToggleSidebar => AppMsg::ToggleSidebar,
-                    CurrentSongOut::ViewAlbum(album) => AppMsg::ViewAlbum(album),
                     CurrentSongOut::ShowRandomSongsDialog => AppMsg::ShowRandomSongsDialog,
-                    CurrentSongOut::ViewArtist(artist) => AppMsg::ViewArtist(artist),
                 });
         let track_list_connector = TrackListWidget::builder().launch(into_init(&init, server.clone()));
         let browse_connector = BrowseWidget::builder().launch(into_init(&init, server.clone()));
@@ -217,8 +217,6 @@ impl AsyncComponent for Model {
             .forward(sender.input_sender(), |msg| match msg {
                 BottomBarOut::ShowSong => AppMsg::ShowSong,
                 BottomBarOut::ShowRandomSongsDialog => AppMsg::ShowRandomSongsDialog,
-                BottomBarOut::ViewAlbum(album) => AppMsg::ViewAlbum(album),
-                BottomBarOut::ViewArtist(artist) => AppMsg::ViewArtist(artist)
             });
         let random_songs_dialog = RandomSongsDialog::builder().launch((server.clone(), init.3.clone()));
         let preferences_view: LazyCell<AsyncController<PreferencesWidget>, Box<dyn FnOnce() -> AsyncController<PreferencesWidget>>>
@@ -252,6 +250,8 @@ impl AsyncComponent for Model {
             preferences_view,
             toaster: Toaster::default(),
             mpris_player: server,
+            artist_cache: init.7,
+            album_cache: init.2,
         };
         let base_provider = CssProvider::new();
         let display = gdk::Display::default().expect("Unable to create Display object");
@@ -336,10 +336,26 @@ impl AsyncComponent for Model {
             }
         ));
         relm4::main_application().set_accelerators_for_action::<PlayPauseAction>(&["space"]);
+        let view_artist_action: RelmAction<ViewArtistAction> = RelmAction::new_stateful_with_target_value(&0, clone!(
+            #[strong]
+            sender,
+            move |_, _state, value| {
+                sender.input(AppMsg::ViewArtist(value));
+            }
+        ));
+        let view_album_action: RelmAction<ViewAlbumAction> = RelmAction::new_stateful_with_target_value(&0, clone!(
+            #[strong]
+            sender,
+            move |_, _state, value| {
+                sender.input(AppMsg::ViewAlbum(value));
+            }
+        ));
 
         let mut group = RelmActionGroup::<WindowActionGroup>::new();
         group.add_action(action);
         group.add_action(playpause_action);
+        group.add_action(view_artist_action);
+        group.add_action(view_album_action);
         group.register_for_widget(&root);
 
         widgets.search_bar.connect_entry(&widgets.search_entry);
@@ -461,14 +477,20 @@ impl AsyncComponent for Model {
             },
             AppMsg::ViewAlbum(album) => {
                 widgets.nav_view.pop_to_tag("base");
-                self.browse_connector.emit(BrowseMsg::ViewAlbum(album));
+                match self.album_cache.get_album(&album).await {
+                    Ok(album) => self.browse_connector.emit(BrowseMsg::ViewAlbum(album)),
+                    Err(err) => self.mpris_player.imp().send_error(err),
+                };
             },
             AppMsg::ShowRandomSongsDialog => {
                 self.random_songs_dialog.widget().present(Some(root));
             },
-            AppMsg::ViewArtist(album) => {
+            AppMsg::ViewArtist(artist) => {
                 widgets.nav_view.pop_to_tag("base");
-                self.browse_connector.emit(BrowseMsg::ViewArtist(album));
+                match self.artist_cache.get_artist(&artist).await {
+                    Ok(artist) => self.browse_connector.emit(BrowseMsg::ViewArtist(artist)),
+                    Err(err) => self.mpris_player.imp().send_error(err),
+                };
             },
         };
         self.update_view(widgets, sender);

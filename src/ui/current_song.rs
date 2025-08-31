@@ -1,10 +1,8 @@
 use crate::dbus::player::MprisPlayer;
-use crate::opensonic::cache::{AlbumCache, ArtistCache, LyricsCache, SongCache};
+use crate::opensonic::cache::{LyricsCache, SongCache};
 use crate::opensonic::types::Song;
 use crate::player::SongEntry;
-use crate::ui::album_object::AlbumObject;
 use crate::ui::app::Init;
-use crate::ui::artist_object::ArtistObject;
 use crate::ui::cover_picture::{CoverPicture, CoverSize};
 use crate::ui::lyrics_line::{self, LyricsLine};
 use crate::ui::song_object::PositionState;
@@ -35,8 +33,6 @@ pub struct CurrentSong {
     show_lyrics: bool,
     has_lyrics: bool,
     song_cache: SongCache,
-    album_cache: AlbumCache,
-    artist_cache: ArtistCache,
 
     // UI data
     song_info: Option<Rc<Song>>,
@@ -57,18 +53,14 @@ pub enum CurrentSongMsg {
     Seek(f64),
     ToggleLyrics,
     Update,
-    OpenAlbum,
     ToggleStarred,
-    OpenArtist(String),
 }
 
 #[derive(Debug)]
 pub enum CurrentSongOut {
     ColorSchemeChange(Option<Vec<Color>>),
     ToggleSidebar,
-    ViewAlbum(AlbumObject),
     ShowRandomSongsDialog,
-    ViewArtist(ArtistObject),
 }
 
 #[relm4::component(pub async)]
@@ -154,8 +146,8 @@ impl AsyncComponent for CurrentSong {
                     set_markup: &model.song_info.as_ref()
                                     .and_then(|x| Some(x.artists()))
                                     .unwrap_or("".to_string()),
-                    connect_activate_link[sender] => move |_, url| {
-                        sender.input(CurrentSongMsg::OpenArtist(url.to_string()));
+                    connect_activate_link => move |this, url| {
+                        this.activate_action("win.artist", Some(&url.to_variant())).expect("Error executing action");
                         glib::Propagation::Stop
                     },
                 },
@@ -163,12 +155,15 @@ impl AsyncComponent for CurrentSong {
                     #[watch]
                     set_markup: &model.song_info.as_ref()
                                     .and_then(|x| x.album.as_ref().and_then(|a|
-                                        Some(format!("<a href=\"test\" title=\"View album\" class=\"normal-link\">{}</a>", a))
+                                        Some(format!("<a href=\"{}\" title=\"View album\" class=\"normal-link\">{}</a>",
+                                            x.album_id.as_ref().and_then(|s| Some(s.as_str())).unwrap_or(""), a))
                                     ))
                                     .unwrap_or("".to_string()),
                     add_css_class: "italic",
-                    connect_activate_link[sender] => move |_, _| {
-                        sender.input(CurrentSongMsg::OpenAlbum);
+                    connect_activate_link => move |this, url| {
+                        if url.len() != 0 {
+                            this.activate_action("win.album", Some(&url.to_variant())).expect("Error executing action");
+                        }
                         glib::Propagation::Stop
                     },
                 },
@@ -369,9 +364,7 @@ impl AsyncComponent for CurrentSong {
             synced_lyrics: false,
             show_lyrics: false,
             has_lyrics: false,
-            album_cache: init.2,
             song_cache: init.1,
-            artist_cache: init.7,
         };
 
         let mplayer = &model.mpris_player;
@@ -544,25 +537,11 @@ impl AsyncComponent for CurrentSong {
                 self.update_lyrics(&widgets.lyrics_list);
             },
             CurrentSongMsg::Update => {} // A message sent just to update all values with #[watch] macro
-            CurrentSongMsg::OpenAlbum => {
-                if let Some(song) = self.song_info.as_ref() && let Some(album_id) = song.album_id.as_ref() {
-                    match self.album_cache.get_album(album_id).await {
-                        Ok(album) => sender.output(CurrentSongOut::ViewAlbum(album)).expect("Error sending album out"),
-                        Err(err) => player.send_error(err),
-                    };
-                }
-            },
             CurrentSongMsg::ToggleStarred => {
                 if self.song_info.is_some() {
                     let song = self.song_info.as_ref().unwrap();
                     player.send_res(self.song_cache.toggle_starred(song).await);
                 }
-            },
-            CurrentSongMsg::OpenArtist(id) => {
-                match self.artist_cache.get_artist(&id).await {
-                    Ok(artist) => sender.output(CurrentSongOut::ViewArtist(artist)).expect("Error sending artist out"),
-                    Err(err) => player.send_error(err),
-                };
             },
         }
         self.update_view(widgets, sender);
