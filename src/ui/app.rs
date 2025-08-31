@@ -1,6 +1,7 @@
 use crate::dbus::player::MprisPlayer;
 use crate::opensonic::cache::{AlbumCache, ArtistCache, CoverCache, LyricsCache, SongCache};
 use crate::ui::album_object::AlbumObject;
+use crate::ui::artist_object::ArtistObject;
 use crate::ui::browse::search::SearchType;
 use crate::ui::browse::{BrowseMsg, BrowseWidget};
 use crate::ui::current_song::{CurrentSong, CurrentSongOut};
@@ -58,6 +59,7 @@ pub enum AppMsg {
     Search,
     ViewAlbum(AlbumObject),
     ShowRandomSongsDialog,
+    ViewArtist(ArtistObject),
 }
 
 pub type Init = (
@@ -205,7 +207,8 @@ impl AsyncComponent for Model {
                     CurrentSongOut::ColorSchemeChange(colors) => AppMsg::ColorschemeChange(colors),
                     CurrentSongOut::ToggleSidebar => AppMsg::ToggleSidebar,
                     CurrentSongOut::ViewAlbum(album) => AppMsg::ViewAlbum(album),
-                    CurrentSongOut::ShowRandomSongsDialog => AppMsg::ShowRandomSongsDialog
+                    CurrentSongOut::ShowRandomSongsDialog => AppMsg::ShowRandomSongsDialog,
+                    CurrentSongOut::ViewArtist(artist) => AppMsg::ViewArtist(artist),
                 });
         let track_list_connector = TrackListWidget::builder().launch(into_init(&init, server.clone()));
         let browse_connector = BrowseWidget::builder().launch(into_init(&init, server.clone()));
@@ -215,6 +218,7 @@ impl AsyncComponent for Model {
                 BottomBarOut::ShowSong => AppMsg::ShowSong,
                 BottomBarOut::ShowRandomSongsDialog => AppMsg::ShowRandomSongsDialog,
                 BottomBarOut::ViewAlbum(album) => AppMsg::ViewAlbum(album),
+                BottomBarOut::ViewArtist(artist) => AppMsg::ViewArtist(artist)
             });
         let random_songs_dialog = RandomSongsDialog::builder().launch((server.clone(), init.3.clone()));
         let preferences_view: LazyCell<AsyncController<PreferencesWidget>, Box<dyn FnOnce() -> AsyncController<PreferencesWidget>>>
@@ -461,7 +465,11 @@ impl AsyncComponent for Model {
             },
             AppMsg::ShowRandomSongsDialog => {
                 self.random_songs_dialog.widget().present(Some(root));
-            }
+            },
+            AppMsg::ViewArtist(album) => {
+                widgets.nav_view.pop_to_tag("base");
+                self.browse_connector.emit(BrowseMsg::ViewArtist(album));
+            },
         };
         self.update_view(widgets, sender);
     }

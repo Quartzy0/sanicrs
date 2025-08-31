@@ -1,8 +1,9 @@
 use crate::dbus::player::MprisPlayer;
-use crate::opensonic::cache::AlbumCache;
+use crate::opensonic::cache::{AlbumCache, ArtistCache};
 use crate::opensonic::types::AlbumListType;
 use crate::ui::album_object::AlbumObject;
 use crate::ui::app::Init;
+use crate::ui::artist_object::ArtistObject;
 use crate::ui::browse::album_list::AlbumList;
 use crate::ui::cover_picture::{CoverPicture, CoverSize};
 use mpris_server::LocalServer;
@@ -10,7 +11,8 @@ use relm4::adw::gio::ListStore;
 use relm4::adw::glib::clone;
 use relm4::adw::gtk::Orientation;
 use relm4::adw::prelude::*;
-use relm4::gtk::{Align, ListItem, SignalListItemFactory, Widget};
+use relm4::gtk::pango::EllipsizeMode;
+use relm4::gtk::{glib, Align, ListItem, SignalListItemFactory, Widget};
 use relm4::prelude::*;
 use relm4::AsyncComponentSender;
 use std::rc::Rc;
@@ -18,6 +20,7 @@ use std::rc::Rc;
 pub struct BrowsePageWidget {
     album_cache: AlbumCache,
     mpris_player: Rc<LocalServer<MprisPlayer>>,
+    artist_cache: ArtistCache,
 
     album_factory: SignalListItemFactory,
 }
@@ -27,11 +30,13 @@ pub enum BrowsePageMsg {
     ScrollNewest(i32),
     ScrollHighest(i32),
     ScrollExplore(i32),
+    OpenArtist(String)
 }
 
 #[derive(Debug)]
 pub enum BrowsePageOut {
     ViewAlbum(AlbumObject),
+    ViewArtist(ArtistObject)
 }
 
 #[relm4::component(pub async)]
@@ -157,6 +162,7 @@ impl AsyncComponent for BrowsePageWidget {
             mpris_player: init.6,
             album_cache: init.2,
             album_factory: SignalListItemFactory::new(),
+            artist_cache: init.7,
         };
 
         let widgets: Self::Widgets = view_output!();
@@ -177,9 +183,21 @@ impl AsyncComponent for BrowsePageWidget {
                 let name = gtk::Label::builder().css_classes(["bold"]).build();
                 let artist = gtk::Label::new(None);
                 name.set_width_chars(25);
+                name.set_ellipsize(EllipsizeMode::End);
                 artist.set_width_chars(25);
+                artist.set_use_markup(true);
+                artist.set_ellipsize(EllipsizeMode::End);
                 vbox.append(&name);
                 vbox.append(&artist);
+
+                artist.connect_activate_link(clone!(
+                    #[strong]
+                    sender,
+                    move |_, url| {
+                        sender.input(BrowsePageMsg::OpenArtist(url.to_string()));
+                        glib::Propagation::Stop
+                    }
+                ));
 
                 let list_item = list_item
                     .downcast_ref::<ListItem>()
@@ -277,7 +295,13 @@ impl AsyncComponent for BrowsePageWidget {
                     .scroll
                     .hadjustment()
                     .set_value(widgets.newest_list.scroll.hadjustment().value() + s as f64);
-            }
+            },
+            BrowsePageMsg::OpenArtist(id) => {
+                match self.artist_cache.get_artist(&id).await {
+                    Ok(artist) => sender.output(BrowsePageOut::ViewArtist(artist)).expect("Error sending artist out"),
+                    Err(err) => self.mpris_player.imp().send_error(err),
+                };
+            },
         };
         self.update_view(widgets, sender);
     }

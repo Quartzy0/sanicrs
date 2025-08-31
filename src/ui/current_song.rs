@@ -1,9 +1,10 @@
 use crate::dbus::player::MprisPlayer;
-use crate::opensonic::cache::{AlbumCache, LyricsCache, SongCache};
+use crate::opensonic::cache::{AlbumCache, ArtistCache, LyricsCache, SongCache};
 use crate::opensonic::types::Song;
 use crate::player::SongEntry;
 use crate::ui::album_object::AlbumObject;
 use crate::ui::app::Init;
+use crate::ui::artist_object::ArtistObject;
 use crate::ui::cover_picture::{CoverPicture, CoverSize};
 use crate::ui::lyrics_line::{self, LyricsLine};
 use crate::ui::song_object::PositionState;
@@ -35,6 +36,7 @@ pub struct CurrentSong {
     has_lyrics: bool,
     song_cache: SongCache,
     album_cache: AlbumCache,
+    artist_cache: ArtistCache,
 
     // UI data
     song_info: Option<Rc<Song>>,
@@ -56,7 +58,8 @@ pub enum CurrentSongMsg {
     ToggleLyrics,
     Update,
     OpenAlbum,
-    ToggleStarred
+    ToggleStarred,
+    OpenArtist(String),
 }
 
 #[derive(Debug)]
@@ -65,6 +68,7 @@ pub enum CurrentSongOut {
     ToggleSidebar,
     ViewAlbum(AlbumObject),
     ShowRandomSongsDialog,
+    ViewArtist(ArtistObject),
 }
 
 #[relm4::component(pub async)]
@@ -147,9 +151,13 @@ impl AsyncComponent for CurrentSong {
                 },
                 append = &gtk::Label {
                     #[watch]
-                    set_label: &model.song_info.as_ref()
+                    set_markup: &model.song_info.as_ref()
                                     .and_then(|x| Some(x.artists()))
                                     .unwrap_or("".to_string()),
+                    connect_activate_link[sender] => move |_, url| {
+                        sender.input(CurrentSongMsg::OpenArtist(url.to_string()));
+                        glib::Propagation::Stop
+                    },
                 },
                 append = &gtk::Label {
                     #[watch]
@@ -363,6 +371,7 @@ impl AsyncComponent for CurrentSong {
             has_lyrics: false,
             album_cache: init.2,
             song_cache: init.1,
+            artist_cache: init.7,
         };
 
         let mplayer = &model.mpris_player;
@@ -548,7 +557,13 @@ impl AsyncComponent for CurrentSong {
                     let song = self.song_info.as_ref().unwrap();
                     player.send_res(self.song_cache.toggle_starred(song).await);
                 }
-            }
+            },
+            CurrentSongMsg::OpenArtist(id) => {
+                match self.artist_cache.get_artist(&id).await {
+                    Ok(artist) => sender.output(CurrentSongOut::ViewArtist(artist)).expect("Error sending artist out"),
+                    Err(err) => player.send_error(err),
+                };
+            },
         }
         self.update_view(widgets, sender);
     }

@@ -282,19 +282,15 @@ pub struct InvalidResponseError {
 
 impl Song {
     pub fn artists(&self) -> String {
-        match &self.display_artists {
-            None => match &self.artist {
-                None => match &self.artists {
-                    None => "Unknown artist".to_string(),
-                    Some(a) => a
-                        .iter()
-                        .map(|x| x.name.clone())
-                        .collect::<Vec<String>>()
-                        .join(", "),
-                },
-                Some(a) => a.clone(),
-            },
-            Some(a) => a.clone(),
+        match self.artists.as_ref() {
+            Some(artists) => {
+                artists
+                    .iter()
+                    .map(|a| format!("<a href=\"{}\" title=\"View artist\" class=\"normal-link\">{}</a>", a.id, a.name))
+                    .collect::<Vec<String>>()
+                    .join("•")
+            }
+            None => self.display_artists.clone().unwrap_or(self.artist.clone().unwrap_or("Unknown artist".to_string()))
         }
     }
 
@@ -305,19 +301,15 @@ impl Song {
 
 impl Album {
     pub fn artists(&self) -> String {
-        match &self.display_artists {
-            None => match &self.artist {
-                None => match &self.artists {
-                    None => "Unknown artist".to_string(),
-                    Some(a) => a
-                        .iter()
-                        .map(|x| x.name.clone())
-                        .collect::<Vec<String>>()
-                        .join(", "),
-                },
-                Some(a) => a.clone(),
-            },
-            Some(a) => a.clone(),
+        match self.artists.as_ref() {
+            Some(artists) => {
+                artists
+                    .iter()
+                    .map(|a| format!("<a href=\"{}\" title=\"View artist\" class=\"normal-link\">{}</a>", a.id, a.name))
+                    .collect::<Vec<String>>()
+                    .join("•")
+            }
+            None => self.display_artists.clone().unwrap_or(self.artist.clone().unwrap_or("Unknown artist".to_string()))
         }
     }
 

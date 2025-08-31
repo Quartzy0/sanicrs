@@ -1,6 +1,7 @@
 use crate::dbus::player::MprisPlayer;
-use crate::opensonic::cache::{AlbumCache, CoverCache};
+use crate::opensonic::cache::{AlbumCache, ArtistCache, CoverCache};
 use crate::ui::album_object::AlbumObject;
+use crate::ui::artist_object::ArtistObject;
 use crate::ui::cover_picture::{CoverPicture, CoverSize};
 use crate::ui::song_object::{PositionState, SongObject};
 use crate::icon_names;
@@ -20,6 +21,7 @@ pub struct ViewAlbumWidget {
     song_list_factory: SignalListItemFactory,
     album: AlbumObject,
     album_cache: AlbumCache,
+    artist_cache: ArtistCache,
 }
 
 #[derive(Debug)]
@@ -27,20 +29,27 @@ pub enum ViewAlbumMsg {
     PlayAlbum(Option<usize>),
     SetAlbum(AlbumObject),
     QueueAlbum,
+    OpenArtist(String)
+}
+
+#[derive(Debug)]
+pub enum ViewAlbumOut {
+    ViewArtist(ArtistObject)
 }
 
 type ViewAlbumInit = (
     AlbumObject,
     Rc<LocalServer<MprisPlayer>>,
     CoverCache,
-    AlbumCache
+    AlbumCache,
+    ArtistCache,
 );
 
 #[relm4::component(pub async)]
 impl AsyncComponent for ViewAlbumWidget {
     type CommandOutput = ();
     type Input = ViewAlbumMsg;
-    type Output = ();
+    type Output = ViewAlbumOut;
     type Init = ViewAlbumInit;
 
     view! {
@@ -94,9 +103,13 @@ impl AsyncComponent for ViewAlbumWidget {
                                     },
                                     gtk::Label {
                                         #[watch]
-                                        set_label: model.album.artist().as_str(),
+                                        set_markup: model.album.artist().as_str(),
                                         add_css_class: "t1",
                                         set_halign: Align::Start,
+                                        connect_activate_link[sender] => move |_, url| {
+                                            sender.input(ViewAlbumMsg::OpenArtist(url.to_string()));
+                                            glib::Propagation::Stop
+                                        },
                                     },
                                     gtk::Label {
                                         #[watch]
@@ -158,6 +171,7 @@ impl AsyncComponent for ViewAlbumWidget {
             album: init.0,
             song_list_factory: SignalListItemFactory::new(),
             album_cache: init.3,
+            artist_cache: init.4,
         };
 
         let widgets: Self::Widgets = view_output!();
@@ -292,7 +306,13 @@ impl AsyncComponent for ViewAlbumWidget {
             },
             ViewAlbumMsg::QueueAlbum => {
                 player.send_res(player.queue_album(self.album.id(), None, false).await);
-            }
+            },
+            ViewAlbumMsg::OpenArtist(id) => {
+                match self.artist_cache.get_artist(&id).await {
+                    Ok(artist) => sender.output(ViewAlbumOut::ViewArtist(artist)).expect("Error sending artist out"),
+                    Err(err) => player.send_error(err),
+                };
+            },
         };
         self.update_view(widgets, sender);
     }
