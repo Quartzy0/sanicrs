@@ -4,29 +4,24 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-tokio = { version = "1.46.1", default-features = false, features = [
+tokio = { version = "1.47.1", default-features = false, features = [
     "fs",
     "macros"
 ] }
-reqwest = { version = "0.12.22", features = ["stream", "blocking"] }
+reqwest = { version = "0.12.23", features = ["stream", "blocking"] }
 format-url = "0.6.2"
-serde_json = "1.0.140"
+serde_json = "1.0.143"
 serde_with = { version = "3.14.0" }
 serde = { version = "1.0.219", features = ["derive"] }
 md5 = "0.8.0"
-rand = "0.9.1"
-rodio = { version = "0.21.1" }
-futures-util = { version = "0.3.31", default-features = false, features = [
-    "std",
-] }
-tokio-util = "0.7.15"
-stream-download = { version = "0.22.1", features = ["async-read"] }
+rand = "0.9.2"
+rodio = { version = "0.21.1", default-features = false, features = ["symphonia-all", "playback"] }
+stream-download = { version = "0.22.4", default-features = false, features = ["http", "reqwest"] }
 async-channel = { version = "2.5.0" }
 zbus = { version = "5.9.0", default-features = false, features = [
     "blocking-api",
     "tokio"
 ] }
-zvariant = { version = "5.6.0" }
 relm4 = { version = "0.9.1", default-features = false, features = [
     "libadwaita",
     "gnome_47",
@@ -34,7 +29,7 @@ relm4 = { version = "0.9.1", default-features = false, features = [
     "macros",
 ] }
 relm4-icons = "0.10.0-beta.2"
-uuid = { version = "1.17.0", default-features = false, features = ["v4"] }
+uuid = { version = "1.18.1", default-features = false, features = ["v4"] }
 color-thief = "0.2.2"
 libsecret = "0.7.0"
 mpris-server = { version = "0.9.0" }

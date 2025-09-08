@@ -1,11 +1,10 @@
 use std::cell::RefCell;
 use crate::opensonic::cache::SongCache;
-use crate::opensonic::client::OpenSubsonicClient;
+use crate::opensonic::client::{OpenSubsonicClient};
 use crate::opensonic::types::{InvalidResponseError, Song};
 use crate::ui::track_list::MoveDirection;
 use crate::PlayerCommand;
 use async_channel::Sender;
-use futures_util::TryStreamExt;
 use mpris_server::{LoopStatus, PlaybackStatus, TrackId};
 use rand::prelude::SliceRandom;
 use rand::Rng;
@@ -17,10 +16,10 @@ use std::error::Error;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
-use stream_download::async_read::AsyncReadStreamParams;
+use stream_download::http::HttpStream;
+use stream_download::source::{DecodeError, SourceStream};
 use stream_download::storage::memory::MemoryStorageProvider;
 use stream_download::StreamDownload;
-use tokio_util::io::StreamReader;
 use uuid::Uuid;
 
 #[derive(Debug, Default)]
@@ -150,43 +149,34 @@ impl PlayerInfo {
         };
 
         println!("Playing: {}", song.1.title);
-        let stream = self
-            .client
-            .stream(&*song.1.id, None, None, None, None, Some(true), None);
-
-        let response = stream
-            .await?;
-        let len = response.headers().get("Content-Length").and_then(|t| match t.to_str() {
-            Ok(v) => match v.parse::<u64>() {
-                Ok(v) => Some(v),
-                Err(_) => None
-            },
-            Err(_) => None
-        });
-        let x = response.bytes_stream();
+        let stream = HttpStream::new(self.client, song.1.id.clone()).await?;
+        let len = stream.content_length().clone();
         let reader =
-            StreamReader::new(x.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)));
+            match StreamDownload::from_stream(stream, MemoryStorageProvider::default(), stream_download::Settings::default())
+                .await
+            {
+                Ok(reader) => reader,
+                Err(e) => Err(e.decode_error().await)?,
+            };
 
-
-        let reader = StreamDownload::new_async_read(
-            AsyncReadStreamParams::new(reader),
-            MemoryStorageProvider::default(),
-            stream_download::Settings::default(),
-        ).await?;
-
-        let mut decoder = Decoder::builder().with_data(reader).with_seekable(true);
-        if let Some(len) = len {
-            decoder = decoder.with_byte_len(len);
-        }
-        if let Some(suffix) = &song.1.suffix {
-            decoder = decoder.with_hint(suffix);
-        }
-        if let Some(mime) = &song.1.media_type {
-            decoder = decoder.with_mime_type(mime);
-        }
+        let suffix = song.1.suffix.clone();
+        let media_type = song.1.media_type.clone();
+        let decoder = relm4::spawn_blocking(move ||{
+            let mut decoder = Decoder::builder().with_data(reader).with_seekable(true);
+            if let Some(len) = len {
+                decoder = decoder.with_byte_len(len);
+            }
+            if let Some(suffix) = suffix {
+                decoder = decoder.with_hint(&suffix);
+            }
+            if let Some(mime) = media_type {
+                decoder = decoder.with_mime_type(&mime);
+            }
+            decoder.build() // This call blocks
+        }).await?;
 
         self.sink.clear();
-        self.sink.append(decoder.build()?);
+        self.sink.append(decoder?);
         let cmd_channel = self.cmd_channel.clone();
         let callback_source = EmptyCallback::new(Box::new(move || {
             cmd_channel.send_blocking(PlayerCommand::TrackOver).expect("Error sending message TrackOver");

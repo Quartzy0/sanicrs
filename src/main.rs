@@ -13,7 +13,7 @@ use relm4::adw::prelude::{ApplicationExtManual, GtkApplicationExt, WidgetExt};
 use relm4::component::{AsyncComponentBuilder, AsyncComponentController};
 use relm4::gtk::gio::prelude::{ApplicationExt, SettingsExt};
 use relm4::gtk::gio::{ApplicationFlags, Cancellable, Settings, SettingsBackend, SettingsSchemaSource};
-use relm4::{RelmApp, RELM_BLOCKING_THREADS};
+use relm4::RelmApp;
 use rodio::OutputStreamBuilder;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -119,7 +119,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             return Ok(());
         }
     }
-    RELM_BLOCKING_THREADS.set(1).expect("Error setting relm4 max blocking threads");
+    // RELM_BLOCKING_THREADS.set(1).expect("Error setting relm4 max blocking threads");
 
     let should_restart;
     {
