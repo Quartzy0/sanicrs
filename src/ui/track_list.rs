@@ -152,6 +152,11 @@ impl AsyncComponent for TrackListWidget {
             artist.set_halign(Align::Start);
             artist.set_max_width_chars(30);
             artist.set_ellipsize(EllipsizeMode::End);
+            artist.set_use_markup(true);
+            artist.connect_activate_link(move |this, url| {
+                this.activate_action("win.artist", Some(&url.to_variant())).expect("Error executing action");
+                glib::Propagation::Stop
+            });
             vbox.append(&artist);
 
             let picture = CoverPicture::new(cover_cache.clone(), CoverSize::Small);
