@@ -15,26 +15,7 @@ use crate::icon_names;
 use crate::ui::album_object::AlbumObject;
 
 #[derive(Debug)]
-pub struct ViewArtistWidget {
-    mpris_player: Rc<LocalServer<MprisPlayer>>,
-    album_factory: SignalListItemFactory,
-    artist: ArtistObject,
-    album_cache: AlbumCache,
-    artist_cache: ArtistCache,
-    cover_cache: CoverCache,
-}
-
-#[derive(Debug)]
-pub enum ViewArtistMsg {
-    PlayAlbum(u32),
-    SetArtist(ArtistObject),
-    ViewAlbum(u32),
-}
-
-#[derive(Debug)]
-pub enum ViewArtistOut {
-    ViewAlbum(AlbumObject)
-}
+pub struct ViewArtistWidget;
 
 type ViewArtistInit = (
     ArtistObject,
@@ -47,13 +28,12 @@ type ViewArtistInit = (
 #[relm4::component(pub async)]
 impl AsyncComponent for ViewArtistWidget {
     type CommandOutput = ();
-    type Input = ViewArtistMsg;
-    type Output = ViewArtistOut;
+    type Input = ();
+    type Output = ();
     type Init = ViewArtistInit;
 
     view! {
         adw::NavigationPage {
-            set_tag: Some("view-artist"),
             set_title: "View artist",
 
             gtk::ScrolledWindow {
@@ -80,37 +60,30 @@ impl AsyncComponent for ViewArtistWidget {
                             CoverPicture{
                                 set_cover_size: CoverSize::Large,
                                 set_cover_type: CoverType::Round,
-                                set_cache: model.cover_cache.clone(),
-                                #[watch]
-                                set_cover_id: model.artist.cover_art_id(),
+                                set_cache: cover_cache.clone(),
+                                set_cover_id: artist.cover_art_id(),
                             },
 
                             gtk::Box {
                                 set_orientation: Orientation::Vertical,
                                 set_spacing: 10,
 
-                                append = &gtk::Label {
-                                    #[watch]
-                                    set_label: model.artist.name().as_str(),
+                                gtk::Label {
+                                    set_label: artist.name().as_str(),
                                     add_css_class: "bold",
                                     add_css_class: "t0",
                                     set_halign: Align::Start,
                                 },
-                                append = if let Some(count) = model.artist.album_count() {
-                                    &gtk::Label {
-                                        #[watch]
-                                        set_label: format!("{} albums", count).as_str(),
-                                        add_css_class: "t1",
-                                        set_halign: Align::Start,
-                                    }
-                                } else {
-                                    &adw::Bin{}
+                                gtk::Label {
+                                    set_label: artist.album_count().and_then(|c| Some(format!("{} albums", c))).unwrap_or("".to_string()).as_str(),
+                                    add_css_class: "t1",
+                                    set_halign: Align::Start,
                                 }
                             }
                         },
                         #[name = "list"]
                         gtk::ListView {
-                            set_factory: Some(&model.album_factory),
+                            set_factory: Some(&album_factory),
                         }
                     }
                 }
@@ -121,22 +94,25 @@ impl AsyncComponent for ViewArtistWidget {
     async fn init(
         init: Self::Init,
         root: Self::Root,
-        sender: AsyncComponentSender<Self>,
+        _sender: AsyncComponentSender<Self>,
     ) -> AsyncComponentParts<Self> {
-        let model = Self {
-            mpris_player: init.1,
-            artist: init.0,
-            album_factory: SignalListItemFactory::new(),
-            album_cache: init.3,
-            artist_cache: init.4,
-            cover_cache: init.2,
-        };
+        let model = Self {};
 
-        model.album_factory.connect_setup(clone!(
+        let mpris_player = init.1;
+        let artist = init.0;
+        let album_factory = SignalListItemFactory::new();
+        let album_cache = init.3;
+        let cover_cache = init.2;
+
+        let widgets: Self::Widgets = view_output!();
+
+        album_factory.connect_setup(clone!(
             #[strong(rename_to = cover_cache)]
-            model.cover_cache,
-            #[strong]
-            sender,
+            cover_cache,
+            #[strong(rename_to = mpris_player)]
+            mpris_player,
+            #[weak(rename_to = list)]
+            widgets.list,
             move |_, list_item| {
                 let hbox = gtk::CenterBox::builder()
                     .orientation(Orientation::Horizontal)
@@ -174,24 +150,37 @@ impl AsyncComponent for ViewArtistWidget {
 
                 play_btn.connect_clicked(clone!(
                     #[strong]
-                    sender,
+                    mpris_player,
                     #[weak]
                     list_item,
+                    #[weak]
+                    list,
                     move |_| {
                         let item = list_item.position();
-                        sender.input(ViewArtistMsg::PlayAlbum(item));
+                        let value = mpris_player.clone();
+                        if let Some(model) = list.model()
+                            && let Some(item) = model.item(item) {
+                            let item = item.downcast::<AlbumObject>().expect("Item should be AlbumObject");
+                            relm4::spawn_local(async move {
+                                let player = value.imp();
+                                player.send_res(player.queue_album(item.id(), None, true).await);
+                            });
+                        }
                     }
                 ));
 
                 let gesture = gtk::GestureClick::new();
                 gesture.connect_released(clone!(
-                    #[strong]
-                    sender,
                     #[weak]
                     list_item,
+                    #[weak]
+                    list,
                     move |_this, _n: i32, _x: f64, _y: f64| {
-                        let item = list_item.position();
-                        sender.input(ViewArtistMsg::ViewAlbum(item));
+                        if let Some(model) = list.model()
+                            && let Some(item) = model.item(list_item.position()) {
+                            let item = item.downcast::<AlbumObject>().expect("Item should be AlbumObject");
+                            list.activate_action("win.album", Some(&item.id().to_variant())).expect("Error executing action");
+                        }
                     }
                 ));
                 hbox.add_controller(gesture);
@@ -211,55 +200,12 @@ impl AsyncComponent for ViewArtistWidget {
             }
         ));
 
-        let widgets: Self::Widgets = view_output!();
-
-        if let Some(albums) = model.artist.get_albums() {
-            let albums = model.album_cache.add_albums(albums).await;
+        if let Some(albums) = artist.get_albums() {
+            let albums = album_cache.add_albums(albums).await;
             let list_store = ListStore::from_iter(albums);
             widgets.list.set_model(Some(&gtk::NoSelection::new(Some(list_store))));
         }
 
         AsyncComponentParts { model, widgets }
-    }
-
-    async fn update_with_view(
-        &mut self,
-        widgets: &mut Self::Widgets,
-        message: Self::Input,
-        sender: AsyncComponentSender<Self>,
-        _root: &Self::Root,
-    ) {
-        let player = self.mpris_player.imp();
-        match message {
-            ViewArtistMsg::PlayAlbum(index) => {
-                if let Some(model) = widgets.list.model()
-                    && let Some(item) = model.item(index) {
-                    let item = item.downcast::<AlbumObject>().expect("Item should be AlbumObject");
-                    player.send_res(player.queue_album(item.id(), None, true).await);
-                }
-            },
-            ViewArtistMsg::SetArtist(artist) => {
-                match self.artist_cache.ensure_albums(artist).await {
-                    Ok(art) => {
-                        self.artist = art;
-                        if let Some(albums) = self.artist.get_albums() {
-                            let albums = self.album_cache.add_albums(albums).await;
-                            let list_store = ListStore::from_iter(albums);
-                            widgets.list.set_model(Some(&gtk::NoSelection::new(Some(list_store))));
-                        }
-                    },
-                    Err(e) => player.send_error(e),
-                }
-            },
-            ViewArtistMsg::ViewAlbum(index) => {
-                if let Some(model) = widgets.list.model()
-                    && let Some(item) = model.item(index) {
-                    let item = item.downcast::<AlbumObject>().expect("Item should be AlbumObject");
-                    sender.output(ViewArtistOut::ViewAlbum(item)).expect("Error sending message out of ViewArtist");
-                }
-            },
-        }
-
-        self.update_view(widgets, sender);
     }
 }

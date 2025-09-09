@@ -15,19 +15,7 @@ use std::rc::Rc;
 use uuid::Uuid;
 
 #[derive(Debug)]
-pub struct ViewAlbumWidget {
-    mpris_player: Rc<LocalServer<MprisPlayer>>,
-    song_list_factory: SignalListItemFactory,
-    album: AlbumObject,
-    album_cache: AlbumCache,
-}
-
-#[derive(Debug)]
-pub enum ViewAlbumMsg {
-    PlayAlbum(Option<usize>),
-    SetAlbum(AlbumObject),
-    QueueAlbum,
-}
+pub struct ViewAlbumWidget;
 
 type ViewAlbumInit = (
     AlbumObject,
@@ -40,13 +28,12 @@ type ViewAlbumInit = (
 #[relm4::component(pub async)]
 impl AsyncComponent for ViewAlbumWidget {
     type CommandOutput = ();
-    type Input = ViewAlbumMsg;
+    type Input = ();
     type Output = ();
     type Init = ViewAlbumInit;
 
     view! {
         adw::NavigationPage {
-            set_tag: Some("view-album"),
             set_title: "View album",
 
             gtk::ScrolledWindow {
@@ -77,9 +64,8 @@ impl AsyncComponent for ViewAlbumWidget {
 
                                 CoverPicture{
                                     set_cover_size: CoverSize::Large,
-                                    set_cache: init.2.clone(),
-                                    #[watch]
-                                    set_cover_id: model.album.cover_art_id(),
+                                    set_cache: cover_cache.clone(),
+                                    set_cover_id: album.cover_art_id(),
                                 },
                                 gtk::Box {
                                     set_orientation: Orientation::Vertical,
@@ -87,15 +73,13 @@ impl AsyncComponent for ViewAlbumWidget {
                                     set_valign: Align::End,
 
                                     gtk::Label {
-                                        #[watch]
-                                        set_label: model.album.name().as_str(),
+                                        set_label: album.name().as_str(),
                                         add_css_class: "bold",
                                         add_css_class: "t0",
                                         set_halign: Align::Start,
                                     },
                                     gtk::Label {
-                                        #[watch]
-                                        set_markup: model.album.artist().as_str(),
+                                        set_markup: album.artist().as_str(),
                                         add_css_class: "t1",
                                         set_halign: Align::Start,
                                         connect_activate_link => move |this, url| {
@@ -104,14 +88,12 @@ impl AsyncComponent for ViewAlbumWidget {
                                         },
                                     },
                                     gtk::Label {
-                                        #[watch]
-                                        set_label: format!("{} songs", model.album.song_count()).as_str(),
+                                        set_label: format!("{} songs", album.song_count()).as_str(),
                                         add_css_class: "t1",
                                         set_halign: Align::Start,
                                     },
                                     gtk::Label {
-                                        #[watch]
-                                        set_label: format!("Duration: {}", model.album.duration()).as_str(),
+                                        set_label: format!("Duration: {}", album.duration()).as_str(),
                                         add_css_class: "t1",
                                         set_halign: Align::Start,
                                     },
@@ -130,14 +112,28 @@ impl AsyncComponent for ViewAlbumWidget {
                                     set_valign: Align::Center,
                                     set_halign: Align::Center,
                                     set_icon_name: icon_names::PLAY,
-                                    connect_clicked => ViewAlbumMsg::PlayAlbum(None),
+                                    connect_clicked[mpris_server, album_id] => move |_| {
+                                        let value = mpris_server.clone();
+                                        let id = album_id.clone();
+                                        relm4::spawn_local(async move {
+                                            let player = value.imp();
+                                            player.send_res(player.queue_album(id, None, true).await);
+                                        });
+                                    },
                                     add_css_class: "album-play-btn"
                                 },
                                 gtk::Button {
                                     set_valign: Align::Center,
                                     set_halign: Align::Center,
                                     set_icon_name: icon_names::ADD_REGULAR,
-                                    connect_clicked => ViewAlbumMsg::QueueAlbum,
+                                    connect_clicked[mpris_server, album_id] => move |_| {
+                                       let value = mpris_server.clone();
+                                       let id = album_id.clone();
+                                       relm4::spawn_local(async move {
+                                           let player = value.imp();
+                                           player.send_res(player.queue_album(id, None, false).await);
+                                       });
+                                    },
                                     add_css_class: "album-play-btn"
                                 }
                             }
@@ -145,7 +141,7 @@ impl AsyncComponent for ViewAlbumWidget {
                         gtk::Separator{},
                         #[name = "song_list"]
                         gtk::ListView {
-                            set_factory: Some(&model.song_list_factory),
+                            set_factory: Some(&song_list_factory),
                         }
                     }
                 }
@@ -156,20 +152,29 @@ impl AsyncComponent for ViewAlbumWidget {
     async fn init(
         init: Self::Init,
         root: Self::Root,
-        sender: AsyncComponentSender<Self>,
+        _sender: AsyncComponentSender<Self>,
     ) -> AsyncComponentParts<Self> {
-        let model = Self {
-            mpris_player: init.1,
-            album: init.0,
-            song_list_factory: SignalListItemFactory::new(),
-            album_cache: init.3,
+        let model = Self {};
+        let album = if init.0.has_songs() {
+            init.0
+        }else {
+            init.3.get_album(init.0.id().as_str()).await.expect("Error getting album")
         };
+        let mpris_player = init.1;
+        let song_list_factory = SignalListItemFactory::new();
+        let cover_cache = init.2;
 
+        let album_id = album.id().clone();
+        let mpris_server = mpris_player.clone();
         let widgets: Self::Widgets = view_output!();
 
-        model.song_list_factory.connect_setup(clone!(
-            #[strong(rename_to = cover_cache)]
-            init.2,
+        song_list_factory.connect_setup(clone!(
+            #[strong]
+            cover_cache,
+            #[strong]
+            mpris_player,
+            #[strong]
+            album,
             move |_, list_item| {
                 let hbox = gtk::CenterBox::builder()
                     .orientation(Orientation::Horizontal)
@@ -203,12 +208,19 @@ impl AsyncComponent for ViewAlbumWidget {
 
                 play_btn.connect_clicked(clone!(
                     #[strong]
-                    sender,
+                    album,
                     #[weak]
                     list_item,
+                    #[strong]
+                    mpris_player,
                     move |_| {
                         let item = list_item.position();
-                        sender.input(ViewAlbumMsg::PlayAlbum(Some(item as usize)));
+                        let value = mpris_player.clone();
+                        let id = album.id().clone();
+                        relm4::spawn_local(async move {
+                            let player = value.imp();
+                            player.send_res(player.queue_album(id, Some(item as usize), true).await);
+                        });
                     }
                 ));
 
@@ -229,76 +241,16 @@ impl AsyncComponent for ViewAlbumWidget {
                     .bind(&picture, "cover-id", Widget::NONE);
             }
         ));
-
-        // let album_cache = init.3;
-        glib::spawn_future_local(clone!(
-            #[strong(rename_to = album)]
-            model.album,
-            #[weak(rename_to = song_list)]
-            widgets.song_list,
-            #[strong(rename_to = album_cache)]
-            model.album_cache,
-            async move {
-                let album = if album.has_songs() {
-                    album
-                }else {
-                    album_cache.get_album(album.id().as_str()).await.expect("Error getting album")
-                };
-                let list_store = ListStore::from_iter(
-                    album
-                        .get_songs()
-                        .unwrap()
-                        .iter()
-                        .map(|x| SongObject::new((Uuid::from_u128(0), x.clone()).into(), PositionState::Passed)),
-                );
-                song_list.set_model(Some(&gtk::NoSelection::new(Some(list_store))));
-            }
-        ));
+        
+        let list_store = ListStore::from_iter(
+            album
+                .get_songs()
+                .unwrap()
+                .iter()
+                .map(|x| SongObject::new((Uuid::from_u128(0), x.clone()).into(), PositionState::Passed)),
+        );
+        widgets.song_list.set_model(Some(&gtk::NoSelection::new(Some(list_store))));
 
         AsyncComponentParts { model, widgets }
-    }
-
-    async fn update_with_view(
-        &mut self,
-        widgets: &mut Self::Widgets,
-        message: Self::Input,
-        sender: AsyncComponentSender<Self>,
-        _root: &Self::Root,
-    ) {
-        let player = self.mpris_player.imp();
-        match message {
-            ViewAlbumMsg::PlayAlbum(index) => {
-                player.send_res(player.queue_album(self.album.id(), index, true).await);
-            },
-            ViewAlbumMsg::SetAlbum(album) => {
-                if self.album.id() == album.id(){
-                    return;
-                }
-                self.album = album;
-                let album = if self.album.has_songs() {
-                    &self.album
-                }else {
-                    &self.album_cache.get_album(self.album.id().as_str()).await.expect("Error getting album")
-                };
-
-                let songs: Vec<SongObject> = album
-                    .get_songs()
-                    .unwrap()
-                    .iter()
-                    .map(|x| SongObject::new((Uuid::from_u128(0), x.clone()).into(), PositionState::Passed))
-                    .collect();
-                let selection = widgets.song_list
-                    .model()
-                    .expect("Song list should have model set")
-                    .downcast::<gtk::NoSelection>()
-                    .expect("Song list model should be NoSelection");
-                let store = selection.model().unwrap().downcast::<ListStore>().expect("Should be ListStore");
-                store.splice(0, store.n_items(), &songs);
-            },
-            ViewAlbumMsg::QueueAlbum => {
-                player.send_res(player.queue_album(self.album.id(), None, false).await);
-            },
-        };
-        self.update_view(widgets, sender);
     }
 }
