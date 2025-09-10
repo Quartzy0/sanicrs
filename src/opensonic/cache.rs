@@ -5,10 +5,14 @@ use crate::ui::artist_object::ArtistObject;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::error::Error;
+use std::io::Cursor;
 use std::rc::Rc;
 use std::sync::Arc;
+use image::{EncodableLayout, ImageReader};
 use relm4::adw::gdk::Texture;
 use relm4::adw::glib;
+use relm4::gtk::gdk_pixbuf;
+use relm4::gtk::gdk_pixbuf::Colorspace;
 use tokio::sync::RwLock;
 
 #[derive(Clone, Debug)]
@@ -227,8 +231,20 @@ impl CoverCache {
             }
         }
         let resp = self.client.get_cover_image(id, Some("512")).await?;
-        let bytes = glib::Bytes::from(&resp);
-        let texture = Texture::from_bytes(&bytes)?;
+        let texture: Result<Texture, Box<dyn Error + Send + Sync>> = relm4::spawn_blocking(|| {
+            let img = ImageReader::new(Cursor::new(resp)).with_guessed_format()?.decode()?.into_rgb8();
+            let bytes = glib::Bytes::from(img.as_bytes());
+            Ok(Texture::for_pixbuf(&gdk_pixbuf::Pixbuf::from_bytes(
+                &bytes,
+                Colorspace::Rgb,
+                false,
+                8,
+                img.width() as i32,
+                img.height() as i32,
+                (img.width()*3) as i32
+            )))
+        }).await?;
+        let texture = texture.map_err(|e| format!("Error loading texture: {}", e))?;
         let mut cache_w = self.cache.write().await;
         cache_w.insert(id.to_string(), texture.clone());
         Ok(texture)

@@ -33,6 +33,7 @@ uuid = { version = "1.18.1", default-features = false, features = ["v4"] }
 color-thief = "0.2.2"
 libsecret = "0.7.0"
 mpris-server = { version = "0.9.0" }
+image = {version = "0.25.8"}
 
 [build-dependencies]
 relm4-icons-build = "0.10.0-beta.2"
