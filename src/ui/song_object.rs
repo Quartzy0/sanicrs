@@ -52,7 +52,7 @@ impl SongObject {
         self.property("cover-art-id")
     }
 
-    pub fn duration(&self) -> u64 {
+    pub fn duration(&self) -> String {
         self.property("duration")
     }
 
@@ -64,7 +64,7 @@ impl SongObject {
 mod imp {
     use crate::player::SongEntry;
     use crate::ui::song_object::PositionState;
-    use relm4::adw::glib::{ParamSpec, ParamSpecEnum, ParamSpecString, ParamSpecUInt64, Value};
+    use relm4::adw::glib::{ParamSpec, ParamSpecEnum, ParamSpecString, Value};
     use relm4::adw::gtk::glib;
     use relm4::adw::gtk::prelude::*;
     use relm4::adw::gtk::subclass::prelude::*;
@@ -98,10 +98,11 @@ mod imp {
                 vec![
                     ParamSpecString::builder("id").build(),
                     ParamSpecString::builder("title").build(),
+                    ParamSpecString::builder("name").build(),
                     ParamSpecString::builder("artist").build(),
                     ParamSpecString::builder("album").build(),
                     ParamSpecString::builder("cover-art-id").build(),
-                    ParamSpecUInt64::builder("duration").build(),
+                    ParamSpecString::builder("duration").build(),
                     ParamSpecEnum::builder::<PositionState>("position-state").build(),
                 ]
             });
@@ -124,17 +125,43 @@ mod imp {
                 match pspec.name() {
                     "id" => song.1.id.to_value(),
                     "title" => song.1.title.to_value(),
+                    "name" => song.1.title.to_value(),
                     "artist" => song.1.artists().to_value(),
                     "album" => song.1.album.to_value(),
                     "cover-art-id" => song.1.cover_art.to_value(),
                     "position-state" => self.position_state.get().to_value(),
-                    "duration" => song.1.duration.and_then(|a| Some(a.as_secs())).unwrap_or(0).to_value(),
+                    "duration" => {
+                        if let Some(duration) = song.1.duration {
+                            let mut secs = duration.as_secs();
+                            let mut mins = secs / 60;
+                            let hrs = mins / 60;
+                            mins = mins % 60;
+                            secs = secs % 60;
+                            let mut str = String::new();
+                            if hrs != 0 {
+                                str.push_str(&hrs.to_string());
+                                str.push_str("h ");
+                                str.push_str(&mins.to_string());
+                                str.push_str("m ");
+                            } else if mins != 0 {
+                                str.push_str(&mins.to_string());
+                                str.push_str("m ");
+                            }
+                            str.push_str(&secs.to_string());
+                            str.push_str("s");
+
+                            str.to_value()
+                        } else {
+                            None::<String>.to_value()
+                        }
+                    },
                     _ => unimplemented!(),
                 }
             } else {
                 match pspec.name() {
                     "id" => None::<String>.to_value(),
                     "title" => None::<String>.to_value(),
+                    "name" => None::<String>.to_value(),
                     "artist" => None::<String>.to_value(),
                     "album" => None::<String>.to_value(),
                     "cover-art-id" => None::<String>.to_value(),

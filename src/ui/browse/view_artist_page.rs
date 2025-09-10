@@ -3,16 +3,14 @@ use crate::opensonic::cache::{AlbumCache, ArtistCache, CoverCache};
 use crate::ui::artist_object::ArtistObject;
 use crate::ui::cover_picture::{CoverPicture, CoverSize, CoverType};
 use mpris_server::LocalServer;
-use relm4::adw::gtk::{Align, Orientation, SignalListItemFactory};
+use relm4::adw::gtk::{Align, Orientation};
 use relm4::adw::prelude::*;
-use relm4::gtk::gio::ListStore;
 use relm4::prelude::*;
 use std::rc::Rc;
 use relm4::adw::glib::clone;
-use relm4::gtk::{ListItem, Widget};
 use relm4::adw::glib as glib;
-use crate::icon_names;
 use crate::ui::album_object::AlbumObject;
+use crate::ui::item_list::{ItemListInit, ItemListWidget};
 
 #[derive(Debug)]
 pub struct ViewArtistWidget;
@@ -81,10 +79,7 @@ impl AsyncComponent for ViewArtistWidget {
                                 }
                             }
                         },
-                        #[name = "list"]
-                        gtk::ListView {
-                            set_factory: Some(&album_factory),
-                        }
+                        item_list_widget.widget(),
                     }
                 }
             }
@@ -100,111 +95,41 @@ impl AsyncComponent for ViewArtistWidget {
 
         let mpris_player = init.1;
         let artist = init.0;
-        let album_factory = SignalListItemFactory::new();
+        let artist_c = artist.clone();
         let album_cache = init.3;
         let cover_cache = init.2;
 
+        let item_list_widget = ItemListWidget::builder()
+            .launch(ItemListInit {
+                r#type: AlbumObject::static_type(),
+                cover_type: CoverType::Square,
+                mpris_player: mpris_player.clone(),
+                cover_cache: cover_cache.clone(),
+                play_fn: Some(Box::new(move |album, _i, mpris_player| {
+                    let album = album.downcast::<AlbumObject>().expect("Item should be AlbumObject");
+                    relm4::spawn_local(async move {
+                        let player = mpris_player.imp();
+                        player.send_res(player.queue_album(album.id(), None, true).await);
+                    });
+                })),
+                click_fn: Some(Box::new(clone!(
+                    #[weak]
+                    root,
+                    move |album, _i, _mpris_player| {
+                        let album = album.downcast::<AlbumObject>().expect("Item should be AlbumObject");
+                        root.activate_action("win.album", Some(&album.id().to_variant())).expect("Error executing action");
+                    }
+                ))),
+                load_items: async move {
+                    if let Some(albums) = artist_c.get_albums() {
+                        album_cache.add_albums(albums).await.into_iter().map(|a| a.upcast()).collect()
+                    } else {
+                        Vec::new()
+                    }
+                },
+            });
+
         let widgets: Self::Widgets = view_output!();
-
-        album_factory.connect_setup(clone!(
-            #[strong(rename_to = cover_cache)]
-            cover_cache,
-            #[strong(rename_to = mpris_player)]
-            mpris_player,
-            #[weak(rename_to = list)]
-            widgets.list,
-            move |_, list_item| {
-                let hbox = gtk::CenterBox::builder()
-                    .orientation(Orientation::Horizontal)
-                    .build();
-                hbox.add_css_class("album-song-item");
-
-                let start_hbox = gtk::Box::builder()
-                    .orientation(Orientation::Horizontal)
-                    .spacing(5)
-                    .build();
-                let end_hbox = gtk::Box::builder()
-                    .orientation(Orientation::Horizontal)
-                    .spacing(5)
-                    .build();
-                let play_btn = gtk::Button::builder()
-                    .icon_name(icon_names::PLAY)
-                    .valign(Align::Center)
-                    .halign(Align::Center)
-                    .build();
-
-                let picture = CoverPicture::new(cover_cache.clone(), CoverSize::Small);
-                let title = gtk::Label::new(None);
-                let duration = gtk::Label::new(None);
-                start_hbox.append(&play_btn);
-                start_hbox.append(&picture);
-                start_hbox.append(&title);
-                end_hbox.append(&duration);
-                hbox.set_start_widget(Some(&start_hbox));
-                hbox.set_end_widget(Some(&end_hbox));
-
-                let list_item = list_item
-                    .downcast_ref::<ListItem>()
-                    .expect("Needs to be ListItem");
-                list_item.set_child(Some(&hbox));
-
-                play_btn.connect_clicked(clone!(
-                    #[strong]
-                    mpris_player,
-                    #[weak]
-                    list_item,
-                    #[weak]
-                    list,
-                    move |_| {
-                        let item = list_item.position();
-                        let value = mpris_player.clone();
-                        if let Some(model) = list.model()
-                            && let Some(item) = model.item(item) {
-                            let item = item.downcast::<AlbumObject>().expect("Item should be AlbumObject");
-                            relm4::spawn_local(async move {
-                                let player = value.imp();
-                                player.send_res(player.queue_album(item.id(), None, true).await);
-                            });
-                        }
-                    }
-                ));
-
-                let gesture = gtk::GestureClick::new();
-                gesture.connect_released(clone!(
-                    #[weak]
-                    list_item,
-                    #[weak]
-                    list,
-                    move |_this, _n: i32, _x: f64, _y: f64| {
-                        if let Some(model) = list.model()
-                            && let Some(item) = model.item(list_item.position()) {
-                            let item = item.downcast::<AlbumObject>().expect("Item should be AlbumObject");
-                            list.activate_action("win.album", Some(&item.id().to_variant())).expect("Error executing action");
-                        }
-                    }
-                ));
-                hbox.add_controller(gesture);
-
-                list_item
-                    .property_expression("item")
-                    .chain_property::<AlbumObject>("name")
-                    .bind(&title, "label", Widget::NONE);
-                list_item
-                    .property_expression("item")
-                    .chain_property::<AlbumObject>("duration")
-                    .bind(&duration, "label", Widget::NONE);
-                list_item
-                    .property_expression("item")
-                    .chain_property::<AlbumObject>("cover-art-id")
-                    .bind(&picture, "cover-id", Widget::NONE);
-            }
-        ));
-
-        if let Some(albums) = artist.get_albums() {
-            let albums = album_cache.add_albums(albums).await;
-            let list_store = ListStore::from_iter(albums);
-            widgets.list.set_model(Some(&gtk::NoSelection::new(Some(list_store))));
-        }
 
         AsyncComponentParts { model, widgets }
     }

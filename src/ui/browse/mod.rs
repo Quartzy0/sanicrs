@@ -13,12 +13,12 @@ use crate::ui::album_object::AlbumObject;
 use crate::ui::app::Init;
 use crate::ui::artist_object::ArtistObject;
 use crate::ui::browse::browse_page::BrowsePageWidget;
-use crate::ui::browse::search::{SearchMsg, SearchOut, SearchType, SearchWidget};
+use crate::ui::browse::search::{SearchMsg, SearchType, SearchWidget};
 use crate::ui::browse::view_album_page::ViewAlbumWidget;
 use crate::ui::browse::view_artist_page::ViewArtistWidget;
 use mpris_server::LocalServer;
 use relm4::component::AsyncComponentParts;
-use relm4::prelude::{AsyncComponent, AsyncController};
+use relm4::prelude::AsyncComponent;
 use relm4::{adw, AsyncComponentSender};
 
 pub struct BrowseWidget {
@@ -28,7 +28,7 @@ pub struct BrowseWidget {
     artist_cache: ArtistCache,
 
     browse_page: AsyncConnector<BrowsePageWidget>,
-    search_controller: AsyncController<SearchWidget>,
+    search_controller: AsyncConnector<SearchWidget>,
 }
 
 #[derive(Debug)]
@@ -56,16 +56,12 @@ impl AsyncComponent for BrowseWidget {
     async fn init(
         init: Self::Init,
         root: Self::Root,
-        sender: AsyncComponentSender<Self>,
+        _sender: AsyncComponentSender<Self>,
     ) -> AsyncComponentParts<Self> {
         let browse_page = BrowsePageWidget::builder()
             .launch(init.clone());
         let search_controller = SearchWidget::builder()
-            .launch(init.clone())
-            .forward(sender.input_sender(), |msg| match msg {
-                SearchOut::ViewAlbum(a) => BrowseMsg::ViewAlbum(a),
-                SearchOut::ViewArtist(a) => BrowseMsg::ViewArtist(a)
-            });
+            .launch(init.clone());
         let model = Self {
             mpris_player: init.6,
             cover_cache: init.0,
