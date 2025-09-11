@@ -34,6 +34,7 @@ color-thief = "0.2.2"
 libsecret = "0.7.0"
 mpris-server = { version = "0.9.0" }
 image = {version = "0.25.8"}
+evicting_cache_map = {git = "https://gitea.quartzy.me/quartzy/rs-collections.git"}
 
 [build-dependencies]
 relm4-icons-build = "0.10.0-beta.2"

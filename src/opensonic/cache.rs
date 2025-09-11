@@ -2,12 +2,11 @@ use crate::opensonic::client::OpenSubsonicClient;
 use crate::opensonic::types::{Album, AlbumListType, Artist, LyricsList, Song};
 use crate::ui::album_object::AlbumObject;
 use crate::ui::artist_object::ArtistObject;
-use std::collections::hash_map::Entry;
-use std::collections::HashMap;
 use std::error::Error;
 use std::io::Cursor;
 use std::rc::Rc;
 use std::sync::Arc;
+use evicting_cache_map::EvictingCacheMap;
 use image::{EncodableLayout, ImageReader};
 use relm4::adw::gdk::Texture;
 use relm4::adw::glib;
@@ -17,7 +16,7 @@ use tokio::sync::RwLock;
 
 #[derive(Clone, Debug)]
 pub struct SongCache {
-    cache: Rc<RwLock<HashMap<String, Rc<Song>>>>,
+    cache: Rc<RwLock<EvictingCacheMap<String, Rc<Song>, 100, fn(String,Rc<Song>)>>>,
     client: &'static OpenSubsonicClient,
 }
 
@@ -25,27 +24,14 @@ impl SongCache {
     pub fn new(client: &'static OpenSubsonicClient) -> Self {
         Self {
             client,
-            cache: Rc::new(RwLock::new(HashMap::new())),
-        }
-    }
-
-    pub async fn get_song_cached(&self, song: Song) -> Rc<Song> {
-        let mut cache_w = self.cache.write().await;
-
-        match cache_w.entry(song.id.clone()) {
-            Entry::Occupied(occupied_entry) => occupied_entry.get().clone(),
-            Entry::Vacant(vacant_entry) => {
-                let song = Rc::new(song);
-                vacant_entry.insert(song.clone());
-                song
-            },
+            cache: Rc::new(RwLock::new(EvictingCacheMap::new())),
         }
     }
 
     pub async fn get_song(&self, id: &str) -> Result<Rc<Song>, Box<dyn Error>> {
         {
             let cahce_r = self.cache.read().await;
-            if let Some(song) = cahce_r.get(id) {
+            if let Some(song) = cahce_r.get_no_promote(id) {
                 return Ok(song.clone());
             }
         }
@@ -110,7 +96,7 @@ impl SongCache {
 
 #[derive(Clone, Debug)]
 pub struct AlbumCache {
-    cache: Rc<RwLock<HashMap<String, AlbumObject>>>,
+    cache: Rc<RwLock<EvictingCacheMap<String, AlbumObject, 100, fn(String, AlbumObject)>>>,
     client: &'static OpenSubsonicClient,
     song_cache: SongCache,
 }
@@ -119,7 +105,7 @@ impl AlbumCache {
     pub fn new(client: &'static OpenSubsonicClient, song_cache: SongCache) -> Self {
         Self {
             client,
-            cache: Rc::new(RwLock::new(HashMap::new())),
+            cache: Rc::new(RwLock::new(EvictingCacheMap::new())),
             song_cache,
         }
     }
@@ -166,7 +152,7 @@ impl AlbumCache {
     pub async fn get_album(&self, id: &str) -> Result<AlbumObject, Box<dyn Error>> {
         {
             let cache_r = self.cache.read().await;
-            if let Some(cached) = cache_r.get(id) {
+            if let Some(cached) = cache_r.get_no_promote(id) {
                 if !cached.has_songs() {
                     let (_resp, songs) = self.client.get_album(id).await?;
                     cached.set_songs(self.song_cache.add_songs(songs).await);
@@ -211,7 +197,7 @@ impl AlbumCache {
 
 #[derive(Clone, Debug)]
 pub struct CoverCache {
-    cache: Rc<RwLock<HashMap<String, Texture>>>,
+    cache: Rc<RwLock<EvictingCacheMap<String, Texture, 100, fn(String, Texture)>>>,
     client: &'static OpenSubsonicClient,
 }
 
@@ -219,14 +205,14 @@ impl CoverCache {
     pub fn new(client: &'static OpenSubsonicClient) -> Self {
         Self {
             client,
-            cache: Rc::new(RwLock::new(HashMap::new())),
+            cache: Rc::new(RwLock::new(EvictingCacheMap::new())),
         }
     }
 
     pub async fn get_cover_texture(&self, id: &str) -> Result<Texture, Box<dyn Error>> {
         {
             let cache_r = self.cache.read().await;
-            if let Some(texture) = cache_r.get(id) {
+            if let Some(texture) = cache_r.get_no_promote(id) {
                 return Ok(texture.clone());
             }
         }
@@ -253,7 +239,7 @@ impl CoverCache {
 
 #[derive(Clone, Debug)]
 pub struct LyricsCache {
-    cache: Rc<RwLock<HashMap<String, Arc<Vec<LyricsList>>>>>,
+    cache: Rc<RwLock<EvictingCacheMap<String, Arc<Vec<LyricsList>>, 10, fn(String, Arc<Vec<LyricsList>>)>>>,
     client: &'static OpenSubsonicClient,
 }
 
@@ -261,14 +247,14 @@ impl LyricsCache {
     pub fn new(client: &'static OpenSubsonicClient) -> Self {
         Self {
             client,
-            cache: Rc::new(RwLock::new(HashMap::new())),
+            cache: Rc::new(RwLock::new(EvictingCacheMap::new())),
         }
     }
 
     pub async fn get_lyrics(&self, id: &str) -> Result<Arc<Vec<LyricsList>>, Box<dyn Error>> {
         {
             let cache_r = self.cache.read().await;
-            if let Some(lyrics) = cache_r.get(id) {
+            if let Some(lyrics) = cache_r.get_no_promote(id) {
                 return Ok(lyrics.clone());
             }
         }
@@ -281,7 +267,7 @@ impl LyricsCache {
 
 #[derive(Clone, Debug)]
 pub struct ArtistCache {
-    cache: Rc<RwLock<HashMap<String, ArtistObject>>>,
+    cache: Rc<RwLock<EvictingCacheMap<String, ArtistObject, 100, fn(String, ArtistObject)>>>,
     client: &'static OpenSubsonicClient,
 }
 
@@ -289,14 +275,14 @@ impl ArtistCache {
     pub fn new(client: &'static OpenSubsonicClient) -> Self {
         Self {
             client,
-            cache: Rc::new(RwLock::new(HashMap::new())),
+            cache: Rc::new(RwLock::new(EvictingCacheMap::new())),
         }
     }
 
     pub async fn get_artist(&self, id: &str) -> Result<ArtistObject, Box<dyn Error>> {
         {
             let cache_r = self.cache.read().await;
-            if let Some(artist) = cache_r.get(id) {
+            if let Some(artist) = cache_r.get_no_promote(id) {
                 if !artist.has_albums() {
                     let artist_new = self.client.get_artist(id).await?;
                     artist.set_artist(artist_new);
