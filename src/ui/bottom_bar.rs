@@ -52,13 +52,18 @@ impl AsyncComponent for BottomBar {
             set_start_widget = &gtk::Box {
                 set_orientation: Orientation::Horizontal,
                 set_halign: Align::Start,
+                set_valign: Align::Center,
                 set_spacing: 5,
+                set_vexpand: false,
+                set_vexpand_set: true,
                 set_cursor: gdk::Cursor::from_name("pointer", None).as_ref(),
 
                 #[name = "cover_image"]
                 CoverPicture {
                     set_cache: init.0,
                     set_cover_size: CoverSize::Small,
+                    set_halign: Align::Center,
+                    set_valign: Align::Center,
                 },
                 gtk::Box {
                     set_orientation: Orientation::Vertical,
