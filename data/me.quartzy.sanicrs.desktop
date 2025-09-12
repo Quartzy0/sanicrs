@@ -1,0 +1,15 @@
+[Desktop Entry]
+Name=SanicRS
+GenericName=Music Player
+Comment=A music player for OpenSubsonic compatible servers
+Type=Application
+Exec=sanicrs %U
+TryExec=sanicrs
+Terminal=false
+Categories=GNOME;GTK;Music;Audio;
+Keywords=music;player;media;audio;playlist;
+StartupNotify=true
+X-SingleMainWindow=true
+X-Purism-FormFactor=Workstation;Mobile;
+DBusActivatable=true
+Icon=me.quartzy.sanicrs

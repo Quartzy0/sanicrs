@@ -93,6 +93,7 @@ fn into_init(value: &StartInit, server: Rc<LocalServer<MprisPlayer>>) -> Init {
 
 relm4::new_action_group!(pub WindowActionGroup, "win");
 relm4::new_stateless_action!(PreferencesAction, WindowActionGroup, "preferences");
+relm4::new_stateless_action!(QuitAction, WindowActionGroup, "quit");
 relm4::new_stateless_action!(pub PlayPauseAction, WindowActionGroup, "playpause");
 relm4::new_stateless_action!(pub NextAction, WindowActionGroup, "next");
 relm4::new_stateless_action!(pub PreviousAction, WindowActionGroup, "previous");
@@ -332,6 +333,13 @@ impl AsyncComponent for Model {
                 sender.input(AppMsg::ShowPreferences);
             }
         ));
+        let quit_action: RelmAction<QuitAction> = RelmAction::new_stateless(clone!(
+            #[strong]
+            sender,
+            move |_| {
+                sender.input(AppMsg::Quit);
+            }
+        ));
         let playpause_action: RelmAction<PlayPauseAction> = RelmAction::new_stateless(clone!(
             #[strong]
             sender,
@@ -371,6 +379,7 @@ impl AsyncComponent for Model {
 
         let mut group = RelmActionGroup::<WindowActionGroup>::new();
         group.add_action(action);
+        group.add_action(quit_action);
         group.add_action(playpause_action);
         group.add_action(view_artist_action);
         group.add_action(view_album_action);

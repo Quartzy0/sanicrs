@@ -16,6 +16,7 @@ impl WidgetTemplate for HeaderBar {
                 #[wrap(Some)]
                 set_menu_model = &gio::Menu {
                     append_item = &gio::MenuItem::new(Some("Preferences"), Some("win.preferences")),
+                    append_item = &gio::MenuItem::new(Some("Quit"), Some("win.quit")),
                 }
             }
         }

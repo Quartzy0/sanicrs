@@ -1,2 +1,6 @@
 /target
 debug
+.flatpak-builder
+builddir
+_builddir
+repo

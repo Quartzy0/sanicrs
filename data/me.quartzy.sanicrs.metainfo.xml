@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<component type="desktop-application">
+    <id>me.quartzy.sanicrs</id>
+    <metadata_license>CC0</metadata_license>
+    <project_license>GPL-3.0+</project_license>
+    <name>SanicRS</name>
+    <summary>A music player for OpenSubsonic compatible servers</summary>
+    <launchable type="desktop-id">me.quartzy.sanicrs.desktop</launchable>
+    <kudos>
+        <kudo>ModernToolkit</kudo>
+    </kudos>
+    <developer id="me.quartzy">
+        <name>Quartzy</name>
+    </developer>
+
+    <description>
+        <p>A music player that serves as a frontend for any OpenSubsonic compatible server (e.g. Navidrome).</p>
+    </description>
+
+    <content_rating type="oars-1.1" />
+
+    <releases>
+        <release version="1.0" date="2025-09-12">
+            <description translatable="no">
+                <p>This is the first release of SanicRS.</p>
+            </description>
+        </release>
+    </releases>
+</component>

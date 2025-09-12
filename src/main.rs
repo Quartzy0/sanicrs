@@ -12,18 +12,17 @@ use relm4::adw::glib::clone;
 use relm4::adw::prelude::{ApplicationExtManual, GtkApplicationExt, WidgetExt};
 use relm4::component::{AsyncComponentBuilder, AsyncComponentController};
 use relm4::gtk::gio::prelude::{ApplicationExt, SettingsExt};
-use relm4::gtk::gio::{ApplicationFlags, Cancellable, Settings, SettingsBackend, SettingsSchemaSource};
+use relm4::gtk::gio::{ApplicationFlags, Cancellable, Settings};
 use relm4::RelmApp;
 use rodio::OutputStreamBuilder;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::error::Error;
 use std::os::unix::process::CommandExt;
-use std::path::Path;
 use std::process::Command;
 use std::rc::Rc;
 use std::sync::{Arc, LazyLock};
-use std::{env, io};
+use std::io;
 use relm4::prelude::AsyncController;
 use tokio::runtime::Handle;
 use zbus::blocking;
@@ -34,7 +33,7 @@ mod player;
 mod ui;
 
 const APP_ID: &'static str = "me.quartzy.sanicrs";
-const DBUS_NAME: &'static str = "org.mpris.MediaPlayer2.sanicrs";
+const DBUS_NAME_PREFIX: &'static str = "org.mpris.MediaPlayer2.";
 
 mod icon_names {
     include!(concat!(env!("OUT_DIR"), "/icon_names.rs"));
@@ -113,35 +112,22 @@ fn main() -> Result<(), Box<dyn Error>> {
         let session = blocking::Connection::session()?;
 
         let reply = session
-            .call_method(Some(DBUS_NAME), "/org/mpris/MediaPlayer2", Some("org.mpris.MediaPlayer2"), "Raise", &());
+            .call_method(Some(DBUS_NAME_PREFIX.to_owned() + APP_ID), "/org/mpris/MediaPlayer2", Some("org.mpris.MediaPlayer2"), "Raise", &());
         if reply.is_ok() {
             println!("An instance is already running. Raised.");
             return Ok(());
         }
     }
-    // RELM_BLOCKING_THREADS.set(1).expect("Error setting relm4 max blocking threads");
 
     let should_restart;
     {
-        let path = env::var("XDG_DATA_HOME");
-        let settings_schema = match path {
-            Ok(path) => SettingsSchemaSource::from_directory(Path::new(path.as_str()).join("glib-2.0/schemas").as_path(), SettingsSchemaSource::default().as_ref(), false).expect("Error getting settings scheme source"),
-            Err(_) => SettingsSchemaSource::default().expect("No default settings scheme source")
-        };
-        let schema = settings_schema.lookup(APP_ID, false).expect(format!("No settings schema found for '{}'", APP_ID).as_str());
-        let settings = Settings::new_full(&schema, None::<&SettingsBackend>, None);
+        let settings = Settings::new(APP_ID);
 
         let secret_schema = Schema::new(APP_ID, SchemaFlags::NONE, HashMap::new());
 
         static CLIENT: LazyLock<OpenSubsonicClient> = LazyLock::new(|| {
             println!("initializing");
-            let path = env::var("XDG_DATA_HOME");
-            let settings_schema = match path {
-                Ok(path) => SettingsSchemaSource::from_directory(Path::new(path.as_str()).join("glib-2.0/schemas").as_path(), SettingsSchemaSource::default().as_ref(), false).expect("Error getting settings scheme source"),
-                Err(_) => SettingsSchemaSource::default().expect("No default settings scheme source")
-            };
-            let schema = settings_schema.lookup(APP_ID, false).expect(format!("No settings schema found for '{}'", APP_ID).as_str());
-            let settings = Settings::new_full(&schema, None::<&SettingsBackend>, None);
+            let settings = Settings::new(APP_ID);
 
             let secret_schema = Schema::new(APP_ID, SchemaFlags::NONE, HashMap::new());
             if settings.value("server-url").as_maybe().is_none() {
@@ -260,7 +246,7 @@ async fn app_main(
     mpris_send: Sender<Rc<LocalServer<MprisPlayer>>>,
     controller_cell: Rc<RefCell<Option<AsyncController<Model>>>>
 ) -> Result<bool, Box<dyn Error>> {
-    let server: Rc<LocalServer<MprisPlayer>> = Rc::new(LocalServer::new_with_track_list("sanicrs", player).await?);
+    let server: Rc<LocalServer<MprisPlayer>> = Rc::new(LocalServer::new_with_track_list(APP_ID, player).await?);
     mpris_send.send(server.clone()).await?;
     server.imp().server.replace(Some(server.clone()));
     let _h = relm4::main_application().hold();

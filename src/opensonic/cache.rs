@@ -3,15 +3,13 @@ use crate::opensonic::types::{Album, AlbumListType, Artist, LyricsList, Song};
 use crate::ui::album_object::AlbumObject;
 use crate::ui::artist_object::ArtistObject;
 use std::error::Error;
-use std::io::Cursor;
 use std::rc::Rc;
 use std::sync::Arc;
 use evicting_cache_map::EvictingCacheMap;
-use image::{EncodableLayout, ImageReader};
 use relm4::adw::gdk::Texture;
-use relm4::adw::glib;
+use relm4::adw::{gio, glib};
+use relm4::adw::gio::Cancellable;
 use relm4::gtk::gdk_pixbuf;
-use relm4::gtk::gdk_pixbuf::Colorspace;
 use tokio::sync::RwLock;
 
 #[derive(Clone, Debug)]
@@ -218,17 +216,9 @@ impl CoverCache {
         }
         let resp = self.client.get_cover_image(id, Some("512")).await?;
         let texture: Result<Texture, Box<dyn Error + Send + Sync>> = relm4::spawn_blocking(|| {
-            let img = ImageReader::new(Cursor::new(resp)).with_guessed_format()?.decode()?.into_rgb8();
-            let bytes = glib::Bytes::from(img.as_bytes());
-            Ok(Texture::for_pixbuf(&gdk_pixbuf::Pixbuf::from_bytes(
-                &bytes,
-                Colorspace::Rgb,
-                false,
-                8,
-                img.width() as i32,
-                img.height() as i32,
-                (img.width()*3) as i32
-            )))
+            let stream = gio::MemoryInputStream::from_bytes(&glib::Bytes::from_owned(resp));
+            let pixbuf = gdk_pixbuf::Pixbuf::from_stream(&stream, Cancellable::NONE)?;
+            Ok(Texture::for_pixbuf(&pixbuf))
         }).await?;
         let texture = texture.map_err(|e| format!("Error loading texture: {}", e))?;
         let mut cache_w = self.cache.write().await;
