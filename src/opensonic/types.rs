@@ -182,7 +182,7 @@ pub struct Album {
     pub duration: Duration,
     pub play_count: Option<u64>,
     pub created: String,
-    pub starred: Option<String>,
+    pub starred: RefCell<Option<String>>,
     pub year: Option<u32>,
     pub genre: Option<String>,
     pub played: Option<String>,
@@ -313,6 +313,12 @@ impl Album {
         }
     }
 
+    pub fn is_starred(&self) -> bool {
+        self.starred.borrow().is_some()
+    }
+}
+
+impl Artist {
     pub fn is_starred(&self) -> bool {
         self.starred.is_some()
     }

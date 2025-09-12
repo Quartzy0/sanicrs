@@ -45,7 +45,8 @@ impl AsyncComponent for BottomBar {
     view!{
         gtk::CenterBox {
             set_orientation: Orientation::Horizontal,
-            add_css_class: "spaced",
+            add_css_class: "padded",
+            add_css_class: "current-song",
 
             #[name = "start_box"]
             #[wrap(Some)]

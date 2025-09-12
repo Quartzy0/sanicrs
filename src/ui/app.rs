@@ -1,7 +1,7 @@
 use crate::dbus::player::MprisPlayer;
 use crate::opensonic::cache::{AlbumCache, ArtistCache, CoverCache, LyricsCache, SongCache};
 use crate::ui::browse::search::SearchType;
-use crate::ui::browse::{BrowseMsg, BrowseWidget};
+use crate::ui::browse::{BrowseMsg, BrowseMsgOut, BrowseWidget};
 use crate::ui::current_song::{CurrentSong, CurrentSongOut};
 use crate::ui::preferences_view::{PreferencesOut, PreferencesWidget};
 use crate::ui::random_songs_dialog::RandomSongsDialog;
@@ -28,11 +28,13 @@ use std::rc::Rc;
 use crate::ui::bottom_bar::{BottomBar, BottomBarOut};
 use crate::ui::header_bar::HeaderBar;
 
+const BG_COLORS: usize = 4;
+
 pub struct Model {
     current_song: AsyncController<CurrentSong>,
     track_list_connector: AsyncConnector<TrackListWidget>,
     bottom_bar_connector: AsyncController<BottomBar>,
-    browse_connector: AsyncConnector<BrowseWidget>,
+    browse_connector: AsyncController<BrowseWidget>,
     provider: CssProvider,
     settings: Settings,
     preferences_view: LazyCell<AsyncController<PreferencesWidget>, Box<dyn FnOnce() -> AsyncController<PreferencesWidget>>>,
@@ -41,11 +43,18 @@ pub struct Model {
     random_songs_dialog: AsyncConnector<RandomSongsDialog>,
     artist_cache: ArtistCache,
     album_cache: AlbumCache,
+    cover_cache: CoverCache,
+
+    current_song_colors: Option<[Color; BG_COLORS]>,
+    current_view_colors: Vec<Option<[Color; BG_COLORS]>>
 }
 
 #[derive(Debug)]
 pub enum AppMsg {
-    ColorschemeChange(Option<Vec<Color>>),
+    CurrentColorschemeChange(Option<Vec<Color>>),
+    PushViewColors(Option<Vec<Color>>),
+    PopViewColors,
+    ClearViewColors,
     ToggleSidebar,
     Quit,
     ShowPreferences,
@@ -139,6 +148,7 @@ impl AsyncComponent for Model {
                                 set_content = &gtk::Box {
                                     set_orientation: gtk::Orientation::Vertical,
                                     set_hexpand: true,
+                                    add_css_class: "current-view",
 
                                     append = model.browse_connector.widget(),
                                     append = &gtk::Separator{
@@ -211,12 +221,17 @@ impl AsyncComponent for Model {
             CurrentSong::builder()
                 .launch(into_init(&init, server.clone()))
                 .forward(sender.input_sender(), |msg| match msg {
-                    CurrentSongOut::ColorSchemeChange(colors) => AppMsg::ColorschemeChange(colors),
+                    CurrentSongOut::ColorSchemeChange(colors) => AppMsg::CurrentColorschemeChange(colors),
                     CurrentSongOut::ToggleSidebar => AppMsg::ToggleSidebar,
                     CurrentSongOut::ShowRandomSongsDialog => AppMsg::ShowRandomSongsDialog,
                 });
         let track_list_connector = TrackListWidget::builder().launch(into_init(&init, server.clone()));
-        let browse_connector = BrowseWidget::builder().launch(into_init(&init, server.clone()));
+        let browse_connector = BrowseWidget::builder()
+            .launch(into_init(&init, server.clone()))
+            .forward(sender.input_sender(), |msg| match msg {
+                BrowseMsgOut::PopView => AppMsg::PopViewColors,
+                BrowseMsgOut::ClearView => AppMsg::ClearViewColors,
+            });
         let bottom_bar_connector= BottomBar::builder()
             .launch(into_init(&init, server.clone()))
             .forward(sender.input_sender(), |msg| match msg {
@@ -257,6 +272,9 @@ impl AsyncComponent for Model {
             mpris_player: server,
             artist_cache: init.7,
             album_cache: init.2,
+            cover_cache: init.0,
+            current_song_colors: None,
+            current_view_colors: vec![],
         };
         let base_provider = CssProvider::new();
         let display = gdk::Display::default().expect("Unable to create Display object");
@@ -275,56 +293,6 @@ impl AsyncComponent for Model {
         let toast_overlay = model.toaster.overlay_widget();
 
         let widgets: ModelWidgets = view_output!();
-
-        /*let condition = adw::BreakpointCondition::parse("max-width: 1000px").unwrap();
-        let breakpoint = adw::Breakpoint::new(condition.clone());
-        breakpoint.add_setter(&widgets.view_switcher_bar, "reveal", Some(&true.to_value()));
-        breakpoint.add_setter(&widgets.header_bar, "title-widget", Some(&None::<Widget>.to_value()));
-        breakpoint.connect_apply(clone!(
-            #[weak(rename_to = view_stack)]
-            widgets.view_stack,
-            #[weak(rename_to = split_view)]
-            widgets.split_view,
-            move |_| {
-                if let Some(name) = view_stack.visible_child_name() {
-                    if name == "Song" {
-                        split_view.set_collapsed(true);
-                    }
-                }
-            }
-        ));
-        breakpoint.connect_unapply(clone!(
-            #[weak(rename_to = view_stack)]
-            widgets.view_stack,
-            #[weak(rename_to = split_view)]
-            widgets.split_view,
-            move |_| {
-                if let Some(name) = view_stack.visible_child_name() {
-                    if name == "Song" {
-                        split_view.set_collapsed(false);
-                    }
-                }
-            }
-        ));
-        root.add_breakpoint(breakpoint);
-
-        let song_page = widgets.view_stack.page(model.current_song.widget());
-        song_page.set_title(Some("Song"));
-        song_page.set_name(Some("Song"));
-        song_page.set_icon_name(Some(icon_names::MUSIC_NOTE));
-        let browse_page = widgets.view_stack.page(model.browse_connector.widget());
-        browse_page.set_title(Some("Browse"));
-        browse_page.set_name(Some("Browse"));
-        browse_page.set_icon_name(Some(icon_names::EXPLORE2));
-        widgets.view_switcher.set_stack(Some(&widgets.view_stack));
-        widgets.view_switcher_bar.set_stack(Some(&widgets.view_stack));
-
-        widgets.view_stack
-            .property_expression("visible-child-name")
-            .chain_closure::<bool>(closure!(|this: Option<adw::OverlaySplitView>, name: Option<&str>| {
-                name.is_some() && name.unwrap() == "Song" && !this.unwrap().is_collapsed()
-            }))
-            .bind(&widgets.split_view, "show-sidebar", Some(&widgets.split_view));*/
 
         let action: RelmAction<PreferencesAction> = RelmAction::new_stateless(clone!(
             #[strong]
@@ -405,23 +373,44 @@ impl AsyncComponent for Model {
             AppMsg::Next => player.next().await.unwrap(),
             AppMsg::Previous => player.previous().await.unwrap(),
             AppMsg::PlayPause => player.play_pause().await.unwrap(),
-            AppMsg::ColorschemeChange(colors) => {
-                let mut css = String::from(":root {");
-                if let Some(colors) = colors {
-                    for (i, color) in colors.iter().enumerate() {
-                        css.push_str(
-                            format!(
-                                "--background-color-{}:rgb({},{},{});",
-                                i, color.r, color.g, color.b
-                            )
-                            .as_str(),
-                        );
+            AppMsg::PushViewColors(colors) => {
+                let colors = if let Some(color) = colors {
+                    let mut it = color.into_iter().cycle();
+                    let mut arr: [Color; BG_COLORS] = [Default::default(); BG_COLORS];
+                    for i in 0..BG_COLORS {
+                        if let Some(color) = it.next() {
+                            arr[i] = color;
+                        }
                     }
+                    Some(arr)
+                } else {
+                    None
+                };
+                self.current_view_colors.push(colors);
+                self.update_colors(root);
+            }
+            AppMsg::PopViewColors => {
+                self.current_view_colors.pop();
+                self.update_colors(root);
+            }
+            AppMsg::ClearViewColors => {
+                self.current_view_colors.clear();
+                self.update_colors(root);
+            }
+            AppMsg::CurrentColorschemeChange(colors) => {
+                if let Some(color) = colors {
+                    let mut it = color.into_iter().cycle();
+                    let mut arr: [Color; BG_COLORS] = [Default::default(); BG_COLORS];
+                    for i in 0..BG_COLORS {
+                        if let Some(color) = it.next() {
+                            arr[i] = color;
+                        }
+                    }
+                    self.current_song_colors = Some(arr);
+                } else {
+                    self.current_song_colors = None;
                 }
-                css.push_str("}");
-                self.provider
-                    .load_from_string(css.as_str());
-                root.action_set_enabled("win.enable-recoloring", true);
+                self.update_colors(root);
             },
             AppMsg::ToggleSidebar => {
                 widgets.split_view.set_show_sidebar(true);
@@ -507,7 +496,25 @@ impl AsyncComponent for Model {
             AppMsg::ViewAlbum(album) => {
                 widgets.nav_view.pop_to_tag("base");
                 match self.album_cache.get_album(&album).await {
-                    Ok(album) => self.browse_connector.emit(BrowseMsg::ViewAlbum(album)),
+                    Ok(album) => {
+                        relm4::spawn_local(clone!(
+                            #[strong]
+                            sender,
+                            #[strong(rename_to = mpris_player)]
+                            self.mpris_player,
+                            #[strong(rename_to = id)]
+                            album.id(),
+                            #[strong(rename_to = cover_cache)]
+                            self.cover_cache,
+                            async move {
+                                match cover_cache.get_palette(id.as_str()).await {
+                                    Ok(c) => sender.input(AppMsg::PushViewColors(c)),
+                                    Err(err) => mpris_player.imp().send_error(err),
+                                }
+                            }
+                        ));
+                        self.browse_connector.emit(BrowseMsg::ViewAlbum(album));
+                    },
                     Err(err) => self.mpris_player.imp().send_error(err),
                 };
             },
@@ -517,11 +524,61 @@ impl AsyncComponent for Model {
             AppMsg::ViewArtist(artist) => {
                 widgets.nav_view.pop_to_tag("base");
                 match self.artist_cache.get_artist(&artist).await {
-                    Ok(artist) => self.browse_connector.emit(BrowseMsg::ViewArtist(artist)),
+                    Ok(artist) => {
+                        relm4::spawn_local(clone!(
+                            #[strong]
+                            sender,
+                            #[strong(rename_to = mpris_player)]
+                            self.mpris_player,
+                            #[strong(rename_to = id)]
+                            artist.id(),
+                            #[strong(rename_to = cover_cache)]
+                            self.cover_cache,
+                            async move {
+                                match cover_cache.get_palette(id.as_str()).await {
+                                    Ok(c) => sender.input(AppMsg::PushViewColors(c)),
+                                    Err(err) => mpris_player.imp().send_error(err),
+                                }
+                            }
+                        ));
+                        self.browse_connector.emit(BrowseMsg::ViewArtist(artist))
+                    },
                     Err(err) => self.mpris_player.imp().send_error(err),
                 };
             },
         };
         self.update_view(widgets, sender);
+    }
+}
+
+impl Model {
+    fn update_colors(&self, root: &<Model as AsyncComponent>::Root) {
+        let mut css = String::from(":root {");
+        if let Some(colors) = self.current_song_colors {
+            for (i, color) in colors.iter().enumerate() {
+                css.push_str(
+                    format!(
+                        "--song-color-{}:rgb({},{},{});",
+                        i, color.r, color.g, color.b
+                    )
+                        .as_str(),
+                );
+            }
+        }
+        if let Some(colors) = self.current_view_colors.last() &&  let Some(colors) = colors {
+            for (i, color) in colors.iter().enumerate() {
+                css.push_str(
+                    format!(
+                        "--view-color-{}:rgb({},{},{});",
+                        i, color.r, color.g, color.b
+                    )
+                        .as_str(),
+                );
+            }
+        }
+        css.push_str("}");
+        self.provider
+            .load_from_string(css.as_str());
+        root.action_set_enabled("win.enable-recoloring", true);
     }
 }

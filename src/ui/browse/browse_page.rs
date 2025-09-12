@@ -7,7 +7,7 @@ use crate::ui::browse::album_list::AlbumList;
 use crate::ui::cover_picture::{CoverPicture, CoverSize};
 use mpris_server::LocalServer;
 use relm4::adw::gio::ListStore;
-use relm4::adw::glib::clone;
+use relm4::adw::glib::{clone, closure, Object};
 use relm4::adw::gtk::Orientation;
 use relm4::adw::prelude::*;
 use relm4::gtk::pango::EllipsizeMode;
@@ -15,6 +15,7 @@ use relm4::gtk::{glib, Align, ListItem, SignalListItemFactory, Widget};
 use relm4::prelude::*;
 use relm4::AsyncComponentSender;
 use std::rc::Rc;
+use crate::icon_names;
 
 pub struct BrowsePageWidget {
     album_cache: AlbumCache,
@@ -160,6 +161,10 @@ impl AsyncComponent for BrowsePageWidget {
         model.album_factory.connect_setup(clone!(
             #[strong(rename_to = cover_cache)]
             init.0,
+            #[strong(rename_to = album_cache)]
+            model.album_cache,
+            #[strong(rename_to = mpris_player)]
+            model.mpris_player,
             move |_, list_item| {
                 let vbox = gtk::Box::builder()
                     .orientation(Orientation::Vertical)
@@ -167,8 +172,35 @@ impl AsyncComponent for BrowsePageWidget {
                     .build();
                 vbox.add_css_class("album-entry");
 
+                let overlay = gtk::Overlay::new();
                 let cover_picture = CoverPicture::new(cover_cache.clone(), CoverSize::Large);
-                vbox.append(&cover_picture);
+                overlay.set_child(Some(&cover_picture));
+                overlay.set_halign(Align::Center);
+                overlay.set_valign(Align::Center);
+                let overlay_box = gtk::Box::new(Orientation::Horizontal, 5);
+                overlay_box.set_halign(Align::End);
+                overlay_box.set_valign(Align::End);
+                let play_btn = gtk::Button::new();
+                play_btn.set_icon_name(icon_names::PLAY);
+                play_btn.add_css_class("flat");
+                let like_btn = gtk::ToggleButton::new();
+                like_btn.add_css_class("flat");
+                like_btn
+                    .property_expression("active")
+                    .chain_closure::<String>(closure!(
+                        move |_: Option<Object>, active: bool| {
+                            if active {
+                                icon_names::HEART_FILLED
+                            } else {
+                                icon_names::HEART_OUTLINE_THIN
+                            }
+                        }
+                    ))
+                    .bind(&like_btn, "icon-name", Widget::NONE);
+                overlay_box.append(&like_btn);
+                overlay_box.append(&play_btn);
+                overlay.add_overlay(&overlay_box);
+                vbox.append(&overlay);
 
                 let name = gtk::Label::builder().css_classes(["bold"]).build();
                 let artist = gtk::Label::new(None);
@@ -190,6 +222,40 @@ impl AsyncComponent for BrowsePageWidget {
                     .expect("Needs to be ListItem");
                 list_item.set_child(Some(&vbox));
 
+                play_btn.connect_clicked(clone!(
+                    #[weak]
+                    list_item,
+                    #[strong]
+                    mpris_player,
+                    move |_this| {
+                        if let Some(item) = list_item.item() {
+                            let album = item.downcast::<AlbumObject>().expect("Item should be AlbumObject");
+                            let mpris_player = mpris_player.clone();
+                            relm4::spawn_local(async move {
+                                mpris_player.imp().send_res(mpris_player.imp().queue_album(album.id(), None, true).await);
+                            });
+                        }
+                    }
+                ));
+                like_btn.connect_clicked(clone!(
+                    #[weak]
+                    list_item,
+                    #[strong]
+                    album_cache,
+                    #[strong]
+                    mpris_player,
+                    move |_this| {
+                        if let Some(item) = list_item.item() {
+                            let album = item.downcast::<AlbumObject>().expect("Item should be AlbumObject");
+                            let album_cache = album_cache.clone();
+                            let mpris_player = mpris_player.clone();
+                            relm4::spawn_local(async move {
+                                mpris_player.imp().send_res(album_cache.toggle_starred(&album).await);
+                            });
+                        }
+                    }
+                ));
+
                 list_item
                     .property_expression("item")
                     .chain_property::<AlbumObject>("name")
@@ -202,6 +268,10 @@ impl AsyncComponent for BrowsePageWidget {
                     .property_expression("item")
                     .chain_property::<AlbumObject>("cover-art-id")
                     .bind(&cover_picture, "cover-id", Widget::NONE);
+                list_item
+                    .property_expression("item")
+                    .chain_property::<AlbumObject>("starred")
+                    .bind(&like_btn, "active", Widget::NONE);
             }
         ));
 

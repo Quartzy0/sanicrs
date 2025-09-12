@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use mpris_server::LocalServer;
 use relm4::adw::glib;
-use relm4::adw::prelude::{StaticType, ToVariant};
+use relm4::adw::prelude::ToVariant;
 use relm4::component::AsyncComponentController;
 use relm4::{
     AsyncComponentSender,
@@ -108,14 +108,9 @@ impl AsyncComponent for SearchWidget {
                         let item_list_widget = ItemListWidget::builder().launch(ItemListInit {
                             mpris_player: self.mpris_player.clone(),
                             cover_type: CoverType::Square,
-                            r#type: SongObject::static_type(),
                             cover_cache: self.cover_cache.clone(),
-                            play_fn: Some(Box::new(|item, _i, mpris_player| {
-                                let item = item
-                                    .downcast::<SongObject>()
-                                    .expect("Item should be SongObject")
-                                    .get_entry();
-                                if let Some(item) = item {
+                            play_fn: Some(Box::new(|item: SongObject, _i, mpris_player| {
+                                if let Some(item) = item.get_entry() {
                                     let mpris_player = mpris_player.clone();
                                     relm4::spawn_local(async move {
                                         let mpris_player = mpris_player.clone();
@@ -140,7 +135,6 @@ impl AsyncComponent for SearchWidget {
                                                 (Uuid::from_u128(0), x.clone()).into(),
                                                 PositionState::Passed,
                                             )
-                                            .upcast()
                                         })
                                         .collect()
                                 }
@@ -153,12 +147,8 @@ impl AsyncComponent for SearchWidget {
                         let item_list_widget = ItemListWidget::builder().launch(ItemListInit {
                             mpris_player: self.mpris_player.clone(),
                             cover_type: CoverType::Square,
-                            r#type: AlbumObject::static_type(),
                             cover_cache: self.cover_cache.clone(),
-                            play_fn: Some(Box::new(|item, _i, mpris_player| {
-                                let item = item
-                                    .downcast::<AlbumObject>()
-                                    .expect("Item should be AlbumObject");
+                            play_fn: Some(Box::new(|item: AlbumObject, _i, mpris_player| {
                                 let mpris_player = mpris_player.clone();
                                 relm4::spawn_local(async move {
                                     let mpris_player = mpris_player.clone();
@@ -187,7 +177,7 @@ impl AsyncComponent for SearchWidget {
                                     mpris_player.imp().send_error(err);
                                     Vec::new()
                                 } else {
-                                    results.unwrap().into_iter().map(|a| a.upcast()).collect()
+                                    results.unwrap().into_iter().collect()
                                 }
                             },
                         });
@@ -198,19 +188,15 @@ impl AsyncComponent for SearchWidget {
                         let item_list_widget = ItemListWidget::builder().launch(ItemListInit {
                             mpris_player: self.mpris_player.clone(),
                             cover_type: CoverType::Round,
-                            r#type: ArtistObject::static_type(),
                             cover_cache: self.cover_cache.clone(),
                             play_fn: None,
                             click_fn: Some(Box::new(clone!(
                                 #[weak]
                                 root,
-                                move |item, _i, _mpris_player| {
-                                    let album = item
-                                        .downcast::<ArtistObject>()
-                                        .expect("Item should be AlbumObject");
+                                move |artist: ArtistObject, _i, _mpris_player| {
                                     root.activate_action(
                                         "win.artist",
-                                        Some(&album.id().to_variant()),
+                                        Some(&artist.id().to_variant()),
                                     )
                                     .expect("Error executing action");
                                 }
@@ -221,7 +207,7 @@ impl AsyncComponent for SearchWidget {
                                     mpris_player.imp().send_error(err);
                                     Vec::new()
                                 } else {
-                                    results.unwrap().into_iter().map(|a| a.upcast()).collect()
+                                    results.unwrap().into_iter().collect()
                                 }
                             },
                         });

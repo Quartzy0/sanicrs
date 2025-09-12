@@ -5,49 +5,56 @@ use mpris_server::LocalServer;
 use relm4::adw::gio::ListStore;
 use relm4::adw::glib::{clone, closure, Object};
 use relm4::adw::prelude::*;
-use relm4::gtk::{Align, ClosureExpression, ListItem, Orientation, PropertyExpression, SignalListItemFactory, Widget};
-use relm4::prelude::*;
+use relm4::gtk::{Align, ListItem, Orientation, SignalListItemFactory, Widget};
 use relm4::adw::glib as glib;
+use relm4::{gtk, AsyncComponentSender};
+use relm4::component::{AsyncComponent, AsyncComponentParts};
 use crate::dbus::player::MprisPlayer;
 use crate::icon_names;
 use crate::opensonic::cache::CoverCache;
 use crate::ui::cover_picture::{CoverPicture, CoverSize, CoverType};
 
 #[derive(Debug)]
-pub struct ItemListWidget<I, F>
+pub struct ItemListWidget<I, F, T>
 where
-    I: IntoIterator<Item = Object>,
+    T: IsA<Object> + ObjectType,
+    I: IntoIterator<Item = T>,
     F: Future<Output = I>
 {
+    phantom_t: PhantomData<T>,
     phantom_i: PhantomData<I>,
     phantom_f: PhantomData<F>,
 }
 
-pub struct ItemListInit<I, F>
+pub struct ItemListInit<I, F, T>
 where
-    I: IntoIterator<Item = Object>,
+    T: IsA<Object> + ObjectType,
+    I: IntoIterator<Item = T>,
     F: Future<Output = I>
 {
-    pub r#type: glib::types::Type,
     pub cover_cache: CoverCache,
-    pub play_fn: Option<Box<dyn Fn(Object, u32, Rc<LocalServer<MprisPlayer>>)>>,
-    pub click_fn: Option<Box<dyn Fn(Object, u32, Rc<LocalServer<MprisPlayer>>)>>,
+    pub play_fn: Option<Box<dyn Fn(T, u32, Rc<LocalServer<MprisPlayer>>)>>,
+    pub click_fn: Option<Box<dyn Fn(T, u32, Rc<LocalServer<MprisPlayer>>)>>,
     pub load_items: F,
     pub mpris_player: Rc<LocalServer<MprisPlayer>>,
     pub cover_type: CoverType,
 }
 
 #[relm4::component(pub async)]
-impl<I: IntoIterator<Item = Object> + 'static, F: 'static + Future<Output = I>> AsyncComponent for ItemListWidget<I, F> {
+impl<T: IsA<Object> + ObjectType, I: IntoIterator<Item = T> + 'static, F: 'static + Future<Output = I>> AsyncComponent for ItemListWidget<I, F, T> {
 
     type CommandOutput = ();
     type Input = ();
     type Output = ();
-    type Init = ItemListInit<I, F>;
+    type Init = ItemListInit<I, F, T>;
 
     view! {
         gtk::ListView {
             set_factory: Some(&factory),
+            add_css_class: "card",
+            add_css_class: "no-bg",
+            set_vexpand: true,
+            set_vexpand_set: true,
         }
     }
 
@@ -58,7 +65,6 @@ impl<I: IntoIterator<Item = Object> + 'static, F: 'static + Future<Output = I>> 
     ) -> AsyncComponentParts<Self> {
         let factory = SignalListItemFactory::new();
         let Self::Init{
-            r#type,
             cover_cache,
             play_fn,
             click_fn,
@@ -84,7 +90,8 @@ impl<I: IntoIterator<Item = Object> + 'static, F: 'static + Future<Output = I>> 
                 let hbox = gtk::CenterBox::builder()
                     .orientation(Orientation::Horizontal)
                     .build();
-                hbox.add_css_class("album-song-item");
+                hbox.add_css_class("card");
+                hbox.add_css_class("padded");
 
                 let start_hbox = gtk::Box::builder()
                     .orientation(Orientation::Horizontal)
@@ -123,7 +130,8 @@ impl<I: IntoIterator<Item = Object> + 'static, F: 'static + Future<Output = I>> 
                         #[strong]
                         mpris_player,
                         move |_| {
-                            play_fn(list_item.item().expect("Expected ListItem to have item"), list_item.position(), mpris_player.clone());
+                            let item = list_item.item().expect("Expected ListItem to have item");
+                            play_fn(item.downcast::<T>().expect("Unexpected type"), list_item.position(), mpris_player.clone());
                         }
                     ));
                 }
@@ -140,43 +148,44 @@ impl<I: IntoIterator<Item = Object> + 'static, F: 'static + Future<Output = I>> 
                         #[strong]
                         mpris_player,
                         move |_this, _n: i32, _x: f64, _y: f64| {
-                            click_fn(list_item.item().expect("Expected ListItem to have item"), list_item.position(), mpris_player.clone());
+                            let item = list_item.item().expect("Expected ListItem to have item");
+                            click_fn(item.downcast::<T>().expect("Unexpected type"), list_item.position(), mpris_player.clone());
                         }
                     ));
                     hbox.add_controller(gesture);
                 }
 
 
-                let expr = list_item
-                    .property_expression("item");
-                PropertyExpression::new(r#type, Some(expr), "name")
+                list_item
+                    .property_expression("item")
+                    .chain_property::<T>("name")
                     .bind(&title, "label", Widget::NONE);
-                let expr = list_item
-                    .property_expression("item");
-                PropertyExpression::new(r#type, Some(expr), "cover-art-id")
+                list_item
+                    .property_expression("item")
+                    .chain_property::<T>("cover-art-id")
                     .bind(&picture, "cover-id", Widget::NONE);
 
-                let expr = list_item
-                        .property_expression("item");
-                ClosureExpression::new::<String>([expr], closure!(|_: Option<Object>, item: Option<Object>| {
-                    match item {
-                        None => "".to_string(),
-                        Some(item) => {
-                            if item.has_property("duration", Some(String::static_type())) {
-                                item.property("duration")
-                            } else {
-                                "".to_string()
+                list_item
+                    .property_expression("item")
+                    .chain_closure::<String>(closure!(|_: Option<Object>, item: Option<Object>| 
+                        match item {
+                            None => "".to_string(),
+                            Some(item) => {
+                                if item.has_property("duration", Some(String::static_type())) {
+                                    item.property("duration")
+                                } else {
+                                    "".to_string()
+                                }
                             }
                         }
-                    }
-                })).bind(&duration, "label", Widget::NONE);
+                )).bind(&duration, "label", Widget::NONE);
             }
         ));
 
         let list_store = ListStore::from_iter(load_items.await);
         root.set_model(Some(&gtk::NoSelection::new(Some(list_store))));
 
-        let model = Self { phantom_i: Default::default(), phantom_f: Default::default() };
+        let model = Self { phantom_t: Default::default(), phantom_i: Default::default(), phantom_f: Default::default() };
         AsyncComponentParts { model, widgets }
     }
 }

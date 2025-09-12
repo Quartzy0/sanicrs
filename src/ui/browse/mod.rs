@@ -38,11 +38,17 @@ pub enum BrowseMsg {
     Search(String, SearchType)
 }
 
+#[derive(Debug)]
+pub enum BrowseMsgOut {
+    PopView,
+    ClearView,
+}
+
 #[relm4::component(pub async)]
 impl AsyncComponent for BrowseWidget {
     type CommandOutput = ();
     type Input = BrowseMsg;
-    type Output = ();
+    type Output = BrowseMsgOut;
     type Init = Init;
 
     view! {
@@ -50,13 +56,17 @@ impl AsyncComponent for BrowseWidget {
         adw::NavigationView {
             add = model.browse_page.widget(),
             add = model.search_controller.widget(),
+
+            connect_popped[sender] => move |_, _| {
+                sender.output(BrowseMsgOut::PopView).expect("Error sending out popped message");
+            }
         }
     }
 
     async fn init(
         init: Self::Init,
         root: Self::Root,
-        _sender: AsyncComponentSender<Self>,
+        sender: AsyncComponentSender<Self>,
     ) -> AsyncComponentParts<Self> {
         let browse_page = BrowsePageWidget::builder()
             .launch(init.clone());
@@ -105,6 +115,7 @@ impl AsyncComponent for BrowseWidget {
                     .and_then(|t| Some(t!="search"))
                     .unwrap_or(true) {
                     widgets.navigation_view.replace_with_tags(&["browse", "search"]);
+                    sender.output(BrowseMsgOut::ClearView).expect("Error sending out clear view message");
                 }
                 self.search_controller.emit(SearchMsg::Search(query, search_type));
             },

@@ -5,8 +5,9 @@ use crate::ui::artist_object::ArtistObject;
 use std::error::Error;
 use std::rc::Rc;
 use std::sync::Arc;
+use color_thief::{Color, ColorFormat};
 use evicting_cache_map::EvictingCacheMap;
-use relm4::adw::gdk::Texture;
+use relm4::adw::gdk::{MemoryFormat, Texture, TextureDownloader};
 use relm4::adw::{gio, glib};
 use relm4::adw::gio::Cancellable;
 use relm4::gtk::gdk_pixbuf;
@@ -191,6 +192,17 @@ impl AlbumCache {
             Err("No albums found".into())
         }
     }
+
+    pub async fn toggle_starred(&self, album: &AlbumObject) -> Result<(), Box<dyn Error>> {
+        if album.starred() {
+            self.client.unstar(Vec::new(), vec![&album.id()], Vec::new()).await?;
+            album.set_starred(false);
+        } else {
+            self.client.star(Vec::new(), vec![&album.id()], Vec::new()).await?;
+            album.set_starred(true);
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -224,6 +236,14 @@ impl CoverCache {
         let mut cache_w = self.cache.write().await;
         cache_w.insert(id.to_string(), texture.clone());
         Ok(texture)
+    }
+
+    pub async fn get_palette(&self, id: &str) -> Result<Option<Vec<Color>>, Box<dyn Error>> {
+        let cover = self.get_cover_texture(id).await?;
+        let mut downloader = TextureDownloader::new(&cover);
+        downloader.set_format(MemoryFormat::A8r8g8b8);
+        let (pixels, _size) = downloader.download_bytes();
+        Ok(color_thief::get_palette(&pixels, ColorFormat::Argb, 10, 4).ok())
     }
 }
 

@@ -101,12 +101,10 @@ impl AsyncComponent for ViewArtistWidget {
 
         let item_list_widget = ItemListWidget::builder()
             .launch(ItemListInit {
-                r#type: AlbumObject::static_type(),
                 cover_type: CoverType::Square,
                 mpris_player: mpris_player.clone(),
                 cover_cache: cover_cache.clone(),
-                play_fn: Some(Box::new(move |album, _i, mpris_player| {
-                    let album = album.downcast::<AlbumObject>().expect("Item should be AlbumObject");
+                play_fn: Some(Box::new(move |album: AlbumObject, _i, mpris_player| {
                     relm4::spawn_local(async move {
                         let player = mpris_player.imp();
                         player.send_res(player.queue_album(album.id(), None, true).await);
@@ -122,7 +120,7 @@ impl AsyncComponent for ViewArtistWidget {
                 ))),
                 load_items: async move {
                     if let Some(albums) = artist_c.get_albums() {
-                        album_cache.add_albums(albums).await.into_iter().map(|a| a.upcast()).collect()
+                        album_cache.add_albums(albums).await.into_iter().collect()
                     } else {
                         Vec::new()
                     }

@@ -56,10 +56,19 @@ impl AlbumObject {
     pub fn duration(&self) -> String {
         self.property("duration")
     }
+
+    pub fn starred(&self) -> bool {
+        self.property("starred")
+    }
+    
+    // Doesn't make any requests to server, simply changes local status
+    pub fn set_starred(&self, val: bool) {
+        self.set_property("starred", val.to_value());
+    }
 }
 
 mod imp {
-    use relm4::adw::glib::{ParamSpec, ParamSpecString, Value};
+    use relm4::adw::glib::{ParamSpec, ParamSpecBoolean, ParamSpecString, Value};
     use relm4::adw::gtk::glib;
     use relm4::adw::gtk::prelude::*;
     use relm4::adw::gtk::subclass::prelude::*;
@@ -93,14 +102,25 @@ mod imp {
                     ParamSpecString::builder("song-count").build(),
                     ParamSpecString::builder("cover-art-id").build(),
                     ParamSpecString::builder("duration").build(),
+                    ParamSpecBoolean::builder("starred").build(),
                 ]
             });
             PROPERTIES.as_ref()
         }
 
 
-        fn set_property(&self, _id: usize, _value: &Value, pspec: &ParamSpec) {
+        fn set_property(&self, _id: usize, value: &Value, pspec: &ParamSpec) {
             match pspec.name() {
+                "starred" => {
+                    if let Some(album) = self.album.borrow().as_ref() {
+                        let val: bool = value.get().expect("Setting 'starred' with non-boolean value");
+                        if val && !album.is_starred(){
+                            album.starred.replace(Some("yes".to_string()));
+                        } else if !val && album.is_starred() {
+                            album.starred.replace(None);
+                        }
+                    }
+                },
                 p => unimplemented!("{}", p),
             };
         }
@@ -135,6 +155,7 @@ mod imp {
 
                         str.to_value()
                     },
+                    "starred" => album.is_starred().to_value(),
                     _ => unimplemented!(),
                 }
             } else {
@@ -145,6 +166,7 @@ mod imp {
                     "cover-art-id" => None::<String>.to_value(),
                     "song-count" => None::<String>.to_value(),
                     "duration" => None::<String>.to_value(),
+                    "starred" => false.to_value(),
                     _ => unimplemented!(),
                 }
             }

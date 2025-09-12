@@ -33,11 +33,6 @@
     background-color: rgba(255, 255, 255, 0.09);
 }
 
-.album-play-btn {
-    -gtk-icon-size: 3em;
-    border-radius: 3em;
-}
-
 .album-song-item {
     margin: 10px;
 }
@@ -81,19 +76,41 @@
     background:
         linear-gradient(
             127deg,
-            color-mix(in srgb, var(--background-color-0) 55%, transparent),
-            color-mix(in srgb, var(--background-color-0) 0%, transparent) 70.71%
+            color-mix(in srgb, var(--song-color-0) 55%, transparent),
+            color-mix(in srgb, var(--song-color-0) 0%, transparent) 70.71%
         ),
         linear-gradient(
             217deg,
-            color-mix(in srgb, var(--background-color-1) 55%, transparent),
-            color-mix(in srgb, var(--background-color-1) 0%, transparent) 70.71%
+            color-mix(in srgb, var(--song-color-1) 55%, transparent),
+            color-mix(in srgb, var(--song-color-1) 0%, transparent) 70.71%
         ),
         linear-gradient(
             336deg,
-            color-mix(in srgb, var(--background-color-2) 55%, transparent),
-            color-mix(in srgb, var(--background-color-2) 0%, transparent) 70.71%
+            color-mix(in srgb, var(--song-color-2) 55%, transparent),
+            color-mix(in srgb, var(--song-color-2) 0%, transparent) 70.71%
         );
+    transition-property: background;
+    transition-duration: 250ms;
+    transition-timing-function: ease;
+}
+
+.current-view {
+    background:
+            linear-gradient(
+                    127deg,
+                    color-mix(in srgb, var(--view-color-0) 55%, transparent),
+                    color-mix(in srgb, var(--view-color-0) 0%, transparent) 70.71%
+            ),
+            linear-gradient(
+                    217deg,
+                    color-mix(in srgb, var(--view-color-1) 55%, transparent),
+                    color-mix(in srgb, var(--view-color-1) 0%, transparent) 70.71%
+            ),
+            linear-gradient(
+                    336deg,
+                    color-mix(in srgb, var(--view-color-2) 55%, transparent),
+                    color-mix(in srgb, var(--view-color-2) 0%, transparent) 70.71%
+            );
     transition-property: background;
     transition-duration: 250ms;
     transition-timing-function: ease;
@@ -104,20 +121,48 @@
     background:
         linear-gradient(
             127deg,
-            color-mix(in srgb, var(--background-color-0) 55%, transparent),
-            color-mix(in srgb, var(--background-color-0) 0%, transparent) 70.71%
+            color-mix(in srgb, var(--song-color-0) 55%, transparent),
+            color-mix(in srgb, var(--song-color-0) 0%, transparent) 70.71%
         ),
         linear-gradient(
             217deg,
-            color-mix(in srgb, var(--background-color-1) 55%, transparent),
-            color-mix(in srgb, var(--background-color-1) 0%, transparent) 70.71%
+            color-mix(in srgb, var(--song-color-1) 55%, transparent),
+            color-mix(in srgb, var(--song-color-1) 0%, transparent) 70.71%
         ),
         linear-gradient(
             336deg,
-            color-mix(in srgb, var(--background-color-2) 55%, transparent),
-            color-mix(in srgb, var(--background-color-2) 0%, transparent) 70.71%
+            color-mix(in srgb, var(--song-color-2) 55%, transparent),
+            color-mix(in srgb, var(--song-color-2) 0%, transparent) 70.71%
         ),
         var(--window-bg-color);
+    transition-property: background;
+    transition-duration: 250ms;
+    transition-timing-function: ease;
+
+    box-shadow: 0.35em 0.35em 0.4em black;
+    border-radius: 10px;
+    padding: 0;
+    margin: 0;
+}
+
+.album-list {
+    background:
+            linear-gradient(
+                    127deg,
+                    color-mix(in srgb, var(--song-color-1) 55%, transparent),
+                    color-mix(in srgb, var(--song-color-1) 0%, transparent) 70.71%
+            ),
+            linear-gradient(
+                    217deg,
+                    color-mix(in srgb, var(--song-color-2) 55%, transparent),
+                    color-mix(in srgb, var(--song-color-2) 0%, transparent) 70.71%
+            ),
+            linear-gradient(
+                    336deg,
+                    color-mix(in srgb, var(--song-color-3) 55%, transparent),
+                    color-mix(in srgb, var(--song-color-3) 0%, transparent) 70.71%
+            ),
+            var(--window-bg-color);
     transition-property: background;
     transition-duration: 250ms;
     transition-timing-function: ease;

@@ -167,9 +167,8 @@ impl AsyncComponent for ViewAlbumWidget {
             .launch(ItemListInit {
                 mpris_player: mpris_player.clone(),
                 cover_type: CoverType::Square,
-                r#type: SongObject::static_type(),
                 cover_cache: cover_cache.clone(),
-                play_fn: Some(Box::new(move |_song, i, mpris_player| {
+                play_fn: Some(Box::new(move |_song: SongObject, i, mpris_player| {
                     let album_id = album_id_c.clone();
                     relm4::spawn_local(async move {
                         let player = mpris_player.imp();
@@ -182,7 +181,7 @@ impl AsyncComponent for ViewAlbumWidget {
                         .get_songs()
                         .unwrap()
                         .into_iter()
-                        .map(|x| SongObject::new((Uuid::from_u128(0), x.clone()).into(), PositionState::Passed).upcast())
+                        .map(|x| SongObject::new((Uuid::from_u128(0), x.clone()).into(), PositionState::Passed))
                 },
             });
 
