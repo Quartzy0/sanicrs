@@ -17,3 +17,11 @@ Should work with any server implementation following the [OpenSubsonic](https://
 standard.
 
 Tested on: [Navidrome](https://github.com/navidrome/navidrome/), [Gonic](https://github.com/sentriz/gonic).
+
+### Building
+
+Build a flatpak:
+
+```shell
+flatpak-builder --force-clean --user --install-deps-from=flathub --repo=repo --install builddir data/me.quartzy.sanicrs.yml
+```

@@ -1,5 +1,5 @@
 use crate::dbus::player::MprisPlayer;
-use crate::opensonic::cache::AlbumCache;
+use crate::opensonic::cache::{AlbumCache, CoverCache};
 use crate::opensonic::types::AlbumListType;
 use crate::ui::album_object::AlbumObject;
 use crate::ui::app::Init;
@@ -11,15 +11,18 @@ use relm4::adw::glib::{clone, closure, Object};
 use relm4::adw::gtk::Orientation;
 use relm4::adw::prelude::*;
 use relm4::gtk::pango::EllipsizeMode;
-use relm4::gtk::{glib, Align, ListItem, SignalListItemFactory, Widget};
+use relm4::gtk::{glib, Align, Justification, ListItem, SignalListItemFactory, Widget};
 use relm4::prelude::*;
 use relm4::AsyncComponentSender;
 use std::rc::Rc;
+use color_thief::Color;
 use crate::icon_names;
 
 pub struct BrowsePageWidget {
     album_cache: AlbumCache,
     mpris_player: Rc<LocalServer<MprisPlayer>>,
+    cover_cache: CoverCache,
+    randoms_ids: Vec<String>,
 
     album_factory: SignalListItemFactory,
 }
@@ -29,13 +32,19 @@ pub enum BrowsePageMsg {
     ScrollNewest(i32),
     ScrollHighest(i32),
     ScrollExplore(i32),
+    SetColors(u32)
+}
+
+#[derive(Debug)]
+pub enum BrowsePageOut {
+    SetColors(Option<Vec<Color>>)
 }
 
 #[relm4::component(pub async)]
 impl AsyncComponent for BrowsePageWidget {
     type CommandOutput = ();
     type Input = BrowsePageMsg;
-    type Output = ();
+    type Output = BrowsePageOut;
     type Init = Init;
 
     view! {
@@ -52,6 +61,14 @@ impl AsyncComponent for BrowsePageWidget {
                 gtk::Box {
                     set_orientation: Orientation::Vertical,
                     add_css_class: "padded",
+
+                    #[name = "carousel"]
+                    adw::Carousel {
+                        set_allow_scroll_wheel: false,
+                        connect_page_changed[sender] => move |_, index: u32| {
+                            sender.input(BrowsePageMsg::SetColors(index));
+                        }
+                    },
 
                     #[template]
                     #[name = "newest_list"]
@@ -150,17 +167,19 @@ impl AsyncComponent for BrowsePageWidget {
         root: Self::Root,
         sender: AsyncComponentSender<Self>,
     ) -> AsyncComponentParts<Self> {
-        let model = Self {
+        let mut model = Self {
             mpris_player: init.6,
             album_cache: init.2,
             album_factory: SignalListItemFactory::new(),
+            cover_cache: init.0,
+            randoms_ids: vec![],
         };
 
         let widgets: Self::Widgets = view_output!();
 
         model.album_factory.connect_setup(clone!(
             #[strong(rename_to = cover_cache)]
-            init.0,
+            model.cover_cache,
             #[strong(rename_to = album_cache)]
             model.album_cache,
             #[strong(rename_to = mpris_player)]
@@ -275,6 +294,110 @@ impl AsyncComponent for BrowsePageWidget {
             }
         ));
 
+        let random = model
+            .album_cache
+            .get_album_list(AlbumListType::Random, None, None, None, None, None, None)
+            .await;
+        match random {
+            Ok(random) => {
+                model.randoms_ids = random.iter().map(|a| a.id().clone()).collect();
+                sender.input(BrowsePageMsg::SetColors(0));
+                for album in random {
+                    let cbox = gtk::CenterBox::builder().orientation(Orientation::Horizontal).build();
+                    cbox.add_css_class("card");
+                    cbox.add_css_class("padded");
+                    cbox.set_halign(Align::Fill);
+                    cbox.set_hexpand(true);
+                    cbox.set_hexpand_set(true);
+                    let hbox = gtk::Box::new(Orientation::Horizontal, 20);
+                    hbox.set_halign(Align::Start);
+                    hbox.set_valign(Align::Center);
+                    let cover_picture = CoverPicture::new(model.cover_cache.clone(), CoverSize::Large);
+                    cover_picture.set_cover_id(album.cover_art_id());
+                    cover_picture.add_css_class("shadowed");
+                    cover_picture.set_halign(Align::Start);
+                    cover_picture.set_valign(Align::Start);
+                    hbox.append(&cover_picture);
+                    cbox.set_start_widget(Some(&hbox));
+                    let text_vbox = gtk::Box::new(Orientation::Vertical, 10);
+                    text_vbox.set_valign(Align::Center);
+                    let title = gtk::Label::new(Some(album.name().as_str()));
+                    title.add_css_class("t0");
+                    title.add_css_class("bold");
+                    title.set_halign(Align::Start);
+                    title.set_justify(Justification::Left);
+                    let artists = gtk::Label::builder()
+                        .use_markup(true)
+                        .label(album.artist())
+                        .build();
+                    artists.set_halign(Align::Start);
+                    artists.set_justify(Justification::Left);
+                    artists.add_css_class("t1");
+                    artists.connect_activate_link(move |this, url| {
+                        this.activate_action("win.artist", Some(&url.to_variant())).expect("Error executing action");
+                        glib::Propagation::Stop
+                    });
+                    text_vbox.append(&title);
+                    text_vbox.append(&artists);
+                    hbox.append(&text_vbox);
+
+                    let gesture = gtk::GestureClick::new();
+                    gesture.connect_released(clone!(
+                        #[weak]
+                        hbox,
+                        #[strong(rename_to = id)]
+                        album.id(),
+                        move |_, _, _, _| {
+                            hbox.activate_action("win.album", Some(&id.to_variant())).expect("Error executing action");
+                        }
+                    ));
+                    cbox.add_controller(gesture);
+
+                    let vbox = gtk::CenterBox::builder().orientation(Orientation::Vertical).build();
+                    vbox.set_valign(Align::Fill);
+                    vbox.set_halign(Align::End);
+                    let song_count_str = format!("Song count: {}", album.song_count());
+                    let song_count = gtk::Label::new(Some(song_count_str.as_str()));
+                    song_count.add_css_class("t2");
+                    song_count.set_justify(Justification::Right);
+                    song_count.set_valign(Align::End);
+                    song_count.set_halign(Align::End);
+                    let play_btn = gtk::Button::builder()
+                        .icon_name(icon_names::PLAY)
+                        .build();
+                    play_btn.set_valign(Align::Center);
+                    play_btn.set_halign(Align::End);
+                    play_btn.set_size_request(64, 64);
+                    play_btn.add_css_class("circular");
+                    play_btn.add_css_class("raised");
+                    play_btn.add_css_class("bigicon");
+                    play_btn.connect_clicked(clone!(
+                        #[strong(rename_to = mpris_player)]
+                        model.mpris_player,
+                        #[strong(rename_to = id)]
+                        album.id(),
+                        move |_| {
+                            relm4::spawn_local(clone!(
+                                #[strong]
+                                mpris_player,
+                                #[strong]
+                                id,
+                                async move {
+                                    mpris_player.imp().send_res(mpris_player.imp().queue_album(id, None, true).await);
+                                }
+                            ));
+                        }
+                    ));
+                    vbox.set_center_widget(Some(&play_btn));
+                    vbox.set_end_widget(Some(&song_count));
+                    cbox.set_end_widget(Some(&vbox));
+
+                    widgets.carousel.append(&cbox);
+                }
+            }
+            Err(err) => model.mpris_player.imp().send_error(err),
+        }
+
         let newest = model
             .album_cache
             .get_album_list(AlbumListType::Newest, None, None, None, None, None, None)
@@ -351,6 +474,16 @@ impl AsyncComponent for BrowsePageWidget {
                     .scroll
                     .hadjustment()
                     .set_value(widgets.newest_list.scroll.hadjustment().value() + s as f64);
+            },
+            BrowsePageMsg::SetColors(i) => {
+                if let Some(id) = self.randoms_ids.get(i as usize) {
+                    let colors = self.cover_cache.get_palette(id).await;
+                    if let Err(err) = colors {
+                        self.mpris_player.imp().send_error(err);
+                    } else {
+                        sender.output(BrowsePageOut::SetColors(colors.ok().and_then(|c| c))).expect("Error sending out colors");
+                    }
+                }
             },
         };
         self.update_view(widgets, sender);

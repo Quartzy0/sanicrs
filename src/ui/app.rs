@@ -55,6 +55,7 @@ pub enum AppMsg {
     PushViewColors(Option<Vec<Color>>),
     PopViewColors,
     ClearViewColors,
+    SetViewColors(Option<Vec<Color>>),
     ToggleSidebar,
     Quit,
     ShowPreferences,
@@ -231,6 +232,7 @@ impl AsyncComponent for Model {
             .forward(sender.input_sender(), |msg| match msg {
                 BrowseMsgOut::PopView => AppMsg::PopViewColors,
                 BrowseMsgOut::ClearView => AppMsg::ClearViewColors,
+                BrowseMsgOut::SetColors(c) => AppMsg::SetViewColors(c),
             });
         let bottom_bar_connector= BottomBar::builder()
             .launch(into_init(&init, server.clone()))
@@ -374,18 +376,7 @@ impl AsyncComponent for Model {
             AppMsg::Previous => player.previous().await.unwrap(),
             AppMsg::PlayPause => player.play_pause().await.unwrap(),
             AppMsg::PushViewColors(colors) => {
-                let colors = if let Some(color) = colors {
-                    let mut it = color.into_iter().cycle();
-                    let mut arr: [Color; BG_COLORS] = [Default::default(); BG_COLORS];
-                    for i in 0..BG_COLORS {
-                        if let Some(color) = it.next() {
-                            arr[i] = color;
-                        }
-                    }
-                    Some(arr)
-                } else {
-                    None
-                };
+                let colors = Self::vec_to_arr(colors);
                 self.current_view_colors.push(colors);
                 self.update_colors(root);
             }
@@ -395,6 +386,16 @@ impl AsyncComponent for Model {
             }
             AppMsg::ClearViewColors => {
                 self.current_view_colors.clear();
+                self.update_colors(root);
+            }
+            AppMsg::SetViewColors(colors) => {
+                let colors = Self::vec_to_arr(colors);
+                let len = self.current_view_colors.len();
+                if len == 0 {
+                    self.current_view_colors.push(colors);
+                } else {
+                    self.current_view_colors[len - 1] = colors;
+                }
                 self.update_colors(root);
             }
             AppMsg::CurrentColorschemeChange(colors) => {
@@ -552,6 +553,21 @@ impl AsyncComponent for Model {
 }
 
 impl Model {
+    fn vec_to_arr(colors: Option<Vec<Color>>) -> Option<[Color; BG_COLORS]> {
+        if let Some(color) = colors {
+            let mut it = color.into_iter().cycle();
+            let mut arr: [Color; BG_COLORS] = [Default::default(); BG_COLORS];
+            for i in 0..BG_COLORS {
+                if let Some(color) = it.next() {
+                    arr[i] = color;
+                }
+            }
+            Some(arr)
+        } else {
+            None
+        }
+    }
+
     fn update_colors(&self, root: &<Model as AsyncComponent>::Root) {
         let mut css = String::from(":root {");
         if let Some(colors) = self.current_song_colors {

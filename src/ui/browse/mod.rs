@@ -1,6 +1,8 @@
 use relm4::adw::prelude::NavigationPageExt;
 use relm4::component::{AsyncComponentController, AsyncConnector};
 use std::rc::Rc;
+use color_thief::Color;
+
 mod album_list;
 mod browse_page;
 mod view_album_page;
@@ -12,13 +14,13 @@ use crate::opensonic::cache::{AlbumCache, ArtistCache, CoverCache};
 use crate::ui::album_object::AlbumObject;
 use crate::ui::app::Init;
 use crate::ui::artist_object::ArtistObject;
-use crate::ui::browse::browse_page::BrowsePageWidget;
+use crate::ui::browse::browse_page::{BrowsePageOut, BrowsePageWidget};
 use crate::ui::browse::search::{SearchMsg, SearchType, SearchWidget};
 use crate::ui::browse::view_album_page::ViewAlbumWidget;
 use crate::ui::browse::view_artist_page::ViewArtistWidget;
 use mpris_server::LocalServer;
 use relm4::component::AsyncComponentParts;
-use relm4::prelude::AsyncComponent;
+use relm4::prelude::{AsyncComponent, AsyncController};
 use relm4::{adw, AsyncComponentSender};
 
 pub struct BrowseWidget {
@@ -27,7 +29,7 @@ pub struct BrowseWidget {
     album_cache: AlbumCache,
     artist_cache: ArtistCache,
 
-    browse_page: AsyncConnector<BrowsePageWidget>,
+    browse_page: AsyncController<BrowsePageWidget>,
     search_controller: AsyncConnector<SearchWidget>,
 }
 
@@ -42,6 +44,7 @@ pub enum BrowseMsg {
 pub enum BrowseMsgOut {
     PopView,
     ClearView,
+    SetColors(Option<Vec<Color>>)
 }
 
 #[relm4::component(pub async)]
@@ -69,7 +72,10 @@ impl AsyncComponent for BrowseWidget {
         sender: AsyncComponentSender<Self>,
     ) -> AsyncComponentParts<Self> {
         let browse_page = BrowsePageWidget::builder()
-            .launch(init.clone());
+            .launch(init.clone())
+            .forward(sender.output_sender(), |msg| match msg {
+                BrowsePageOut::SetColors(c) => BrowseMsgOut::SetColors(c)
+            });
         let search_controller = SearchWidget::builder()
             .launch(init.clone());
         let model = Self {

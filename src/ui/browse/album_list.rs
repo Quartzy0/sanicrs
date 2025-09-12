@@ -53,7 +53,8 @@ impl WidgetTemplate for AlbumList {
                 #[name = "list"]
                 gtk::ListView {
                     set_orientation: Orientation::Horizontal,
-                    add_css_class: "album-list",
+                    add_css_class: "no-bg",
+                    add_css_class: "card",
                     // set_factory: Some(&model.album_factory),
                     set_single_click_activate: true,
                     /*connect_activate[sender] => move |view, index| {

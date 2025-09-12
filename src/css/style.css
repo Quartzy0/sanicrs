@@ -57,6 +57,10 @@
     background-color: transparent;
 }
 
+.bigicon {
+    -gtk-icon-size: 3em;
+}
+
 .padded {
     padding: 10px;
 }
@@ -64,6 +68,10 @@
 .lyric-line {
     font-size: larger;
     margin: 10px;
+}
+
+.shadowed {
+    box-shadow: 0.25em 0.25em 0.35em black;
 }
 
 .spaced {
