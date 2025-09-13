@@ -52,6 +52,7 @@ impl AsyncComponent for BrowsePageWidget {
             set_tag: Some("browse"),
             set_title: "Browse",
 
+            #[name = "scroll"]
             gtk::ScrolledWindow {
                 set_hscrollbar_policy: gtk::PolicyType::Never,
                 set_vexpand: true,
@@ -176,6 +177,40 @@ impl AsyncComponent for BrowsePageWidget {
         };
 
         let widgets: Self::Widgets = view_output!();
+
+        let controller = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
+        controller.set_propagation_phase(gtk::PropagationPhase::Capture);
+        controller.connect_scroll(clone!(
+            #[strong(rename_to = scroll)]
+            widgets.scroll,
+            move |_,_x,y| {
+                scroll.vadjustment().set_value(scroll.vadjustment().value()+y*scroll.vadjustment().step_increment());
+                glib::Propagation::Proceed
+            }
+        ));
+        widgets.newest_list.scroll.add_controller(controller);
+        let controller = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
+        controller.set_propagation_phase(gtk::PropagationPhase::Capture);
+        controller.connect_scroll(clone!(
+            #[strong(rename_to = scroll)]
+            widgets.scroll,
+            move |_,_x,y| {
+                scroll.vadjustment().set_value(scroll.vadjustment().value()+y*scroll.vadjustment().step_increment());
+                glib::Propagation::Proceed
+            }
+        ));
+        widgets.highest_list.scroll.add_controller(controller);
+        let controller = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
+        controller.set_propagation_phase(gtk::PropagationPhase::Capture);
+        controller.connect_scroll(clone!(
+            #[strong(rename_to = scroll)]
+            widgets.scroll,
+            move |_,_x,y| {
+                scroll.vadjustment().set_value(scroll.vadjustment().value()+y*scroll.vadjustment().step_increment());
+                glib::Propagation::Proceed
+            }
+        ));
+        widgets.explore_list.scroll.add_controller(controller);
 
         model.album_factory.connect_setup(clone!(
             #[strong(rename_to = cover_cache)]
@@ -466,14 +501,14 @@ impl AsyncComponent for BrowsePageWidget {
                     .highest_list
                     .scroll
                     .hadjustment()
-                    .set_value(widgets.newest_list.scroll.hadjustment().value() + s as f64);
+                    .set_value(widgets.highest_list.scroll.hadjustment().value() + s as f64);
             },
             BrowsePageMsg::ScrollExplore(s) => {
                 widgets
                     .explore_list
                     .scroll
                     .hadjustment()
-                    .set_value(widgets.newest_list.scroll.hadjustment().value() + s as f64);
+                    .set_value(widgets.explore_list.scroll.hadjustment().value() + s as f64);
             },
             BrowsePageMsg::SetColors(i) => {
                 if let Some(id) = self.randoms_ids.get(i as usize) {
