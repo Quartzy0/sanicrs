@@ -638,8 +638,9 @@ dependencies = [
 
 [[package]]
 name = "evicting_cache_map"
-version = "0.4.0"
-source = "git+https://gitea.quartzy.me/quartzy/rs-collections.git#ab93593c3f7d7229d0b1be870c7cb99379ec4204"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "69a8278a081d85fb6f22449e566a6172a93f7465d850cec4ee17aea68bf0c13c"
 dependencies = [
  "ordered_hash_map",
 ]
@@ -1992,8 +1993,9 @@ dependencies = [
 
 [[package]]
 name = "ordered_hash_map"
-version = "0.4.0"
-source = "git+https://gitea.quartzy.me/quartzy/rs-collections.git#ab93593c3f7d7229d0b1be870c7cb99379ec4204"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a6c699f8a30f345785be969deed7eee4c73a5de58c7faf61d6a3251ef798ff61"
 dependencies = [
  "hashbrown 0.15.4",
 ]
