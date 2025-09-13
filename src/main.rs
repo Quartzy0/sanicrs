@@ -1,5 +1,5 @@
 use crate::dbus::player::MprisPlayer;
-use crate::opensonic::cache::{AlbumCache, ArtistCache, CoverCache, LyricsCache, SongCache};
+use crate::opensonic::cache::{AlbumCache, ArtistCache, CoverCache, LyricsCache, SongCache, SuperCache};
 use crate::opensonic::client::{self, OpenSubsonicClient};
 use crate::player::{PlayerInfo, TrackList};
 use crate::ui::app::{AppMsg, Model, StartInit};
@@ -147,6 +147,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         let cover_cache = CoverCache::new(&CLIENT);
         let lyrics_cache = LyricsCache::new(&CLIENT);
         let artist_cache = ArtistCache::new(&CLIENT);
+        let super_cache = SuperCache::new(&album_cache, &song_cache, &artist_cache, &CLIENT);
 
         relm4_icons::initialize_icons(icon_names::GRESOURCE_BYTES, icon_names::RESOURCE_PREFIX);
         let adw_app = Application::new(Some(APP_ID), ApplicationFlags::empty());
@@ -194,7 +195,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             secret_schema,
             lyrics_cache,
             mpris_receive,
-            artist_cache
+            artist_cache,
+            super_cache
         );
 
 

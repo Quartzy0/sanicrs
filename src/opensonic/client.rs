@@ -1,4 +1,4 @@
-use crate::opensonic::types::{Album, AlbumListType, Albums, Artist, Extensions, InvalidResponseError, License, LyricsLine, LyricsLines, LyricsList, Search3Results, Song, SubsonicError, SupportedExtensions};
+use crate::opensonic::types::{Album, AlbumListType, Albums, Artist, Extensions, InvalidResponseError, License, LyricsLine, LyricsLines, LyricsList, Search3Results, Song, Starred, SubsonicError, SupportedExtensions};
 use format_url::FormatUrl;
 use rand::distr::{Alphanumeric, SampleString};
 use reqwest;
@@ -750,6 +750,22 @@ impl OpenSubsonicClient {
             serde_json::from_value(response["subsonic-response"]["artist"].take())?;
 
         Ok(resp_artist)
+    }
+
+    pub async fn get_starred(
+        &self,
+    ) -> Result<Starred, Box<dyn Error>> {
+        let body = self
+            .get_action_request("getStarred2", vec![], None, None)
+            .await?
+            .text()
+            .await?;
+        let mut response: Value = serde_json::from_str(&body)?;
+        if response["subsonic-response"]["status"] != "ok" {
+            return Err(SubsonicError::from_response(response));
+        }
+
+        Ok(serde_json::from_value(response["subsonic-response"]["starred2"].take())?)
     }
 }
 

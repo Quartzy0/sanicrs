@@ -1,5 +1,5 @@
 use crate::dbus::player::MprisPlayer;
-use crate::opensonic::cache::{AlbumCache, ArtistCache, CoverCache, LyricsCache, SongCache};
+use crate::opensonic::cache::{AlbumCache, ArtistCache, CoverCache, LyricsCache, SongCache, SuperCache};
 use crate::ui::browse::search::SearchType;
 use crate::ui::browse::{BrowseMsg, BrowseMsgOut, BrowseWidget};
 use crate::ui::current_song::{CurrentSong, CurrentSongOut};
@@ -82,7 +82,8 @@ pub type Init = (
     Schema,
     LyricsCache,
     Rc<LocalServer<MprisPlayer>>,
-    ArtistCache
+    ArtistCache,
+    SuperCache
 );
 
 pub type StartInit = (
@@ -93,12 +94,13 @@ pub type StartInit = (
     Schema,
     LyricsCache,
     Receiver<Rc<LocalServer<MprisPlayer>>>,
-    ArtistCache
+    ArtistCache,
+    SuperCache,
 );
 
 fn into_init(value: &StartInit, server: Rc<LocalServer<MprisPlayer>>) -> Init {
     let value = value.clone();
-    (value.0, value.1, value.2, value.3, value.4, value.5, server, value.7).into()
+    (value.0, value.1, value.2, value.3, value.4, value.5, server, value.7, value.8).into()
 }
 
 relm4::new_action_group!(pub WindowActionGroup, "win");

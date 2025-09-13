@@ -14,6 +14,50 @@ use relm4::gtk::gdk_pixbuf;
 use tokio::sync::RwLock;
 
 #[derive(Clone, Debug)]
+pub struct SuperCache {
+    album_cache: AlbumCache,
+    song_cache: SongCache,
+    artist_cache: ArtistCache,
+    client: &'static OpenSubsonicClient
+}
+
+impl SuperCache {
+    pub fn new(
+        album_cache: &AlbumCache,
+        song_cache: &SongCache,
+        artist_cache: &ArtistCache,
+        client: &'static OpenSubsonicClient
+    ) -> Self {
+        Self {
+            album_cache: album_cache.clone(),
+            song_cache: song_cache.clone(),
+            artist_cache: artist_cache.clone(),
+            client
+        }
+    }
+
+    pub async fn get_starred(&self) -> Result<(Vec<Rc<Song>>, Vec<AlbumObject>, Vec<ArtistObject>), Box<dyn Error>>{
+        let starred = self.client.get_starred().await?;
+        let songs = if let Some(songs) = starred.songs {
+            self.song_cache.add_songs(songs).await
+        } else {
+            Vec::new()
+        };
+        let albums = if let Some(albums) = starred.albums {
+            self.album_cache.add_albums(albums).await
+        } else {
+            Vec::new()
+        };
+        let artist = if let Some(artists) = starred.artists {
+            self.artist_cache.add_artist(artists).await
+        } else {
+            Vec::new()
+        };
+        Ok((songs, albums, artist))
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct SongCache {
     cache: Rc<RwLock<EvictingCacheMap<String, Rc<Song>, 100, fn(String,Rc<Song>)>>>,
     client: &'static OpenSubsonicClient,

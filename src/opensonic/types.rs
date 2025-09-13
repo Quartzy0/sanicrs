@@ -57,6 +57,17 @@ impl TryFrom<&String> for SupportedExtensions {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Starred {
+    #[serde(rename(serialize = "artist", deserialize = "artist"))]
+    pub artists: Option<Vec<Artist>>,
+    #[serde(rename(serialize = "album", deserialize = "album"))]
+    pub albums: Option<Vec<Album>>,
+    #[serde(rename(serialize = "song", deserialize = "song"))]
+    pub songs: Option<Vec<Song>>,
+}
+
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct LyricsLine {

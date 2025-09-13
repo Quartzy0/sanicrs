@@ -1,6 +1,6 @@
 use std::cmp::{max, min};
 use crate::dbus::player::MprisPlayer;
-use crate::opensonic::cache::{AlbumCache, CoverCache};
+use crate::opensonic::cache::{AlbumCache, CoverCache, SuperCache};
 use crate::opensonic::types::AlbumListType;
 use crate::ui::album_object::AlbumObject;
 use crate::ui::app::Init;
@@ -17,13 +17,18 @@ use relm4::prelude::*;
 use relm4::AsyncComponentSender;
 use std::rc::Rc;
 use color_thief::Color;
+use uuid::Uuid;
 use crate::icon_names;
+use crate::ui::artist_object::ArtistObject;
+use crate::ui::item_list::{ItemListInit, ItemListWidget};
+use crate::ui::song_object::{PositionState, SongObject};
 
 pub struct BrowsePageWidget {
     album_cache: AlbumCache,
     mpris_player: Rc<LocalServer<MprisPlayer>>,
     cover_cache: CoverCache,
     randoms_ids: Vec<String>,
+    super_cache: SuperCache,
 
     album_factory: SignalListItemFactory,
 }
@@ -158,6 +163,69 @@ impl AsyncComponent for BrowsePageWidget {
                                 }
                             }
                         }
+                    },
+                    #[name = "starred_songs_box"]
+                    gtk::Box {
+                        set_orientation: Orientation::Vertical,
+                        set_halign: Align::Fill,
+                        set_spacing: 10,
+
+                        gtk::Label {
+                            set_label: "Starred songs",
+                            add_css_class: "t0",
+                            add_css_class: "bold",
+                            set_halign: Align::Start,
+                            set_justify: Justification::Left,
+                        },
+                        #[name = "starred_songs_bin"]
+                        gtk::ScrolledWindow {
+                            add_css_class: "padded",
+                            set_vscrollbar_policy: gtk::PolicyType::Automatic,
+                            set_hscrollbar_policy: gtk::PolicyType::Never,
+                            set_min_content_height: 450,
+                        }
+                    },
+                    #[name = "starred_albums_box"]
+                    gtk::Box {
+                        set_orientation: Orientation::Vertical,
+                        set_halign: Align::Fill,
+                        set_spacing: 10,
+
+                        gtk::Label {
+                            set_label: "Starred albums",
+                            add_css_class: "t0",
+                            add_css_class: "bold",
+                            set_halign: Align::Start,
+                            set_justify: Justification::Left,
+                        },
+                        #[name = "starred_albums_bin"]
+                        gtk::ScrolledWindow {
+                            add_css_class: "padded",
+                            set_vscrollbar_policy: gtk::PolicyType::Automatic,
+                            set_hscrollbar_policy: gtk::PolicyType::Never,
+                            set_min_content_height: 450,
+                        }
+                    },
+                    #[name = "starred_artists_box"]
+                    gtk::Box {
+                        set_orientation: Orientation::Vertical,
+                        set_halign: Align::Fill,
+                        set_spacing: 10,
+
+                        gtk::Label {
+                            set_label: "Starred artists",
+                            add_css_class: "t0",
+                            add_css_class: "bold",
+                            set_halign: Align::Start,
+                            set_justify: Justification::Left,
+                        },
+                        #[name = "starred_artists_bin"]
+                        gtk::ScrolledWindow {
+                            add_css_class: "padded",
+                            set_vscrollbar_policy: gtk::PolicyType::Automatic,
+                            set_hscrollbar_policy: gtk::PolicyType::Never,
+                            set_min_content_height: 450,
+                        }
                     }
                 }
             }
@@ -175,9 +243,96 @@ impl AsyncComponent for BrowsePageWidget {
             album_factory: SignalListItemFactory::new(),
             cover_cache: init.0,
             randoms_ids: vec![],
+            super_cache: init.8,
         };
 
+
         let widgets: Self::Widgets = view_output!();
+
+        relm4::spawn_local(clone!(
+            #[weak(rename_to = songs_bin)]
+            widgets.starred_songs_bin,
+            #[weak(rename_to = albums_bin)]
+            widgets.starred_albums_bin,
+            #[weak(rename_to = artists_bin)]
+            widgets.starred_artists_bin,
+            #[strong(rename_to = scache)]
+            model.super_cache,
+            #[strong(rename_to = mpris_player)]
+            model.mpris_player,
+            #[strong(rename_to = cover_cache)]
+            model.cover_cache,
+            async move {
+                let starred = scache.get_starred().await;
+                if let Err(err) = starred {
+                    mpris_player.imp().send_error(err);
+                    return;
+                }
+                let starred = starred.unwrap();
+                if starred.0.len() == 0 {
+                    songs_bin.set_visible(false);
+                } else {
+                    let starred_songs_list = ItemListWidget::builder()
+                        .launch(ItemListInit {
+                            cover_cache: cover_cache.clone(),
+                            play_fn: Some(Box::new(move |song: SongObject, _i, mpris_player| {
+                                relm4::spawn_local(async move {
+                                    mpris_player.imp().send_res(mpris_player.imp().queue_songs(vec![song.get_entry().unwrap()], None, true).await);
+                                });
+                            })),
+                            click_fn: None,
+                            load_items: async move {
+                                starred.0.into_iter().map(|v| SongObject::new((Uuid::max(), v).into(), PositionState::Passed))
+                            },
+                            mpris_player: mpris_player.clone(),
+                            cover_type: Default::default(),
+                        });
+                    songs_bin.set_child(Some(starred_songs_list.widget()));
+                }
+                if starred.1.len() == 0{
+                    albums_bin.set_visible(false);
+                } else {
+                    let cloned = albums_bin.clone();
+                    let starred_albums_list = ItemListWidget::builder()
+                        .launch(ItemListInit {
+                            cover_cache: cover_cache.clone(),
+                            play_fn: Some(Box::new(move |album: AlbumObject, _i, mpris_player| {
+                                relm4::spawn_local(async move {
+                                    mpris_player.imp().send_res(mpris_player.imp().queue_album(album.id(), None, true).await);
+                                });
+                            })),
+                            click_fn: Some(Box::new(move |album: AlbumObject, _i, _mpris_player| {
+                                cloned.activate_action("win.album", Some(&album.id().to_variant())).expect("Error executing action");
+                            })),
+                            load_items: async move {
+                                starred.1.into_iter()
+                            },
+                            mpris_player: mpris_player.clone(),
+                            cover_type: Default::default(),
+                        });
+                    albums_bin.set_child(Some(starred_albums_list.widget()));
+                }
+                if starred.2.len() == 0 {
+                    artists_bin.set_visible(false);
+                } else {
+                    let cloned = artists_bin.clone();
+                    let starred_artists_list = ItemListWidget::builder()
+                        .launch(ItemListInit {
+                            cover_cache: cover_cache.clone(),
+                            play_fn: None,
+                            click_fn: Some(Box::new(move |artist: ArtistObject, _i, _mpris_player| {
+                                cloned.activate_action("win.artist", Some(&artist.id().to_variant())).expect("Error executing action");
+                            })),
+                            load_items: async move {
+                                starred.2.into_iter()
+                            },
+                            mpris_player: mpris_player.clone(),
+                            cover_type: Default::default(),
+                        });
+                    artists_bin.set_child(Some(starred_artists_list.widget()));
+                }
+            }
+        ));
 
         let controller = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
         controller.set_propagation_phase(gtk::PropagationPhase::Capture);
