@@ -2,6 +2,7 @@ use relm4::WidgetTemplate;
 use relm4::adw::gtk;
 use relm4::adw::prelude::*;
 use relm4::adw::gtk::{Orientation, Align};
+use crate::icon_names;
 
 #[relm4::widget_template(pub)]
 impl WidgetTemplate for AlbumList {
@@ -29,17 +30,15 @@ impl WidgetTemplate for AlbumList {
                     set_spacing: 5,
                     #[name = "back_btn"]
                     gtk::Button {
-                        set_label: "<",
+                        set_icon_name: icon_names::LEFT,
                         add_css_class: "no-bg",
-                        add_css_class: "bold",
-                        // connect_clicked => BrowseMsg::ScrollNewest(-100)
+                        add_css_class: "pill",
                     },
                     #[name = "forward_btn"]
                     gtk::Button {
-                        set_label: ">",
+                        set_icon_name: icon_names::RIGHT,
                         add_css_class: "no-bg",
-                        add_css_class: "bold",
-                        // connect_clicked => BrowseMsg::ScrollNewest(100)
+                        add_css_class: "pill",
                     }
                 }
             },
@@ -55,18 +54,7 @@ impl WidgetTemplate for AlbumList {
                     set_orientation: Orientation::Horizontal,
                     add_css_class: "no-bg",
                     add_css_class: "card",
-                    // set_factory: Some(&model.album_factory),
                     set_single_click_activate: true,
-                    /*connect_activate[sender] => move |view, index| {
-                        let model = view.model();
-                        if let Some(model) = model {
-                            let album: AlbumObject = model.item(index)
-                                .expect("Item at index clicked expected to exist")
-                                .downcast::<AlbumObject>()
-                                .expect("Item expected to be AlbumObject");
-                            sender.input(BrowseMsg::ViewAlbum(album));
-                        }
-                    }*/
                 }
             }
         }

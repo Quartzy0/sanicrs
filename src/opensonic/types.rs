@@ -124,7 +124,7 @@ pub struct Artist {
     pub cover_art: Option<String>,
     pub artist_image_url: Option<String>,
     pub album_count: Option<u32>,
-    pub starred: Option<String>,
+    pub starred: RefCell<Option<String>>,
     pub music_brainz_id: Option<String>,
     pub sort_name: Option<String>,
     pub roles: Option<Vec<String>>,
@@ -320,7 +320,7 @@ impl Album {
 
 impl Artist {
     pub fn is_starred(&self) -> bool {
-        self.starred.is_some()
+        self.starred.borrow().is_some()
     }
 }
 

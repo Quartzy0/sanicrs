@@ -61,6 +61,10 @@
     -gtk-icon-size: 3em;
 }
 
+.midicon {
+    -gtk-icon-size: 2em;
+}
+
 .padded {
     padding: 10px;
 }

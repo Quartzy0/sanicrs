@@ -1,3 +1,4 @@
+use std::cmp::{max, min};
 use crate::dbus::player::MprisPlayer;
 use crate::opensonic::cache::{AlbumCache, CoverCache};
 use crate::opensonic::types::AlbumListType;
@@ -423,8 +424,34 @@ impl AsyncComponent for BrowsePageWidget {
                             ));
                         }
                     ));
+
+                    let btns_hbox = gtk::Box::new(Orientation::Horizontal, 10);
+                    let next_btn = gtk::Button::from_icon_name(icon_names::RIGHT);
+                    let prev_btn = gtk::Button::from_icon_name(icon_names::LEFT);
+                    next_btn.add_css_class("pill");
+                    prev_btn.add_css_class("pill");
+                    next_btn.connect_clicked(clone!(
+                        #[weak(rename_to = carousel)]
+                        widgets.carousel,
+                        move |_| {
+                            let page = carousel.nth_page(min((carousel.position() + 1.0) as u32, carousel.n_pages()-1));
+                            carousel.scroll_to(&page, true);
+                        }
+                    ));
+                    prev_btn.connect_clicked(clone!(
+                        #[weak(rename_to = carousel)]
+                        widgets.carousel,
+                        move |_| {
+                            let page = carousel.nth_page(max((carousel.position() - 1.0) as i32, 0) as u32);
+                            carousel.scroll_to(&page, true);
+                        }
+                    ));
+                    btns_hbox.append(&prev_btn);
+                    btns_hbox.append(&next_btn);
+
                     vbox.set_center_widget(Some(&play_btn));
-                    vbox.set_end_widget(Some(&song_count));
+                    vbox.set_start_widget(Some(&song_count));
+                    vbox.set_end_widget(Some(&btns_hbox));
                     cbox.set_end_widget(Some(&vbox));
 
                     widgets.carousel.append(&cbox);

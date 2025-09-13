@@ -39,7 +39,9 @@ fn main() {
             "up-small",
             "cross-small-circle-outline",
             "heart-filled",
-            "heart-outline-thin"
+            "heart-outline-thin",
+            "right",
+            "left"
         ],
     );
 }

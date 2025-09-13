@@ -45,10 +45,19 @@ impl ArtistObject {
     pub fn id(&self) -> String {
         self.property("id")
     }
+
+    pub fn starred(&self) -> bool {
+        self.property("starred")
+    }
+    
+    // Doesn't make any requests to server, simply changes local status
+    pub fn set_starred(&self, val: bool) {
+        self.set_property("starred", val.to_value());
+    }
 }
 
 mod imp {
-    use relm4::adw::glib::{ParamSpec, ParamSpecString, Value};
+    use relm4::adw::glib::{ParamSpec, ParamSpecBoolean, ParamSpecString, Value};
     use relm4::adw::gtk::glib;
     use relm4::adw::gtk::prelude::*;
     use relm4::adw::gtk::subclass::prelude::*;
@@ -78,14 +87,25 @@ mod imp {
                     ParamSpecString::builder("name").build(),
                     ParamSpecString::builder("cover-art-id").build(),
                     ParamSpecString::builder("album-count").build(),
+                    ParamSpecBoolean::builder("starred").build(),
                 ]
             });
             PROPERTIES.as_ref()
         }
 
 
-        fn set_property(&self, _id: usize, _value: &Value, pspec: &ParamSpec) {
+        fn set_property(&self, _id: usize, value: &Value, pspec: &ParamSpec) {
             match pspec.name() {
+                "starred" => {
+                    if let Some(album) = self.artist.borrow().as_ref() {
+                        let val: bool = value.get().expect("Setting 'starred' with non-boolean value");
+                        if val && !album.is_starred(){
+                            album.starred.replace(Some("yes".to_string()));
+                        } else if !val && album.is_starred() {
+                            album.starred.replace(None);
+                        }
+                    }
+                },
                 p => unimplemented!("{}", p),
             };
         }
@@ -98,6 +118,7 @@ mod imp {
                     "name" => artist.name.to_value(),
                     "cover-art-id" => artist.cover_art.to_value(),
                     "album-count" => artist.album_count.and_then(|c| Some(c.to_string())).to_value(),
+                    "starred" => artist.is_starred().to_value(),
                     _ => unimplemented!(),
                 }
             } else {
@@ -106,6 +127,7 @@ mod imp {
                     "name" => None::<String>.to_value(),
                     "cover-art-id" => None::<String>.to_value(),
                     "album-count" => None::<String>.to_value(),
+                    "starred" => false.to_value(),
                     _ => unimplemented!(),
                 }
             }

@@ -7,8 +7,10 @@ use relm4::adw::gtk::{Align, Orientation};
 use relm4::adw::prelude::*;
 use relm4::prelude::*;
 use std::rc::Rc;
-use relm4::adw::glib::clone;
+use relm4::adw::glib::{clone, closure, Object};
 use relm4::adw::glib as glib;
+use relm4::gtk::Widget;
+use crate::icon_names;
 use crate::ui::album_object::AlbumObject;
 use crate::ui::item_list::{ItemListInit, ItemListWidget};
 
@@ -51,31 +53,92 @@ impl AsyncComponent for ViewArtistWidget {
                         add_css_class: "padded",
                         set_spacing: 10,
 
-                        gtk::Box {
-                            set_orientation: Orientation::Horizontal,
-                            set_spacing: 10,
-
-                            CoverPicture{
-                                set_cover_size: CoverSize::Large,
-                                set_cover_type: CoverType::Round,
-                                set_cache: cover_cache.clone(),
-                                set_cover_id: artist.cover_art_id(),
-                            },
-
-                            gtk::Box {
-                                set_orientation: Orientation::Vertical,
+                        gtk::CenterBox {
+                            #[wrap(Some)]
+                            set_start_widget = &gtk::Box {
+                                set_orientation: Orientation::Horizontal,
                                 set_spacing: 10,
 
-                                gtk::Label {
-                                    set_label: artist.name().as_str(),
-                                    add_css_class: "bold",
-                                    add_css_class: "t0",
-                                    set_halign: Align::Start,
+                                CoverPicture{
+                                    set_cover_size: CoverSize::Large,
+                                    set_cover_type: CoverType::Round,
+                                    set_cache: cover_cache.clone(),
+                                    set_cover_id: artist.cover_art_id(),
                                 },
-                                gtk::Label {
-                                    set_label: artist.album_count().and_then(|c| Some(format!("{} albums", c))).unwrap_or("".to_string()).as_str(),
-                                    add_css_class: "t1",
-                                    set_halign: Align::Start,
+
+                                gtk::Box {
+                                    set_orientation: Orientation::Vertical,
+                                    set_spacing: 10,
+                                    set_valign: Align::Center,
+
+                                    gtk::Label {
+                                        set_label: artist.name().as_str(),
+                                        add_css_class: "bold",
+                                        add_css_class: "t0",
+                                        set_halign: Align::Start,
+                                    },
+                                    gtk::Label {
+                                        set_label: artist.album_count().and_then(|c| Some(format!("{} albums", c))).unwrap_or("".to_string()).as_str(),
+                                        add_css_class: "t1",
+                                        set_halign: Align::Start,
+                                    }
+                                }
+                            },
+
+                            #[wrap(Some)]
+                            set_end_widget = &gtk::Box {
+                                set_orientation: Orientation::Horizontal,
+                                set_halign: Align::End,
+                                set_spacing: 10,
+
+                                gtk::Button {
+                                    set_halign: Align::Center,
+                                    set_valign: Align::Center,
+                                    add_css_class: "circular",
+                                    add_css_class: "midicon",
+                                    set_icon_name: icon_names::PLAY,
+                                    set_width_request: 48,
+                                    set_height_request: 48,
+                                    connect_clicked[artist, mpris_player] => move |_| {
+                                        relm4::spawn_local(clone!(
+                                            #[strong]
+                                            artist,
+                                            #[strong]
+                                            mpris_player,
+                                            async move {
+                                                let mut albums = artist.get_albums().unwrap_or(Vec::new());
+                                                if let Some(first) = albums.pop() {
+                                                    // Clear previous play queue with first album
+                                                    mpris_player.imp().send_res(mpris_player.imp().queue_album(first.id, None, true).await);
+                                                    for album in albums {
+                                                        mpris_player.imp().send_res(mpris_player.imp().queue_album(album.id, None, false).await);
+                                                    }
+                                                }
+                                            }
+                                        ));
+                                    }
+                                },
+                                #[name = "like_btn"]
+                                gtk::ToggleButton {
+                                    set_halign: Align::Center,
+                                    set_valign: Align::Center,
+                                    add_css_class: "circular",
+                                    add_css_class: "midicon",
+                                    set_width_request: 48,
+                                    set_height_request: 48,
+                                    connect_clicked[artist_cache, artist, mpris_player] => move |_| {
+                                        relm4::spawn_local(clone!(
+                                            #[strong]
+                                            artist,
+                                            #[strong]
+                                            artist_cache,
+                                            #[strong]
+                                            mpris_player,
+                                            async move {
+                                                mpris_player.imp().send_res(artist_cache.toggle_starred(&artist).await);
+                                            }
+                                        ));
+                                    }
                                 }
                             }
                         },
@@ -98,6 +161,7 @@ impl AsyncComponent for ViewArtistWidget {
         let artist_c = artist.clone();
         let album_cache = init.3;
         let cover_cache = init.2;
+        let artist_cache = init.4;
 
         let item_list_widget = ItemListWidget::builder()
             .launch(ItemListInit {
@@ -128,6 +192,22 @@ impl AsyncComponent for ViewArtistWidget {
             });
 
         let widgets: Self::Widgets = view_output!();
+
+        widgets.like_btn
+            .property_expression("active")
+            .chain_closure::<String>(closure!(
+                        move |_: Option<Object>, active: bool| {
+                            if active {
+                                icon_names::HEART_FILLED
+                            } else {
+                                icon_names::HEART_OUTLINE_THIN
+                            }
+                        }
+                    ))
+            .bind(&widgets.like_btn, "icon-name", Widget::NONE);
+        artist
+            .property_expression("starred")
+            .bind(&widgets.like_btn, "active", Widget::NONE);
 
         AsyncComponentParts { model, widgets }
     }

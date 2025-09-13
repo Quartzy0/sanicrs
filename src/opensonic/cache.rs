@@ -338,4 +338,15 @@ impl ArtistCache {
             Err("No artists found".into())
         }
     }
+
+    pub async fn toggle_starred(&self, artist: &ArtistObject) -> Result<(), Box<dyn Error>> {
+        if artist.starred() {
+            self.client.unstar(Vec::new(), Vec::new(), vec![&artist.id()]).await?;
+            artist.set_starred(false);
+        } else {
+            self.client.star(Vec::new(), Vec::new(), vec![&artist.id()]).await?;
+            artist.set_starred(true);
+        }
+        Ok(())
+    }
 }

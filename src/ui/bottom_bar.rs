@@ -8,6 +8,7 @@ use relm4::gtk::glib::{closure, Object};
 use relm4::prelude::*;
 use relm4::adw::{gdk, glib, gtk};
 use relm4::gtk::{Align, Justification, Orientation, Widget};
+use relm4::gtk::pango::EllipsizeMode;
 use uuid::Uuid;
 use crate::dbus::player::MprisPlayer;
 use crate::icon_names;
@@ -81,6 +82,7 @@ impl AsyncComponent for BottomBar {
                         set_max_width_chars: 30,
                         set_justify: Justification::Left,
                         set_halign: Align::Start,
+                        set_ellipsize: EllipsizeMode::End,
                     },
                     gtk::Label {
                         #[watch]
@@ -90,6 +92,7 @@ impl AsyncComponent for BottomBar {
                         set_max_width_chars: 30,
                         set_justify: Justification::Left,
                         set_halign: Align::Start,
+                        set_ellipsize: EllipsizeMode::End,
                         connect_activate_link => move |this, url| {
                             this.activate_action("win.artist", Some(&url.to_variant())).expect("Error executing action");
                             glib::Propagation::Stop
@@ -106,6 +109,8 @@ impl AsyncComponent for BottomBar {
                         add_css_class: "italic",
                         set_justify: Justification::Left,
                         set_halign: Align::Start,
+                        set_max_width_chars: 30,
+                        set_ellipsize: EllipsizeMode::End,
                         connect_activate_link => move |this, url| {
                             if url.len() != 0 {
                                 this.activate_action("win.album", Some(&url.to_variant())).expect("Error executing action");
