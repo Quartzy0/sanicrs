@@ -189,6 +189,7 @@ impl AsyncComponent for ViewArtistWidget {
                         Vec::new()
                     }
                 },
+                highlight: None,
             });
 
         let widgets: Self::Widgets = view_output!();

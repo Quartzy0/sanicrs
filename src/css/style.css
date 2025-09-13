@@ -33,6 +33,33 @@
     background-color: rgba(255, 255, 255, 0.09);
 }
 
+@keyframes flash {
+    0% {
+        border: 2px solid transparent;
+    }
+    25% {
+        border: 2px solid var(--light-5);
+    }
+    50% {
+        border: 2px solid transparent;
+    }
+    75% {
+        border: 2px solid var(--light-5);
+    }
+    100% {
+        border: 2px solid transparent;
+    }
+}
+
+.highlighted {
+    animation-name: flash;
+    animation-duration: 1s;
+    animation-iteration-count: 3;
+    animation-delay: 0s;
+    animation-timing-function: linear;
+    border: 2px solid transparent;
+}
+
 .album-song-item {
     margin: 10px;
 }

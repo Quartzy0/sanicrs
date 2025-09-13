@@ -139,6 +139,7 @@ impl AsyncComponent for SearchWidget {
                                         .collect()
                                 }
                             },
+                            highlight: None,
                         });
                         widgets.scrolled.set_child(Some(item_list_widget.widget()));
                     }
@@ -180,6 +181,7 @@ impl AsyncComponent for SearchWidget {
                                     results.unwrap().into_iter().collect()
                                 }
                             },
+                            highlight: None,
                         });
                         widgets.scrolled.set_child(Some(item_list_widget.widget()));
                     }
@@ -210,6 +212,7 @@ impl AsyncComponent for SearchWidget {
                                     results.unwrap().into_iter().collect()
                                 }
                             },
+                            highlight: None,
                         });
                         widgets.scrolled.set_child(Some(item_list_widget.widget()));
                     }

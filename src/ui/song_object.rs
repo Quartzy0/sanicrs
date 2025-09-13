@@ -56,6 +56,10 @@ impl SongObject {
         self.property("duration")
     }
 
+    pub fn id(&self) -> String {
+        self.property("id")
+    }
+
     pub fn get_entry(&self) -> Option<Rc<Song>> {
         self.imp().song.borrow().as_ref().and_then(|s| Some(s.1.clone()))
     }

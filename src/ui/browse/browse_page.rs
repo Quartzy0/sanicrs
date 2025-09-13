@@ -272,6 +272,7 @@ impl AsyncComponent for BrowsePageWidget {
                 if starred.0.len() == 0 {
                     songs_bin.set_visible(false);
                 } else {
+                    let cloned = songs_bin.clone();
                     let starred_songs_list = ItemListWidget::builder()
                         .launch(ItemListInit {
                             cover_cache: cover_cache.clone(),
@@ -280,12 +281,15 @@ impl AsyncComponent for BrowsePageWidget {
                                     mpris_player.imp().send_res(mpris_player.imp().queue_songs(vec![song.get_entry().unwrap()], None, true).await);
                                 });
                             })),
-                            click_fn: None,
+                            click_fn: Some(Box::new(move |song: SongObject, _i, _mpris_player| {
+                                cloned.activate_action("win.song", Some(&song.id().to_variant())).expect("Error executing action");
+                            })),
                             load_items: async move {
                                 starred.0.into_iter().map(|v| SongObject::new((Uuid::max(), v).into(), PositionState::Passed))
                             },
                             mpris_player: mpris_player.clone(),
                             cover_type: Default::default(),
+                            highlight: None,
                         });
                     songs_bin.set_child(Some(starred_songs_list.widget()));
                 }
@@ -309,6 +313,7 @@ impl AsyncComponent for BrowsePageWidget {
                             },
                             mpris_player: mpris_player.clone(),
                             cover_type: Default::default(),
+                            highlight: None,
                         });
                     albums_bin.set_child(Some(starred_albums_list.widget()));
                 }
@@ -328,6 +333,7 @@ impl AsyncComponent for BrowsePageWidget {
                             },
                             mpris_player: mpris_player.clone(),
                             cover_type: Default::default(),
+                            highlight: None,
                         });
                     artists_bin.set_child(Some(starred_artists_list.widget()));
                 }

@@ -153,14 +153,13 @@ impl AsyncComponent for CurrentSong {
                     #[watch]
                     set_markup: &model.song_info.as_ref()
                                     .and_then(|x| x.album.as_ref().and_then(|a|
-                                        Some(format!("<a href=\"{}\" title=\"View album\" class=\"normal-link\">{}</a>",
-                                            x.album_id.as_ref().and_then(|s| Some(s.as_str())).unwrap_or(""), a))
+                                        Some(format!("<a href=\"{}\" title=\"View album\" class=\"normal-link\">{}</a>", x.id, a))
                                     ))
                                     .unwrap_or("".to_string()),
                     add_css_class: "italic",
                     connect_activate_link => move |this, url| {
                         if url.len() != 0 {
-                            this.activate_action("win.album", Some(&url.to_variant())).expect("Error executing action");
+                            this.activate_action("win.song", Some(&url.to_variant())).expect("Error executing action");
                         }
                         glib::Propagation::Stop
                     },

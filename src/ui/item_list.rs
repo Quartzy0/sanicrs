@@ -38,6 +38,7 @@ where
     pub load_items: F,
     pub mpris_player: Rc<LocalServer<MprisPlayer>>,
     pub cover_type: CoverType,
+    pub highlight: Option<u32>,
 }
 
 #[relm4::component(pub async)]
@@ -71,6 +72,7 @@ impl<T: IsA<Object> + ObjectType, I: IntoIterator<Item = T> + 'static, F: 'stati
             load_items,
             mpris_player,
             cover_type,
+            highlight,
         } = init;
         let play_fn = play_fn.and_then(|f| Some(Rc::new(f)));
         let click_fn = click_fn.and_then(|f| Some(Rc::new(f)));
@@ -156,6 +158,20 @@ impl<T: IsA<Object> + ObjectType, I: IntoIterator<Item = T> + 'static, F: 'stati
                 }
 
 
+                if let Some(highlight) = highlight {
+                    list_item
+                        .property_expression("position")
+                        .chain_closure::<Vec<String>>(closure!(
+                            move |_: Option<Object>, pos: u32| {
+                                if pos == highlight {
+                                    vec!["card".to_string(), "padded".to_string(), "highlighted".to_string()]
+                                } else {
+                                    vec!["card".to_string(), "padded".to_string()]
+                                }
+                            }
+                        ))
+                        .bind(&hbox, "css-classes", Widget::NONE);
+                }
                 list_item
                     .property_expression("item")
                     .chain_property::<T>("name")

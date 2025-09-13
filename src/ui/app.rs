@@ -44,6 +44,7 @@ pub struct Model {
     artist_cache: ArtistCache,
     album_cache: AlbumCache,
     cover_cache: CoverCache,
+    song_cache: SongCache,
 
     current_song_colors: Option<[Color; BG_COLORS]>,
     current_view_colors: Vec<Option<[Color; BG_COLORS]>>
@@ -69,7 +70,8 @@ pub enum AppMsg {
     CloseRequest,
     ShowSong,
     Search,
-    ViewAlbum(String),
+    ViewAlbum(String, Option<u32>),
+    ViewSong(String),
     ShowRandomSongsDialog,
     ViewArtist(String),
 }
@@ -111,6 +113,7 @@ relm4::new_stateless_action!(pub NextAction, WindowActionGroup, "next");
 relm4::new_stateless_action!(pub PreviousAction, WindowActionGroup, "previous");
 relm4::new_stateful_action!(pub ViewArtistAction, WindowActionGroup, "artist", String, u8);
 relm4::new_stateful_action!(pub ViewAlbumAction, WindowActionGroup, "album", String, u8);
+relm4::new_stateful_action!(pub ViewSongAction, WindowActionGroup, "song", String, u8);
 
 #[relm4::component(pub async)]
 impl AsyncComponent for Model {
@@ -279,6 +282,7 @@ impl AsyncComponent for Model {
             cover_cache: init.0,
             current_song_colors: None,
             current_view_colors: vec![],
+            song_cache: init.1,
         };
         let base_provider = CssProvider::new();
         let display = gdk::Display::default().expect("Unable to create Display object");
@@ -331,7 +335,14 @@ impl AsyncComponent for Model {
             #[strong]
             sender,
             move |_, _state, value| {
-                sender.input(AppMsg::ViewAlbum(value));
+                sender.input(AppMsg::ViewAlbum(value, None));
+            }
+        ));
+        let view_song_action: RelmAction<ViewSongAction> = RelmAction::new_stateful_with_target_value(&0, clone!(
+            #[strong]
+            sender,
+            move |_, _state, value| {
+                sender.input(AppMsg::ViewSong(value));
             }
         ));
         let next_action: RelmAction<NextAction> = RelmAction::new_stateless(clone!(
@@ -355,6 +366,7 @@ impl AsyncComponent for Model {
         group.add_action(playpause_action);
         group.add_action(view_artist_action);
         group.add_action(view_album_action);
+        group.add_action(view_song_action);
         group.add_action(next_action);
         group.add_action(previous_action);
         group.register_for_widget(&root);
@@ -496,10 +508,10 @@ impl AsyncComponent for Model {
                 };
                 self.browse_connector.emit(BrowseMsg::Search(widgets.search_entry.text().into(), search_type));
             },
-            AppMsg::ViewAlbum(album) => {
-                widgets.nav_view.pop_to_tag("base");
+            AppMsg::ViewAlbum(album, highlight) => {
                 match self.album_cache.get_album(&album).await {
                     Ok(album) => {
+                        widgets.nav_view.pop_to_tag("base");
                         relm4::spawn_local(clone!(
                             #[strong]
                             sender,
@@ -516,11 +528,23 @@ impl AsyncComponent for Model {
                                 }
                             }
                         ));
-                        self.browse_connector.emit(BrowseMsg::ViewAlbum(album));
+                        self.browse_connector.emit(BrowseMsg::ViewAlbum(album, highlight));
                     },
                     Err(err) => self.mpris_player.imp().send_error(err),
                 };
             },
+            AppMsg::ViewSong(song) => {
+                match self.song_cache.get_song(&song).await {
+                    Ok(song) => {
+                        if let Some(album_id) = &song.album_id {
+                            sender.input(AppMsg::ViewAlbum(album_id.clone(), song.track.and_then(|v| Some(v as u32 - 1))));
+                        } else {
+                            self.mpris_player.imp().send_error("Song has no album_id".into());
+                        }
+                    }
+                    Err(err) => self.mpris_player.imp().send_error(err),
+                }
+            }
             AppMsg::ShowRandomSongsDialog => {
                 self.random_songs_dialog.widget().present(Some(root));
             },

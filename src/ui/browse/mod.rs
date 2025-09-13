@@ -35,7 +35,7 @@ pub struct BrowseWidget {
 
 #[derive(Debug)]
 pub enum BrowseMsg {
-    ViewAlbum(AlbumObject),
+    ViewAlbum(AlbumObject, Option<u32>),
     ViewArtist(ArtistObject),
     Search(String, SearchType)
 }
@@ -100,9 +100,9 @@ impl AsyncComponent for BrowseWidget {
         _root: &Self::Root,
     ) {
         match message {
-            BrowseMsg::ViewAlbum(album) => {
+            BrowseMsg::ViewAlbum(album, highlight) => {
                 let view_album_page = ViewAlbumWidget::builder()
-                    .launch((album, self.mpris_player.clone(), self.cover_cache.clone(), self.album_cache.clone(), self.artist_cache.clone()));
+                    .launch((album, self.mpris_player.clone(), self.cover_cache.clone(), self.album_cache.clone(), self.artist_cache.clone(), highlight));
                 widgets.navigation_view.push(view_album_page.widget());
             },
             BrowseMsg::ViewArtist(artist) => {

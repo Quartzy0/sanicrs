@@ -22,6 +22,7 @@ type ViewAlbumInit = (
     CoverCache,
     AlbumCache,
     ArtistCache,
+    Option<u32>
 );
 
 #[relm4::component(pub async)]
@@ -183,6 +184,7 @@ impl AsyncComponent for ViewAlbumWidget {
                         .into_iter()
                         .map(|x| SongObject::new((Uuid::from_u128(0), x.clone()).into(), PositionState::Passed))
                 },
+                highlight: init.5
             });
 
         let widgets: Self::Widgets = view_output!();
