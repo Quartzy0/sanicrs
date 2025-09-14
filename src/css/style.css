@@ -92,6 +92,10 @@
     -gtk-icon-size: 2em;
 }
 
+.paddedx {
+    padding: 20px;
+}
+
 .padded {
     padding: 10px;
 }

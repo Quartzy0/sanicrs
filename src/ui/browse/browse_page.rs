@@ -29,6 +29,7 @@ pub struct BrowsePageWidget {
     cover_cache: CoverCache,
     randoms_ids: Vec<String>,
     super_cache: SuperCache,
+    carousel_pos: u32,
 
     album_factory: SignalListItemFactory,
 }
@@ -38,7 +39,8 @@ pub enum BrowsePageMsg {
     ScrollNewest(i32),
     ScrollHighest(i32),
     ScrollExplore(i32),
-    SetColors(u32)
+    ScrollCarousel(i32),
+    ScrolledCarousel(u32)
 }
 
 #[derive(Debug)]
@@ -69,11 +71,15 @@ impl AsyncComponent for BrowsePageWidget {
                     set_orientation: Orientation::Vertical,
                     add_css_class: "padded",
 
+                    /*#[name = "carousel"]
+                    gtk::Stack {
+
+                    },*/
                     #[name = "carousel"]
                     adw::Carousel {
                         set_allow_scroll_wheel: false,
                         connect_page_changed[sender] => move |_, index: u32| {
-                            sender.input(BrowsePageMsg::SetColors(index));
+                            sender.input(BrowsePageMsg::ScrolledCarousel(index));
                         }
                     },
 
@@ -244,6 +250,7 @@ impl AsyncComponent for BrowsePageWidget {
             cover_cache: init.0,
             randoms_ids: vec![],
             super_cache: init.8,
+            carousel_pos: 0,
         };
 
 
@@ -278,7 +285,7 @@ impl AsyncComponent for BrowsePageWidget {
                             cover_cache: cover_cache.clone(),
                             play_fn: Some(Box::new(move |song: SongObject, _i, mpris_player| {
                                 relm4::spawn_local(async move {
-                                    mpris_player.imp().send_res(mpris_player.imp().queue_songs(vec![song.get_entry().unwrap()], None, true).await);
+                                    mpris_player.imp().send_res(mpris_player.imp().set_song(song.get_entry().unwrap()).await);
                                 });
                             })),
                             click_fn: Some(Box::new(move |song: SongObject, _i, _mpris_player| {
@@ -498,24 +505,21 @@ impl AsyncComponent for BrowsePageWidget {
         match random {
             Ok(random) => {
                 model.randoms_ids = random.iter().map(|a| a.id().clone()).collect();
-                sender.input(BrowsePageMsg::SetColors(0));
+                sender.input(BrowsePageMsg::ScrolledCarousel(0));
+                let breakpoint = init.9;
                 for album in random {
-                    let cbox = gtk::CenterBox::builder().orientation(Orientation::Horizontal).build();
+                    let cbox = gtk::Box::new(Orientation::Horizontal, 10);
                     cbox.add_css_class("card");
                     cbox.add_css_class("padded");
                     cbox.set_halign(Align::Fill);
                     cbox.set_hexpand(true);
                     cbox.set_hexpand_set(true);
-                    let hbox = gtk::Box::new(Orientation::Horizontal, 20);
-                    hbox.set_halign(Align::Start);
-                    hbox.set_valign(Align::Center);
                     let cover_picture = CoverPicture::new(model.cover_cache.clone(), CoverSize::Large);
                     cover_picture.set_cover_id(album.cover_art_id());
                     cover_picture.add_css_class("shadowed");
                     cover_picture.set_halign(Align::Start);
                     cover_picture.set_valign(Align::Start);
-                    hbox.append(&cover_picture);
-                    cbox.set_start_widget(Some(&hbox));
+                    cbox.append(&cover_picture);
                     let text_vbox = gtk::Box::new(Orientation::Vertical, 10);
                     text_vbox.set_valign(Align::Center);
                     let title = gtk::Label::new(Some(album.name().as_str()));
@@ -523,6 +527,8 @@ impl AsyncComponent for BrowsePageWidget {
                     title.add_css_class("bold");
                     title.set_halign(Align::Start);
                     title.set_justify(Justification::Left);
+                    title.set_max_width_chars(30);
+                    title.set_ellipsize(EllipsizeMode::End);
                     let artists = gtk::Label::builder()
                         .use_markup(true)
                         .label(album.artist())
@@ -530,22 +536,23 @@ impl AsyncComponent for BrowsePageWidget {
                     artists.set_halign(Align::Start);
                     artists.set_justify(Justification::Left);
                     artists.add_css_class("t1");
+                    artists.set_ellipsize(EllipsizeMode::End);
                     artists.connect_activate_link(move |this, url| {
                         this.activate_action("win.artist", Some(&url.to_variant())).expect("Error executing action");
                         glib::Propagation::Stop
                     });
                     text_vbox.append(&title);
                     text_vbox.append(&artists);
-                    hbox.append(&text_vbox);
+                    cbox.append(&text_vbox);
 
                     let gesture = gtk::GestureClick::new();
                     gesture.connect_released(clone!(
                         #[weak]
-                        hbox,
+                        cbox,
                         #[strong(rename_to = id)]
                         album.id(),
                         move |_, _, _, _| {
-                            hbox.activate_action("win.album", Some(&id.to_variant())).expect("Error executing action");
+                            cbox.activate_action("win.album", Some(&id.to_variant())).expect("Error executing action");
                         }
                     ));
                     cbox.add_controller(gesture);
@@ -553,6 +560,8 @@ impl AsyncComponent for BrowsePageWidget {
                     let vbox = gtk::CenterBox::builder().orientation(Orientation::Vertical).build();
                     vbox.set_valign(Align::Fill);
                     vbox.set_halign(Align::End);
+                    vbox.set_hexpand(true);
+                    vbox.set_hexpand_set(true);
                     let song_count_str = format!("Song count: {}", album.song_count());
                     let song_count = gtk::Label::new(Some(song_count_str.as_str()));
                     song_count.add_css_class("t2");
@@ -592,19 +601,17 @@ impl AsyncComponent for BrowsePageWidget {
                     next_btn.add_css_class("pill");
                     prev_btn.add_css_class("pill");
                     next_btn.connect_clicked(clone!(
-                        #[weak(rename_to = carousel)]
-                        widgets.carousel,
+                        #[strong]
+                        sender,
                         move |_| {
-                            let page = carousel.nth_page(min((carousel.position() + 1.0) as u32, carousel.n_pages()-1));
-                            carousel.scroll_to(&page, true);
+                            sender.input(BrowsePageMsg::ScrollCarousel(1));
                         }
                     ));
                     prev_btn.connect_clicked(clone!(
-                        #[weak(rename_to = carousel)]
-                        widgets.carousel,
+                        #[strong]
+                        sender,
                         move |_| {
-                            let page = carousel.nth_page(max((carousel.position() - 1.0) as i32, 0) as u32);
-                            carousel.scroll_to(&page, true);
+                            sender.input(BrowsePageMsg::ScrollCarousel(-1));
                         }
                     ));
                     btns_hbox.append(&prev_btn);
@@ -613,9 +620,17 @@ impl AsyncComponent for BrowsePageWidget {
                     vbox.set_center_widget(Some(&play_btn));
                     vbox.set_start_widget(Some(&song_count));
                     vbox.set_end_widget(Some(&btns_hbox));
-                    cbox.set_end_widget(Some(&vbox));
+                    cbox.append(&vbox);
 
                     widgets.carousel.append(&cbox);
+
+                    breakpoint.add_setter(&cbox, "orientation", Some(&Orientation::Vertical.to_value()));
+                    breakpoint.add_setter(&cbox, "halign", Some(&Align::Center.to_value()));
+                    breakpoint.add_setter(&cbox, "css-classes", Some(&["vertical", "card", "paddedx"].to_value()));
+                    breakpoint.add_setter(&vbox, "halign", Some(&Align::Start.to_value()));
+                    breakpoint.add_setter(&btns_hbox, "halign", Some(&Align::Start.to_value()));
+                    breakpoint.add_setter(&song_count, "visible", Some(&false.to_value()));
+                    breakpoint.add_setter(&play_btn, "visible", Some(&false.to_value()));
                 }
             }
             Err(err) => model.mpris_player.imp().send_error(err),
@@ -677,6 +692,10 @@ impl AsyncComponent for BrowsePageWidget {
         _root: &Self::Root,
     ) {
         match message {
+            BrowsePageMsg::ScrollCarousel(s) => {
+                self.carousel_pos = min(max(self.carousel_pos as i32 + s, 0) as u32, widgets.carousel.n_pages() - 1);
+                widgets.carousel.scroll_to(&widgets.carousel.nth_page(self.carousel_pos), true);
+            }
             BrowsePageMsg::ScrollNewest(s) => {
                 widgets
                     .newest_list
@@ -698,7 +717,8 @@ impl AsyncComponent for BrowsePageWidget {
                     .hadjustment()
                     .set_value(widgets.explore_list.scroll.hadjustment().value() + s as f64);
             },
-            BrowsePageMsg::SetColors(i) => {
+            BrowsePageMsg::ScrolledCarousel(i) => {
+                self.carousel_pos = i;
                 if let Some(id) = self.randoms_ids.get(i as usize) {
                     let colors = self.cover_cache.get_palette(id).await;
                     if let Err(err) = colors {

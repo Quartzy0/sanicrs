@@ -18,6 +18,14 @@ standard.
 
 Tested on: [Navidrome](https://github.com/navidrome/navidrome/), [Gonic](https://github.com/sentriz/gonic).
 
+### Installing
+
+Download the latest build from the [GitHub CI](https://github.com/Quartzy0/sanicrs/actions).
+Then install it using the following command:
+```shell
+flatpak install sanicrs.flatpak
+```
+
 ### Building
 
 Build a flatpak:

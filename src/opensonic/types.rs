@@ -7,6 +7,7 @@ use std::error::Error;
 use std::fmt;
 use std::fmt::Debug;
 use std::time::Duration;
+use relm4::adw::glib;
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum AlbumListType {
@@ -297,7 +298,8 @@ impl Song {
             Some(artists) => {
                 artists
                     .iter()
-                    .map(|a| format!("<a href=\"{}\" title=\"View artist\" class=\"normal-link\">{}</a>", a.id, a.name))
+                    .map(|a| format!("<a href=\"{}\" title=\"View artist\" class=\"normal-link\">{}</a>", a.id,
+                                     glib::markup_escape_text(a.name.as_str())))
                     .collect::<Vec<String>>()
                     .join("•")
             }
@@ -316,7 +318,8 @@ impl Album {
             Some(artists) => {
                 artists
                     .iter()
-                    .map(|a| format!("<a href=\"{}\" title=\"View artist\" class=\"normal-link\">{}</a>", a.id, a.name))
+                    .map(|a| format!("<a href=\"{}\" title=\"View artist\" class=\"normal-link\">{}</a>", a.id,
+                                     glib::markup_escape_text(a.name.as_str())))
                     .collect::<Vec<String>>()
                     .join("•")
             }

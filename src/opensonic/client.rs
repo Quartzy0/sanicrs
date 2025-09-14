@@ -364,6 +364,12 @@ impl OpenSubsonicClient {
         let response = self
             .get_action_request("getCoverArt", params, None, None)
             .await?;
+        if !response.status().is_success() {
+            return Err(InvalidResponseError::new_boxed(format!("Response status code: {}", response.status()).as_str()));
+        }
+        if !response.headers().contains_key("Content-Type") {
+            return Err(InvalidResponseError::new_boxed("No 'Content-Type' header in response."));
+        }
         if response.headers()["Content-Type"] == "text/xml" {
             return Err(InvalidResponseError::new_boxed(
                 response.text().await?.as_str(),

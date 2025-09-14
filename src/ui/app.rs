@@ -13,7 +13,7 @@ use libsecret::Schema;
 use mpris_server::{LocalPlayerInterface, LocalServer};
 use relm4::abstractions::Toaster;
 use relm4::actions::{AccelsPlus, RelmAction, RelmActionGroup};
-use relm4::adw::glib as glib;
+use relm4::adw::{glib as glib, Breakpoint, BreakpointConditionLengthType, LengthUnit};
 use relm4::adw::glib::{clone};
 use relm4::adw::gtk::CssProvider;
 use relm4::adw::prelude::*;
@@ -85,7 +85,8 @@ pub type Init = (
     LyricsCache,
     Rc<LocalServer<MprisPlayer>>,
     ArtistCache,
-    SuperCache
+    SuperCache,
+    Breakpoint
 );
 
 pub type StartInit = (
@@ -100,14 +101,16 @@ pub type StartInit = (
     SuperCache,
 );
 
-fn into_init(value: &StartInit, server: Rc<LocalServer<MprisPlayer>>) -> Init {
+fn into_init(value: &StartInit, server: Rc<LocalServer<MprisPlayer>>, breakpoint: Breakpoint) -> Init {
     let value = value.clone();
-    (value.0, value.1, value.2, value.3, value.4, value.5, server, value.7, value.8).into()
+    (value.0, value.1, value.2, value.3, value.4, value.5, server, value.7, value.8, breakpoint).into()
 }
 
 relm4::new_action_group!(pub WindowActionGroup, "win");
 relm4::new_stateless_action!(PreferencesAction, WindowActionGroup, "preferences");
 relm4::new_stateless_action!(QuitAction, WindowActionGroup, "quit");
+relm4::new_stateless_action!(pub ShowTracklistAction, WindowActionGroup, "tracklist");
+relm4::new_stateless_action!(pub ShowRandomSongsAction, WindowActionGroup, "randoms");
 relm4::new_stateless_action!(pub PlayPauseAction, WindowActionGroup, "playpause");
 relm4::new_stateless_action!(pub NextAction, WindowActionGroup, "next");
 relm4::new_stateless_action!(pub PreviousAction, WindowActionGroup, "previous");
@@ -223,27 +226,27 @@ impl AsyncComponent for Model {
         server.imp().app_sender.replace(Some(sender.clone()));
 
 
+        let breakpoint = adw::Breakpoint::new(
+            adw::BreakpointCondition::new_length(BreakpointConditionLengthType::MaxWidth, 650.0, LengthUnit::Px)
+        );
         let current_song =
             CurrentSong::builder()
-                .launch(into_init(&init, server.clone()))
+                .launch(into_init(&init, server.clone(), breakpoint.clone()))
                 .forward(sender.input_sender(), |msg| match msg {
                     CurrentSongOut::ColorSchemeChange(colors) => AppMsg::CurrentColorschemeChange(colors),
-                    CurrentSongOut::ToggleSidebar => AppMsg::ToggleSidebar,
-                    CurrentSongOut::ShowRandomSongsDialog => AppMsg::ShowRandomSongsDialog,
                 });
-        let track_list_connector = TrackListWidget::builder().launch(into_init(&init, server.clone()));
+        let track_list_connector = TrackListWidget::builder().launch(into_init(&init, server.clone(), breakpoint.clone()));
         let browse_connector = BrowseWidget::builder()
-            .launch(into_init(&init, server.clone()))
+            .launch(into_init(&init, server.clone(), breakpoint.clone()))
             .forward(sender.input_sender(), |msg| match msg {
                 BrowseMsgOut::PopView => AppMsg::PopViewColors,
                 BrowseMsgOut::ClearView => AppMsg::ClearViewColors,
                 BrowseMsgOut::SetColors(c) => AppMsg::SetViewColors(c),
             });
         let bottom_bar_connector= BottomBar::builder()
-            .launch(into_init(&init, server.clone()))
+            .launch(into_init(&init, server.clone(), breakpoint.clone()))
             .forward(sender.input_sender(), |msg| match msg {
                 BottomBarOut::ShowSong => AppMsg::ShowSong,
-                BottomBarOut::ShowRandomSongsDialog => AppMsg::ShowRandomSongsDialog,
             });
         let random_songs_dialog = RandomSongsDialog::builder().launch((server.clone(), init.3.clone()));
         let preferences_view: LazyCell<AsyncController<PreferencesWidget>, Box<dyn FnOnce() -> AsyncController<PreferencesWidget>>>
@@ -316,6 +319,20 @@ impl AsyncComponent for Model {
                 sender.input(AppMsg::Quit);
             }
         ));
+        let show_tracklist_action: RelmAction<ShowTracklistAction> = RelmAction::new_stateless(clone!(
+            #[strong]
+            sender,
+            move |_| {
+                sender.input(AppMsg::ToggleSidebar);
+            }
+        ));
+        let show_randoms_action: RelmAction<ShowRandomSongsAction> = RelmAction::new_stateless(clone!(
+            #[strong]
+            sender,
+            move |_| {
+                sender.input(AppMsg::ShowRandomSongsDialog);
+            }
+        ));
         let playpause_action: RelmAction<PlayPauseAction> = RelmAction::new_stateless(clone!(
             #[strong]
             sender,
@@ -363,6 +380,8 @@ impl AsyncComponent for Model {
         let mut group = RelmActionGroup::<WindowActionGroup>::new();
         group.add_action(action);
         group.add_action(quit_action);
+        group.add_action(show_tracklist_action);
+        group.add_action(show_randoms_action);
         group.add_action(playpause_action);
         group.add_action(view_artist_action);
         group.add_action(view_album_action);
@@ -373,6 +392,7 @@ impl AsyncComponent for Model {
 
         widgets.search_bar.connect_entry(&widgets.search_entry);
         widgets.search_bar.set_key_capture_widget(Some(&root));
+        root.add_breakpoint(breakpoint);
 
         AsyncComponentParts { model, widgets }
     }

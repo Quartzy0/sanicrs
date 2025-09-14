@@ -10,6 +10,7 @@ use relm4::adw::gtk::{Align, Orientation};
 use relm4::adw::prelude::*;
 use relm4::prelude::*;
 use std::rc::Rc;
+use relm4::gtk::pango::WrapMode;
 use uuid::Uuid;
 use crate::ui::item_list::{ItemListInit, ItemListWidget};
 
@@ -77,6 +78,8 @@ impl AsyncComponent for ViewAlbumWidget {
                                         add_css_class: "bold",
                                         add_css_class: "t0",
                                         set_halign: Align::Start,
+                                        set_wrap: true,
+                                        set_wrap_mode: WrapMode::WordChar,
                                     },
                                     gtk::Label {
                                         set_markup: album.artist().as_str(),
@@ -86,6 +89,8 @@ impl AsyncComponent for ViewAlbumWidget {
                                             this.activate_action("win.artist", Some(&url.to_variant())).expect("Error executing action");
                                             glib::Propagation::Stop
                                         },
+                                        set_wrap: true,
+                                        set_wrap_mode: WrapMode::WordChar,
                                     },
                                     gtk::Label {
                                         set_label: format!("{} songs", album.song_count()).as_str(),

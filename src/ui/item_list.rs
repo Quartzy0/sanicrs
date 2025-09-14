@@ -9,6 +9,7 @@ use relm4::gtk::{Align, ListItem, Orientation, SignalListItemFactory, Widget};
 use relm4::adw::glib as glib;
 use relm4::{gtk, AsyncComponentSender};
 use relm4::component::{AsyncComponent, AsyncComponentParts};
+use relm4::gtk::pango::EllipsizeMode;
 use crate::dbus::player::MprisPlayer;
 use crate::icon_names;
 use crate::opensonic::cache::CoverCache;
@@ -112,6 +113,7 @@ impl<T: IsA<Object> + ObjectType, I: IntoIterator<Item = T> + 'static, F: 'stati
                 let picture = CoverPicture::new(cover_cache.clone(), CoverSize::Small);
                 picture.set_cover_type(cover_type);
                 let title = gtk::Label::new(None);
+                title.set_ellipsize(EllipsizeMode::End);
                 hbox.set_start_widget(Some(&start_hbox));
                 hbox.set_end_widget(Some(&end_hbox));
 

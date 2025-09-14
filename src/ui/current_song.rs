@@ -2,7 +2,7 @@ use crate::dbus::player::MprisPlayer;
 use crate::opensonic::cache::{LyricsCache, SongCache};
 use crate::opensonic::types::Song;
 use crate::player::SongEntry;
-use crate::ui::app::{Init, NextAction, PlayPauseAction, PreviousAction};
+use crate::ui::app::{Init, NextAction, PlayPauseAction, PreviousAction, ShowRandomSongsAction, ShowTracklistAction};
 use crate::ui::cover_picture::{CoverPicture, CoverSize};
 use crate::ui::lyrics_line::{self, LyricsLine};
 use crate::ui::song_object::PositionState;
@@ -57,8 +57,6 @@ pub enum CurrentSongMsg {
 #[derive(Debug)]
 pub enum CurrentSongOut {
     ColorSchemeChange(Option<Vec<Color>>),
-    ToggleSidebar,
-    ShowRandomSongsDialog,
 }
 
 #[relm4::component(pub async)]
@@ -248,17 +246,12 @@ impl AsyncComponent for CurrentSong {
                         gtk::Button {
                             set_icon_name: icon_names::LIST,
                             set_tooltip_text: Some("Show queue"),
-                            connect_clicked[sender] => move |_| {
-                                sender.output(CurrentSongOut::ToggleSidebar)
-                                    .expect("Error when sending message out of CurrentSong component");
-                            },
+                            ActionablePlus::set_stateless_action::<ShowTracklistAction>: &(),
                         },
                         gtk::Button {
                             set_icon_name: icon_names::ADD_REGULAR,
                             set_tooltip_text: Some("Add random songs"),
-                            connect_clicked[sender] => move |_| {
-                                sender.output(CurrentSongOut::ShowRandomSongsDialog).expect("Error sending message out");
-                            },
+                            ActionablePlus::set_stateless_action::<ShowRandomSongsAction>: &(),
                         }
                     },
 

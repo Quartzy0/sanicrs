@@ -9,6 +9,7 @@ use relm4::prelude::*;
 use std::rc::Rc;
 use relm4::adw::glib::{clone, closure, Object};
 use relm4::adw::glib as glib;
+use relm4::gtk::pango::WrapMode;
 use relm4::gtk::Widget;
 use crate::icon_names;
 use crate::ui::album_object::AlbumObject;
@@ -76,6 +77,8 @@ impl AsyncComponent for ViewArtistWidget {
                                         add_css_class: "bold",
                                         add_css_class: "t0",
                                         set_halign: Align::Start,
+                                        set_wrap: true,
+                                        set_wrap_mode: WrapMode::WordChar,
                                     },
                                     gtk::Label {
                                         set_label: artist.album_count().and_then(|c| Some(format!("{} albums", c))).unwrap_or("".to_string()).as_str(),
