@@ -108,6 +108,7 @@ mod imp {
                     ParamSpecString::builder("cover-art-id").build(),
                     ParamSpecString::builder("duration").build(),
                     ParamSpecEnum::builder::<PositionState>("position-state").build(),
+                    ParamSpecString::builder("filetype").build(),
                 ]
             });
             PROPERTIES.as_ref()
@@ -159,6 +160,13 @@ mod imp {
                             None::<String>.to_value()
                         }
                     },
+                    "filetype" => self.song.borrow().as_ref().and_then(|s| {
+                        if let Some(suf) = &s.1.suffix && let Some(bitrate) = s.1.bit_rate {
+                            Some(format!("{}/{}", suf, bitrate).to_uppercase())
+                        } else {
+                            None
+                        }
+                    }).to_value(),
                     _ => unimplemented!(),
                 }
             } else {
@@ -170,6 +178,7 @@ mod imp {
                     "album" => None::<String>.to_value(),
                     "cover-art-id" => None::<String>.to_value(),
                     "position-state" => self.position_state.get().to_value(),
+                    "filetype" => None::<String>.to_value(),
                     _ => unimplemented!(),
                 }
             }

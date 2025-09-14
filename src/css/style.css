@@ -96,6 +96,10 @@
     padding: 10px;
 }
 
+.paddeds {
+    padding: 6px;
+}
+
 .lyric-line {
     font-size: larger;
     margin: 10px;
@@ -107,6 +111,10 @@
 
 .spaced {
     margin: 10px;
+}
+
+.rounded {
+    border-radius: 4px;
 }
 
 /* This class taken from Amberol (looks very nice) */

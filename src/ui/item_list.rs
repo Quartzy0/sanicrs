@@ -79,6 +79,11 @@ impl<T: IsA<Object> + ObjectType, I: IntoIterator<Item = T> + 'static, F: 'stati
 
         let widgets: Self::Widgets = view_output!();
 
+        let mut iter = load_items.await.into_iter().peekable();
+        let first = iter.peek();
+        let has_duration = first.and_then(|f| Some(f.has_property("duration", Some(String::static_type())))).unwrap_or(false);
+        let has_filetype = first.and_then(|f| Some(f.has_property("filetype", Some(String::static_type())))).unwrap_or(false);
+
         factory.connect_setup(clone!(
             #[strong(rename_to = cover_cache)]
             cover_cache,
@@ -107,8 +112,6 @@ impl<T: IsA<Object> + ObjectType, I: IntoIterator<Item = T> + 'static, F: 'stati
                 let picture = CoverPicture::new(cover_cache.clone(), CoverSize::Small);
                 picture.set_cover_type(cover_type);
                 let title = gtk::Label::new(None);
-                let duration = gtk::Label::new(None);
-                end_hbox.append(&duration);
                 hbox.set_start_widget(Some(&start_hbox));
                 hbox.set_end_widget(Some(&end_hbox));
 
@@ -157,6 +160,32 @@ impl<T: IsA<Object> + ObjectType, I: IntoIterator<Item = T> + 'static, F: 'stati
                     hbox.add_controller(gesture);
                 }
 
+                if has_duration {
+                    let duration = gtk::Label::new(None);
+                    end_hbox.append(&duration);
+                    list_item
+                        .property_expression("item")
+                        .chain_property::<T>("duration")
+                        .bind(&duration, "label", Widget::NONE);
+                }
+                if has_filetype {
+                    let center_hbox = gtk::Box::new(Orientation::Horizontal, 10);
+                    let filetype = gtk::Label::new(None);
+                    filetype.set_halign(Align::Center);
+                    filetype.set_valign(Align::Center);
+                    filetype.add_css_class("frame");
+                    filetype.add_css_class("numeric");
+                    filetype.add_css_class("caption");
+                    filetype.add_css_class("rounded");
+                    filetype.add_css_class("paddeds");
+                    center_hbox.append(&filetype);
+                    hbox.set_center_widget(Some(&center_hbox));
+
+                    list_item
+                        .property_expression("item")
+                        .chain_property::<T>("filetype")
+                        .bind(&filetype, "label", Widget::NONE);
+                }
 
                 if let Some(highlight) = highlight {
                     list_item
@@ -180,25 +209,10 @@ impl<T: IsA<Object> + ObjectType, I: IntoIterator<Item = T> + 'static, F: 'stati
                     .property_expression("item")
                     .chain_property::<T>("cover-art-id")
                     .bind(&picture, "cover-id", Widget::NONE);
-
-                list_item
-                    .property_expression("item")
-                    .chain_closure::<String>(closure!(|_: Option<Object>, item: Option<Object>| 
-                        match item {
-                            None => "".to_string(),
-                            Some(item) => {
-                                if item.has_property("duration", Some(String::static_type())) {
-                                    item.property("duration")
-                                } else {
-                                    "".to_string()
-                                }
-                            }
-                        }
-                )).bind(&duration, "label", Widget::NONE);
             }
         ));
 
-        let list_store = ListStore::from_iter(load_items.await);
+        let list_store = ListStore::from_iter(iter);
         root.set_model(Some(&gtk::NoSelection::new(Some(list_store))));
 
         let model = Self { phantom_t: Default::default(), phantom_i: Default::default(), phantom_f: Default::default() };
