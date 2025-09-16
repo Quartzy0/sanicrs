@@ -187,7 +187,7 @@ impl AsyncComponent for Model {
                                                 },
                                                 #[name = "search_entry"]
                                                 gtk::SearchEntry {
-                                                    connect_activate => AppMsg::Search
+                                                    connect_activate => AppMsg::Search,
                                                 }
                                             }
                                         }
@@ -393,6 +393,15 @@ impl AsyncComponent for Model {
         widgets.search_bar.connect_entry(&widgets.search_entry);
         widgets.search_bar.set_key_capture_widget(Some(&root));
         root.add_breakpoint(breakpoint);
+
+        let focus_controller = gtk::EventControllerFocus::new();
+        focus_controller.connect_enter(move |_| {
+            relm4::main_application().set_accelerators_for_action::<PlayPauseAction>(&[]);
+        });
+        focus_controller.connect_leave(move |_| {
+            relm4::main_application().set_accelerators_for_action::<PlayPauseAction>(&["space"]);
+        });
+        widgets.search_entry.add_controller(focus_controller);
 
         AsyncComponentParts { model, widgets }
     }
