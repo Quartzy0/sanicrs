@@ -5,11 +5,12 @@ use libsecret::password_store_future;
 use libsecret::Schema;
 use relm4::gtk::gio::Settings;
 use relm4::gtk::glib::Variant;
-use relm4::gtk::Orientation;
+use relm4::gtk::{Align, IconSize, Orientation};
 use relm4::prelude::*;
 use relm4::adw;
 use relm4::adw::gtk::prelude::*;
-
+use relm4::adw::LengthUnit;
+use crate::APP_ID;
 use crate::opensonic::client;
 use crate::opensonic::client::OpenSubsonicClient;
 
@@ -37,52 +38,70 @@ impl AsyncComponent for SetupWidget {
 
     view! {
         adw::ApplicationWindow {
-            set_title: Some("Sanic-rs - Setup"),
+            set_title: Some("SanicRs - Setup"),
             set_default_width: 400,
             set_default_height: 400,
 
-            gtk::Box {
-                set_orientation: Orientation::Vertical,
+            adw::Clamp {
+                set_orientation: Orientation::Horizontal,
+                set_maximum_size: 600,
+                set_tightening_threshold: 400,
+                set_unit: LengthUnit::Px,
 
-                gtk::Label {
-                    set_label: "Server URL",
-                    add_css_class: "bold"
-                },
-                #[name = "server_url"]
-                gtk::Entry {
-                    set_placeholder_text: Some("http://music.example.com")
-                },
-                gtk::Label {
-                    set_label: "Username",
-                    add_css_class: "bold"
-                },
-                #[name = "username"]
-                gtk::Entry {
-                    set_placeholder_text: Some("user")
-                },
-                gtk::Label {
-                    set_label: "Password",
-                    add_css_class: "bold"
-                },
-                #[name = "password"]
-                gtk::PasswordEntry {
-                    set_placeholder_text: Some("password")
-                },
                 gtk::Box {
-                    set_orientation: Orientation::Horizontal,
+                    set_orientation: Orientation::Vertical,
+                    set_valign: Align::Center,
+                    set_halign: Align::Fill,
+                    set_spacing: 10,
 
-                    gtk::Button {
-                        set_label: "Test",
-                        connect_clicked => SetupMsg::Test
+                    gtk::Image {
+                        set_icon_name: Some(APP_ID),
+                        set_icon_size: IconSize::Large,
                     },
-                    gtk::Button {
-                        set_label: "Save",
-                        connect_clicked => SetupMsg::Save
+                    gtk::Label {
+                        set_label: "Server URL",
+                        add_css_class: "bold"
+                    },
+                    #[name = "server_url"]
+                    gtk::Entry {
+                        set_placeholder_text: Some("https://music.example.com")
+                    },
+                    gtk::Label {
+                        set_label: "Username",
+                        add_css_class: "bold"
+                    },
+                    #[name = "username"]
+                    gtk::Entry {
+                        set_placeholder_text: Some("Username")
+                    },
+                    gtk::Label {
+                        set_label: "Password",
+                        add_css_class: "bold"
+                    },
+                    #[name = "password"]
+                    gtk::PasswordEntry {
+                        set_placeholder_text: Some("Password")
+                    },
+                    gtk::Box {
+                        set_orientation: Orientation::Horizontal,
+                        set_valign: Align::Center,
+                        set_halign: Align::Start,
+                        set_spacing: 15,
+
+                        gtk::Button {
+                            set_label: "Test",
+                            connect_clicked => SetupMsg::Test
+                        },
+                        gtk::Button {
+                            set_label: "Save",
+                            connect_clicked => SetupMsg::Save
+                        }
+                    },
+                    #[name = "status"]
+                    gtk::Label {
+                        add_css_class: "title-4",
+                        set_label: ""
                     }
-                },
-                #[name = "status"]
-                gtk::Label {
-                    set_label: ""
                 }
             }
         }
