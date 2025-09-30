@@ -495,8 +495,9 @@ impl AsyncComponent for Model {
                 }
             },
             AppMsg::ShowError(summary, description) => {
+                let str = format!("Error occurred: {}", summary);
                 let toast = adw::Toast::builder()
-                    .title(format!("Error occurred: {}", summary))
+                    .title(glib::markup_escape_text(&str))
                     .button_label("Details")
                     .timeout(8)
                     .build();

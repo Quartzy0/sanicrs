@@ -160,7 +160,7 @@ impl PlayerInfo {
             };
 
         let suffix = song.1.suffix.clone();
-        let media_type = song.1.media_type.clone();
+        let media_type = song.1.content_type.clone();
         let decoder = relm4::spawn_blocking(move ||{
             let mut decoder = Decoder::builder().with_data(reader).with_seekable(true);
             if let Some(len) = len {
