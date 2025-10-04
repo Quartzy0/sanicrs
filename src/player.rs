@@ -5,7 +5,7 @@ use crate::opensonic::types::{InvalidResponseError, Song};
 use crate::ui::track_list::MoveDirection;
 use crate::PlayerCommand;
 use async_channel::Sender;
-use mpris_server::{LoopStatus, PlaybackStatus, TrackId};
+use mpris_server::{LoopStatus, TrackId};
 use rand::prelude::SliceRandom;
 use rand::Rng;
 use relm4::gtk::gio::prelude::SettingsExt;
@@ -16,6 +16,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use gstreamer::glib::clone;
 use gstreamer::prelude::{Cast, ElementExt, ElementExtManual, GstBinExt, ObjectExt, PadExt};
+use gstreamer_play::PlayState;
 use uuid::Uuid;
 
 pub const MAX_PLAYBACK_RATE: f64 = 2.0;
@@ -70,7 +71,7 @@ pub struct PlayerInfo {
     gst_player: gstreamer_play::Play,
     rg_filter_bin: gstreamer::Element,
     rg_volume: gstreamer::Element,
-    playing: Cell<bool>,
+    play_state: Cell<PlayState>,
 
     settings: RefCell<PlayerSettings>,
 }
@@ -127,6 +128,11 @@ impl PlayerInfo {
                             }
                         }
                     }
+                    gstreamer_play::PlayMessage::StateChanged(state) => {
+                        if let Err(e) = cmd_channel.send_blocking(PlayerCommand::PlayStateUpdate(state.state())) {
+                            eprintln!("Failed to send PlayStateUpdate: {e}");
+                        }
+                    }
                     _ => {}
                 }
 
@@ -159,9 +165,13 @@ impl PlayerInfo {
             gst_player,
             rg_filter_bin: filter_bin.upcast(),
             rg_volume,
-            playing: Cell::new(false),
+            play_state: Cell::new(PlayState::Stopped),
             settings: RefCell::default()
         })
+    }
+
+    pub fn set_playstate(&self, new_state: PlayState) {
+        self.play_state.set(new_state);
     }
 
     pub fn load_rg_from_settings(&self) {
@@ -217,24 +227,32 @@ impl PlayerInfo {
     }
 
     pub async fn play(&self) {
-        if self.gst_player.uri().is_some() {
-            self.gst_player.play();
-            self.playing.set(true);
-        } else {
-            self.start_current().await.expect("Error playing");
+        match self.play_state.get() {
+            PlayState::Stopped => {
+                self.start_current().await.expect("Error playing");
+            }
+            PlayState::Paused => {
+                self.gst_player.play();
+            }
+            _ => {}
         }
     }
 
     pub fn pause(&self) {
         self.gst_player.pause();
-        self.playing.set(false);
     }
 
     pub async fn playpause(&self) {
-        if !self.playing.get() || self.gst_player.uri().is_none() {
-            self.play().await;
-        } else {
-            self.pause();
+        match self.play_state.get() {
+            PlayState::Stopped => {
+                self.start_current().await.expect("Error playing");
+            }
+            PlayState::Paused => {
+                self.gst_player.play();
+            }
+            _ => {
+                self.gst_player.pause();
+            }
         }
     }
 
@@ -248,7 +266,6 @@ impl PlayerInfo {
         println!("Playing: {}", song.1.title);
         self.gst_player.set_uri(Some(&self.client.stream_get_url(&song.1.id, None, None, None, None, Some(true), None)));
         self.gst_player.play();
-        self.playing.set(true);
 
         Ok(Some(song.clone()))
     }
@@ -300,29 +317,9 @@ impl PlayerInfo {
         Ok(())
     }
 
-    /*pub fn gain_from_track(&self, song: Option<&SongEntry>) -> f64 {
-        match self.settings.borrow().replay_gain_mode {
-            ReplayGainMode::None => 0.0,
-            ReplayGainMode::Track => match song {
-                Some(entry) => entry.1.replay_gain.as_ref().and_then(|x| x.track_gain).unwrap_or(0.0) as f64,
-                None => 0.0,
-            },
-            ReplayGainMode::Album => match song {
-                Some(entry) => entry.1.replay_gain.as_ref().and_then(|x| x.album_gain).unwrap_or(0.0) as f64,
-                None => 0.0,
-            },
-        }
-    }*/
-
-    /*pub fn gain(&self) -> f64 {
-        self.gain_from_track(self.track_list.borrow().current())
-    }*/
-
     fn set_set_volume(&self) {
         let v = self.settings.borrow().volume;
         self.gst_player.set_volume(v);
-        /*let mul = v * 10.0_f64.powf(self.gain()/20.0);
-        self.gst_player.set_volume(mul);*/
     }
 
     pub fn volume(&self) -> f64 {
@@ -337,16 +334,8 @@ impl PlayerInfo {
         self.gst_player.set_volume(volume);
     }
 
-    pub fn playback_status(&self) -> PlaybackStatus {
-        if self.gst_player.uri().is_none() {
-            PlaybackStatus::Stopped
-        } else {
-            if !self.playing.get() {
-                PlaybackStatus::Paused
-            } else {
-                PlaybackStatus::Playing
-            }
-        }
+    pub fn playback_status(&self) -> PlayState {
+        self.play_state.get()
     }
 
     pub fn rate(&self) -> f64 {

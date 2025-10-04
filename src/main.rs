@@ -22,6 +22,7 @@ use std::process::Command;
 use std::rc::Rc;
 use std::sync::{Arc, LazyLock};
 use std::io;
+use gstreamer_play::PlayState;
 use relm4::prelude::AsyncController;
 use tokio::runtime::Handle;
 use zbus::blocking;
@@ -46,6 +47,7 @@ pub enum PlayerCommand {
     Close,
     Error(String, String),
     PositionUpdate(f64),
+    PlayStateUpdate(PlayState)
 }
 
 fn do_setup(settings: &Settings, secret_schema: &Schema) -> OpenSubsonicClient {
@@ -286,6 +288,7 @@ async fn handle_command(
             PlayerCommand::TrackOver => server.imp().send_res_fdo(server.imp().next().await),
             PlayerCommand::Error(error, description) => server.imp().send_app_msg(AppMsg::ShowError(error, description)),
             PlayerCommand::PositionUpdate(pos) => server.imp().send_cs_msg(CurrentSongMsg::ProgressUpdateSync(pos)),
+            PlayerCommand::PlayStateUpdate(state) => server.imp().update_playstate(state).await,
         }
     }
 }

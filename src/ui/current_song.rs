@@ -9,7 +9,7 @@ use crate::ui::song_object::PositionState;
 use crate::icon_names;
 use color_thief::Color;
 use mpris_server::{LocalPlayerInterface};
-use mpris_server::{LocalServer, LoopStatus, PlaybackStatus};
+use mpris_server::{LocalServer, LoopStatus};
 use relm4::actions::ActionablePlus;
 use relm4::adw::gio::ListStore;
 use relm4::adw::glib as glib;
@@ -24,6 +24,7 @@ use relm4::gtk::{Justification, ListItem, ListScrollFlags, SignalListItemFactory
 use relm4::prelude::*;
 use std::rc::Rc;
 use std::time::Duration;
+use gstreamer_play::PlayState;
 use uuid::Uuid;
 
 pub struct CurrentSong {
@@ -170,17 +171,22 @@ impl AsyncComponent for CurrentSong {
                         add_css_class: "track-action-btn",
                         ActionablePlus::set_stateless_action::<PreviousAction>: &(),
                     },
-                    #[name = "play_pause"]
-                    gtk::Button {
-                        #[watch]
-                        set_icon_name: match model.mpris_player.imp().info().playback_status() {
-                            PlaybackStatus::Paused => icon_names::PLAY,
-                            PlaybackStatus::Playing => icon_names::PAUSE,
-                            PlaybackStatus::Stopped => icon_names::STOP,
-                        },
-                        add_css_class: "track-action-btn",
-                        add_css_class: "track-playpause-btn",
-                        ActionablePlus::set_stateless_action::<PlayPauseAction>: &(),
+                    if !model.mpris_player.imp().is_buffering() {
+                        &gtk::Button {
+                            #[watch]
+                            set_icon_name: match model.mpris_player.imp().info().playback_status() {
+                                PlayState::Paused => icon_names::PLAY,
+                                PlayState::Playing => icon_names::PAUSE,
+                                _ => icon_names::STOP,
+                            },
+                            add_css_class: "track-action-btn",
+                            add_css_class: "track-playpause-btn",
+                            ActionablePlus::set_stateless_action::<PlayPauseAction>: &(),
+                        }
+                    } else {
+                        adw::Spinner {
+
+                        }
                     },
                     gtk::Button {
                         set_icon_name: icon_names::NEXT_REGULAR,

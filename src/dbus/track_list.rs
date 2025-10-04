@@ -32,8 +32,7 @@ impl MprisPlayer {
                     self.send_cs_msg(CurrentSongMsg::SongUpdate(song));
                     self.properties_changed([
                         Property::Metadata(self.current_song_metadata().await),
-                        Property::PlaybackStatus(self.player_ref.playback_status())
-                    ]);
+                    ]).await;
                 }
                 self.send_tl_msg(TrackListMsg::ReloadList);
             }
@@ -52,8 +51,7 @@ impl MprisPlayer {
         self.send_cs_msg(CurrentSongMsg::SongUpdate(song));
         self.properties_changed([
             Property::Metadata(self.current_song_metadata().await),
-            Property::PlaybackStatus(self.player_ref.playback_status())
-        ]);
+        ]).await;
         let guard = self.track_list().borrow();
         self.track_list_replaced(guard.get_songs(), guard.current_index()).await?;
         self.send_tl_msg(TrackListMsg::ReloadList);
@@ -83,8 +81,7 @@ impl MprisPlayer {
             self.send_cs_msg(CurrentSongMsg::SongUpdate(song));
             self.properties_changed([
                 Property::Metadata(self.current_song_metadata().await),
-                Property::PlaybackStatus(self.player_ref.playback_status())
-            ]);
+            ]).await;
         }
         let guard = self.track_list().borrow();
         self.track_list_replaced(guard.get_songs(), guard.current_index()).await?;
@@ -105,8 +102,7 @@ impl MprisPlayer {
             if index.is_some() {
                 self.properties_changed([
                     Property::Metadata(self.current_song_metadata().await),
-                    Property::PlaybackStatus(self.player_ref.playback_status())
-                ]);
+                ]).await;
             }
         }
         Ok(())
@@ -118,8 +114,7 @@ impl MprisPlayer {
         self.send_cs_msg(CurrentSongMsg::SongUpdate(song));
         self.properties_changed([
             Property::Metadata(self.current_song_metadata().await),
-            Property::PlaybackStatus(self.player_ref.playback_status())
-        ]);
+        ]).await;
         Ok(())
     }
 
@@ -132,7 +127,7 @@ impl MprisPlayer {
         self.send_cs_msg(CurrentSongMsg::SongUpdate(self.track_list().borrow().current().cloned()));
         self.properties_changed([
             Property::Metadata(self.current_song_metadata().await),
-        ]);
+        ]).await;
         Ok(())
     }
 

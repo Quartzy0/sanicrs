@@ -1,6 +1,7 @@
 use std::rc::Rc;
 use std::time::Duration;
-use mpris_server::{LocalPlayerInterface, LocalServer, PlaybackStatus};
+use gstreamer_play::PlayState;
+use mpris_server::{LocalPlayerInterface, LocalServer};
 use relm4::actions::ActionablePlus;
 use relm4::adw::glib::{clone, Propagation};
 use relm4::adw::gtk::prelude::*;
@@ -158,16 +159,22 @@ impl AsyncComponent for BottomBar {
                             add_css_class: "track-action-btn",
                             ActionablePlus::set_stateless_action::<PreviousAction>: &(),
                         },
-                        gtk::Button {
-                            #[watch]
-                            set_icon_name: match model.mpris_player.imp().info().playback_status() {
-                                PlaybackStatus::Paused => icon_names::PLAY,
-                                PlaybackStatus::Playing => icon_names::PAUSE,
-                                PlaybackStatus::Stopped => icon_names::STOP,
-                            },
-                            add_css_class: "track-action-btn",
-                            add_css_class: "track-playpause-btn",
-                            ActionablePlus::set_stateless_action::<PlayPauseAction>: &(),
+                        append = if !model.mpris_player.imp().is_buffering() {
+                            &gtk::Button {
+                                #[watch]
+                                set_icon_name: match model.mpris_player.imp().info().playback_status() {
+                                    PlayState::Paused => icon_names::PLAY,
+                                    PlayState::Playing => icon_names::PAUSE,
+                                    _ => icon_names::STOP,
+                                },
+                                add_css_class: "track-action-btn",
+                                add_css_class: "track-playpause-btn",
+                                ActionablePlus::set_stateless_action::<PlayPauseAction>: &(),
+                            }
+                        } else {
+                            adw::Spinner {
+
+                            }
                         },
                         gtk::Button {
                             set_icon_name: icon_names::NEXT_REGULAR,
@@ -276,18 +283,24 @@ impl AsyncComponent for BottomBar {
                             set_halign: Align::End,
                             set_spacing: 5,
 
-                            gtk::Button {
-                                #[watch]
-                                set_icon_name: match model.mpris_player.imp().info().playback_status() {
-                                    PlaybackStatus::Paused => icon_names::PLAY,
-                                    PlaybackStatus::Playing => icon_names::PAUSE,
-                                    PlaybackStatus::Stopped => icon_names::STOP,
-                                },
-                                add_css_class: "track-action-btn",
-                                add_css_class: "track-playpause-btn",
-                                set_valign: Align::Center,
-                                set_halign: Align::Center,
-                                ActionablePlus::set_stateless_action::<PlayPauseAction>: &(),
+                            if !model.mpris_player.imp().is_buffering() {
+                                &gtk::Button {
+                                    #[watch]
+                                    set_icon_name: match model.mpris_player.imp().info().playback_status() {
+                                        PlayState::Paused => icon_names::PLAY,
+                                        PlayState::Playing => icon_names::PAUSE,
+                                        _ => icon_names::STOP,
+                                    },
+                                    add_css_class: "track-action-btn",
+                                    add_css_class: "track-playpause-btn",
+                                    set_valign: Align::Center,
+                                    set_halign: Align::Center,
+                                    ActionablePlus::set_stateless_action::<PlayPauseAction>: &(),
+                                }
+                            } else {
+                                adw::Spinner {
+
+                                }
                             },
                             gtk::Button {
                                 set_icon_name: icon_names::NEXT_REGULAR,
@@ -398,6 +411,13 @@ impl AsyncComponent for BottomBar {
                 }
             },
             _ => {},
+        }
+        match player.player_ref.playback_status() {
+            PlayState::Stopped => {}
+            PlayState::Buffering => {}
+            PlayState::Paused => {}
+            PlayState::Playing => {}
+            _ => {}
         }
         self.update_view(widgets, sender);
     }
