@@ -1,7 +1,7 @@
 use crate::dbus::player::MprisPlayer;
 use crate::opensonic::cache::{LyricsCache, SongCache};
 use crate::opensonic::types::Song;
-use crate::player::SongEntry;
+use crate::player::{SongEntry, MAX_PLAYBACK_RATE, MIN_PLAYBACK_RATE};
 use crate::ui::app::{Init, NextAction, PlayPauseAction, PreviousAction, ShowRandomSongsAction, ShowTracklistAction};
 use crate::ui::cover_picture::{CoverPicture, CoverSize};
 use crate::ui::lyrics_line::{self, LyricsLine};
@@ -23,7 +23,7 @@ use relm4::gtk::glib::{clone, closure, Object};
 use relm4::gtk::{Justification, ListItem, ListScrollFlags, SignalListItemFactory, Widget};
 use relm4::prelude::*;
 use std::rc::Rc;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 use uuid::Uuid;
 
 pub struct CurrentSong {
@@ -38,16 +38,13 @@ pub struct CurrentSong {
     // UI data
     song_info: Option<Rc<Song>>,
     playback_position: f64,
-    playback_rate: f64,
-    previous_progress_check: SystemTime,
 }
 
 #[derive(Debug, Clone)]
 pub enum CurrentSongMsg {
     SongUpdate(Option<SongEntry>),
-    ProgressUpdate,
-    ProgressUpdateSync(Option<f64>),
-    // RateChange(f64),
+    ProgressUpdateSync(f64),
+    RateChange(f64),
     Seek(f64),
     ToggleLyrics,
     Update,
@@ -307,24 +304,25 @@ impl AsyncComponent for CurrentSong {
                             },
                         },
 
-                        /*#[name = "rate_dropdown"]
+                        #[name = "rate_dropdown"]
                         gtk::DropDown {
                             set_enable_search: false,
-                            set_model: Some(&gtk::StringList::new(&["0.5x", "0.75x", "1.0x", "1.25x", "1.5x", "1.75x", "2x"])),
-                            set_selected: 2,
+                            set_model: Some(&gtk::StringList::new(&["0.25x", "0.5x", "0.75x", "1.0x", "1.25x", "1.5x", "1.75x", "2x"])),
+                            set_selected: 3,
                             connect_selected_notify[mplayer] => move |dd| {
                                 mplayer.imp().set_rate(match dd.selected() { // Rates from string list above
-                                    0 => 0.5,
-                                    1 => 0.75,
-                                    2 => 1.0,
-                                    3 => 1.25,
-                                    4 => 1.5,
-                                    5 => 1.75,
-                                    6 => 2.0,
+                                    0 => 0.25,
+                                    1 => 0.5,
+                                    2 => 0.75,
+                                    3 => 1.0,
+                                    4 => 1.25,
+                                    5 => 1.5,
+                                    6 => 1.75,
+                                    7 => 2.0,
                                     _ => 1.0,
                                 });
                             }
-                        },*/
+                        },
                         #[name = "like_btn"]
                         gtk::ToggleButton {
                             #[watch]
@@ -347,8 +345,6 @@ impl AsyncComponent for CurrentSong {
             mpris_player: init.6,
             song_info: Default::default(),
             playback_position: 0.0,
-            playback_rate: 1.0,
-            previous_progress_check: SystemTime::now(),
             lyrics_cache: init.5,
             lyrics_factory: SignalListItemFactory::new(),
             synced_lyrics: false,
@@ -370,27 +366,6 @@ impl AsyncComponent for CurrentSong {
                 )))),
             };
         }
-
-        glib::timeout_add_local(Duration::from_millis(500), clone!(
-            #[strong]
-            sender,
-            move || {
-                match sender.input_sender().send(CurrentSongMsg::ProgressUpdate) {
-                    Ok(_) => glib::ControlFlow::Continue,
-                    Err(_) => glib::ControlFlow::Break
-                }
-            }
-        ));
-        glib::timeout_add_seconds_local(10, clone!(
-            #[strong]
-            sender,
-            move || {
-                match sender.input_sender().send(CurrentSongMsg::ProgressUpdateSync(None)) {
-                    Ok(_) => glib::ControlFlow::Continue,
-                    Err(_) => glib::ControlFlow::Break
-                }
-            }
-        ));
 
         let s2 = sender.clone();
         widgets.cover_image.connect_closure(
@@ -460,8 +435,11 @@ impl AsyncComponent for CurrentSong {
         let player = self.mpris_player.imp();
         match message {
             CurrentSongMsg::SongUpdate(info) => {
-                self.playback_position = Duration::from_micros(player.position().await.unwrap().as_micros() as u64)
-                .as_secs_f64();
+                if info.is_some() {
+                    self.playback_position = Duration::from_micros(player.position().await.unwrap().as_micros() as u64).as_secs_f64();
+                } else {
+                    self.playback_position = 0.0;
+                }
                 widgets.cover_image.set_cover_id(
                     info.as_ref().and_then(|t| t.1.cover_art.clone())
                 );
@@ -490,33 +468,15 @@ impl AsyncComponent for CurrentSong {
                         Some(i.1)
                     },
                 };
-
-
-                self.previous_progress_check = SystemTime::now();
             }
-            CurrentSongMsg::ProgressUpdate => {
-                if player.info().playback_status() == PlaybackStatus::Playing {
-                    self.playback_position += SystemTime::now()
-                        .duration_since(self.previous_progress_check)
-                        .expect("Error calculating progress tiem")
-                        .as_secs_f64()
-                        * self.playback_rate;
-                    self.update_lyrics(&widgets.lyrics_list);
-                }
-                self.previous_progress_check = SystemTime::now();
+            CurrentSongMsg::RateChange(rate) => {
+                let rate = rate.clamp(MIN_PLAYBACK_RATE, MAX_PLAYBACK_RATE);
+                let index = ((rate - MIN_PLAYBACK_RATE)/0.25) as u32;
+                widgets.rate_dropdown.set_selected(index);
             }
-            /*CurrentSongMsg::RateChange(rate) => {
-                self.playback_rate = rate;
-                sender.input(CurrentSongMsg::ProgressUpdateSync(None));
-            }*/
             CurrentSongMsg::ProgressUpdateSync(pos) => {
-                if let Some(pos) = pos {
-                    self.playback_position = pos;
-                    self.update_lyrics(&widgets.lyrics_list);
-                } else {
-                    self.playback_position = Duration::from_micros(player.info().position() as u64)
-                    .as_secs_f64();
-                }
+                self.playback_position = pos;
+                self.update_lyrics(&widgets.lyrics_list);
             }
             CurrentSongMsg::Seek(pos) => player.send_res(player.set_position(Duration::from_secs_f64(pos))),
             CurrentSongMsg::ToggleLyrics => {

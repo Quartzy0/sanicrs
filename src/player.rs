@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use crate::opensonic::cache::SongCache;
 use crate::opensonic::client::{OpenSubsonicClient};
 use crate::opensonic::types::{InvalidResponseError, Song};
@@ -10,17 +10,16 @@ use rand::prelude::SliceRandom;
 use rand::Rng;
 use relm4::gtk::gio::prelude::SettingsExt;
 use relm4::gtk::gio::Settings;
-use rodio::source::EmptyCallback;
-use rodio::{Decoder, OutputStream, Sink};
 use std::error::Error;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
-use stream_download::http::HttpStream;
-use stream_download::source::{DecodeError, SourceStream};
-use stream_download::storage::memory::MemoryStorageProvider;
-use stream_download::StreamDownload;
+use gstreamer::glib::clone;
+use gstreamer::prelude::{Cast, ElementExt, ElementExtManual, GstBinExt, ObjectExt, PadExt};
 use uuid::Uuid;
+
+pub const MAX_PLAYBACK_RATE: f64 = 2.0;
+pub const MIN_PLAYBACK_RATE: f64 = 0.25;
 
 #[derive(Debug, Default)]
 #[repr(u8)]
@@ -65,9 +64,13 @@ impl PlayerSettings {
 
 pub struct PlayerInfo {
     client: &'static OpenSubsonicClient,
-    sink: Sink,
+    // sink: Sink,
     track_list: RefCell<TrackList>,
-    cmd_channel: Arc<Sender<PlayerCommand>>,
+
+    gst_player: gstreamer_play::Play,
+    rg_filter_bin: gstreamer::Element,
+    rg_volume: gstreamer::Element,
+    playing: Cell<bool>,
 
     settings: RefCell<PlayerSettings>,
 }
@@ -75,26 +78,118 @@ pub struct PlayerInfo {
 impl PlayerInfo {
     pub fn new(
         client: &'static OpenSubsonicClient,
-        stream_handle: &OutputStream,
         track_list: TrackList,
         cmd_channel: Arc<Sender<PlayerCommand>>,
-    ) -> Self {
-        PlayerInfo {
+    ) -> Result<Self, Box<dyn Error>> {
+        // GStreamer initialization code adapted from Amberol (https://gitlab.gnome.org/World/amberol/-/blob/main/src/audio/gst_backend.rs)
+        gstreamer::init()?;
+
+        let gst_player = gstreamer_play::Play::default();
+        gst_player.set_video_track_enabled(false);
+
+        let mut config = gst_player.config();
+        config.set_position_update_interval(250);
+        gst_player.set_config(config).unwrap();
+
+        gst_player.message_bus().set_sync_handler(clone!(
+            move |_bus, msg| {
+                let Ok(play_msg) = gstreamer_play::PlayMessage::parse(&msg) else {
+                    return gstreamer::BusSyncReply::Drop;
+                };
+
+                match play_msg {
+                    gstreamer_play::PlayMessage::Error(error) => {
+                        let err_str = format!("{:?}", error);
+                        eprintln!("GStreamer error: {}", err_str);
+                        if let Err(_) = cmd_channel.send_blocking(PlayerCommand::Error("Error from GStreamer".to_string(), err_str)) {
+                            eprintln!("Error sending error string to main");
+                        }
+                    }
+                    gstreamer_play::PlayMessage::Warning(warning) => {
+                        eprintln!("GStreamer warning: {:?}", warning);
+                    }
+                    gstreamer_play::PlayMessage::EndOfStream(_) => {
+                        if let Err(e) = cmd_channel.send_blocking(PlayerCommand::TrackOver) {
+                            eprintln!("Failed to send TrackOver: {e}");
+                        }
+                    }
+                    gstreamer_play::PlayMessage::PositionUpdated(pos) => {
+                        if let Some(position) = pos.position() {
+                            if let Err(e) = cmd_channel.send_blocking(PlayerCommand::PositionUpdate(position.seconds_f64())) {
+                                eprintln!("Failed to send PositionUpdate: {e}");
+                            }
+                        }
+                    },
+                    gstreamer_play::PlayMessage::SeekDone(sd) => {
+                        if let Some(position) = sd.position() {
+                            if let Err(e) = cmd_channel.send_blocking(PlayerCommand::PositionUpdate(position.seconds_f64())) {
+                                eprintln!("Failed to send PositionUpdate: {e}");
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+
+                gstreamer::BusSyncReply::Drop
+            }
+        ));
+
+        let rg_volume = gstreamer::ElementFactory::make_with_name("rgvolume", Some("rg volume"))?;
+        let rg_limiter = gstreamer::ElementFactory::make_with_name("rglimiter", Some("rg limiter"))?;
+
+        let filter_bin = gstreamer::Bin::builder().name("filter bin").build();
+        filter_bin.add(&rg_volume)?;
+        filter_bin.add(&rg_limiter)?;
+        rg_volume.link(&rg_limiter)?;
+
+        let pad_src = rg_limiter.static_pad("src").unwrap();
+        pad_src.set_active(true).unwrap();
+        let ghost_src = gstreamer::GhostPad::with_target(&pad_src)?;
+        filter_bin.add_pad(&ghost_src)?;
+
+        let pad_sink = rg_volume.static_pad("sink").unwrap();
+        pad_sink.set_active(true).unwrap();
+        let ghost_sink = gstreamer::GhostPad::with_target(&pad_sink)?;
+        filter_bin.add_pad(&ghost_sink)?;
+
+
+        Ok(PlayerInfo {
             client,
-            sink: Sink::connect_new(stream_handle.mixer()),
             track_list: RefCell::new(track_list),
-            cmd_channel,
+            gst_player,
+            rg_filter_bin: filter_bin.upcast(),
+            rg_volume,
+            playing: Cell::new(false),
             settings: RefCell::default()
-        }
+        })
     }
+
+    pub fn load_rg_from_settings(&self) {
+        let identity = gstreamer::ElementFactory::make_with_name("identity", None).unwrap();
+
+        let (filter, album_mode) = match self.settings.borrow().replay_gain_mode {
+            ReplayGainMode::Album => (self.rg_filter_bin.as_ref(), true),
+            ReplayGainMode::Track => (self.rg_filter_bin.as_ref(), false),
+            ReplayGainMode::None => (&identity, true),
+        };
+
+        self.rg_volume.set_property("album-mode", album_mode);
+        self.gst_player.pipeline().set_property("audio-filter", filter);
+    }
+
 
     pub fn track_list(&self) -> &RefCell<TrackList> {
         &self.track_list
     }
 
     pub fn load_settings(&self, settings: &Settings) -> Result<(), Box<dyn Error>>{
-        let mut s = self.settings.borrow_mut();
-        s.load_settings(settings)
+        {
+            let mut s = self.settings.borrow_mut();
+            s.load_settings(settings)?;
+        }
+        self.set_set_volume();
+        self.load_rg_from_settings();
+        Ok(())
     }
 
     pub fn loop_status(&self) -> LoopStatus {
@@ -122,19 +217,21 @@ impl PlayerInfo {
     }
 
     pub async fn play(&self) {
-        if !self.sink.empty() {
-            self.sink.play();
+        if self.gst_player.uri().is_some() {
+            self.gst_player.play();
+            self.playing.set(true);
         } else {
             self.start_current().await.expect("Error playing");
         }
     }
 
     pub fn pause(&self) {
-        self.sink.pause();
+        self.gst_player.pause();
+        self.playing.set(false);
     }
 
     pub async fn playpause(&self) {
-        if self.sink.is_paused() || self.sink.empty() {
+        if !self.playing.get() || self.gst_player.uri().is_none() {
             self.play().await;
         } else {
             self.pause();
@@ -149,48 +246,9 @@ impl PlayerInfo {
         };
 
         println!("Playing: {}", song.1.title);
-        let stream = HttpStream::new(self.client, song.1.id.clone()).await?;
-        let len = stream.content_length().clone();
-        let reader =
-            match StreamDownload::from_stream(stream, MemoryStorageProvider::default(), stream_download::Settings::default())
-                .await
-            {
-                Ok(reader) => reader,
-                Err(e) => Err(e.decode_error().await)?,
-            };
-
-        let suffix = song.1.suffix.clone();
-        let media_type = song.1.content_type.clone();
-        let decoder = relm4::spawn_blocking(move ||{
-            let mut decoder = Decoder::builder().with_data(reader).with_seekable(true);
-            if let Some(len) = len {
-                decoder = decoder.with_byte_len(len);
-            }
-            if let Some(suffix) = suffix {
-                decoder = decoder.with_hint(&suffix);
-            }
-            if let Some(mime) = media_type {
-                decoder = decoder.with_mime_type(&mime);
-            }
-            decoder.build() // This call blocks
-        }).await?;
-
-        self.sink.clear();
-        self.sink.append(decoder?);
-        let cmd_channel = self.cmd_channel.clone();
-        let callback_source = EmptyCallback::new(Box::new(move || {
-            cmd_channel.send_blocking(PlayerCommand::TrackOver).expect("Error sending message TrackOver");
-        }));
-        self.sink.append(callback_source);
-        self.sink.play();
-
-        let v = self.settings.borrow().volume;
-        let mul = v * 10.0_f64.powf(self.gain_from_track(Some(song))/20.0);
-        self.sink.set_volume(mul as f32);
-
-        if self.settings.borrow().should_scrobble {
-            self.client.scrobble(song.1.id.as_str(), Some(false)).await?;
-        }
+        self.gst_player.set_uri(Some(&self.client.stream_get_url(&song.1.id, None, None, None, None, Some(true), None)));
+        self.gst_player.play();
+        self.playing.set(true);
 
         Ok(Some(song.clone()))
     }
@@ -221,7 +279,7 @@ impl PlayerInfo {
     }
 
     pub fn stop(&self) {
-        self.sink.clear();
+        self.gst_player.stop();
         let mut track_list = self.track_list.borrow_mut();
         track_list.clear();
     }
@@ -238,11 +296,11 @@ impl PlayerInfo {
                 return Ok(());
             }
         }
-        self.sink.try_seek(position)?;
+        self.gst_player.seek(gstreamer::ClockTime::from_seconds_f64(position.as_secs_f64()));
         Ok(())
     }
 
-    pub fn gain_from_track(&self, song: Option<&SongEntry>) -> f64 {
+    /*pub fn gain_from_track(&self, song: Option<&SongEntry>) -> f64 {
         match self.settings.borrow().replay_gain_mode {
             ReplayGainMode::None => 0.0,
             ReplayGainMode::Track => match song {
@@ -254,16 +312,17 @@ impl PlayerInfo {
                 None => 0.0,
             },
         }
-    }
+    }*/
 
-    pub fn gain(&self) -> f64 {
+    /*pub fn gain(&self) -> f64 {
         self.gain_from_track(self.track_list.borrow().current())
-    }
+    }*/
 
     fn set_set_volume(&self) {
         let v = self.settings.borrow().volume;
-        let mul = v * 10.0_f64.powf(self.gain()/20.0);
-        self.sink.set_volume(mul as f32);
+        self.gst_player.set_volume(v);
+        /*let mul = v * 10.0_f64.powf(self.gain()/20.0);
+        self.gst_player.set_volume(mul);*/
     }
 
     pub fn volume(&self) -> f64 {
@@ -275,14 +334,14 @@ impl PlayerInfo {
             let mut settings = self.settings.borrow_mut();
             settings.volume = volume;
         }
-        self.set_set_volume();
+        self.gst_player.set_volume(volume);
     }
 
     pub fn playback_status(&self) -> PlaybackStatus {
-        if self.sink.empty() {
+        if self.gst_player.uri().is_none() {
             PlaybackStatus::Stopped
         } else {
-            if self.sink.is_paused() {
+            if !self.playing.get() {
                 PlaybackStatus::Paused
             } else {
                 PlaybackStatus::Playing
@@ -291,11 +350,10 @@ impl PlayerInfo {
     }
 
     pub fn rate(&self) -> f64 {
-        self.sink.speed() as f64
+        self.gst_player.rate()
     }
 
-    // See comment in dbus/player.rs on set_rate function
-    /*pub fn set_rate(&self, rate: f64) {
+    pub fn set_rate(&self, rate: f64) {
         let rate = if rate > MAX_PLAYBACK_RATE {
             MAX_PLAYBACK_RATE
         } else if rate < MIN_PLAYBACK_RATE {
@@ -306,12 +364,12 @@ impl PlayerInfo {
         if rate == 0.0 {
             self.pause();
         } else {
-            self.sink.set_speed(rate as f32);
+            self.gst_player.set_rate(rate);
         }
-    }*/
+    }
 
     pub fn position(&self) -> i64 {
-        self.sink.get_pos().mul_f64(self.rate()).as_micros() as i64
+        self.gst_player.position().and_then(|c| Some(c.useconds() as i64)).unwrap_or(0)
     }
 
     pub fn shuffled(&self) -> bool {

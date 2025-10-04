@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::error::Error;
 use crate::opensonic::client::OpenSubsonicClient;
-use crate::player::{PlayerInfo, SongEntry, TrackList};
+use crate::player::{PlayerInfo, SongEntry, TrackList, MAX_PLAYBACK_RATE, MIN_PLAYBACK_RATE};
 use crate::PlayerCommand;
 use std::ops::Add;
 use std::rc::Rc;
@@ -169,7 +169,7 @@ impl MprisPlayer {
 
     pub fn set_position(&self, p: Duration) -> Result<(), Box<dyn Error>> {
         self.player_ref.set_position(p)?;
-        self.send_cs_msg(CurrentSongMsg::ProgressUpdateSync(Some(p.as_secs_f64())));
+        // self.send_cs_msg(CurrentSongMsg::ProgressUpdateSync(p.as_secs_f64()));
         self.emit(Signal::Seeked {
             position: Time::from_micros(p.as_micros() as i64),
         });
@@ -223,10 +223,7 @@ impl MprisPlayer {
         ]);
     }
 
-    // Changing the rate is currently unsupported because of issues in Rodio's API
-    // https://github.com/RustAudio/rodio/issues/638
-    // https://github.com/RustAudio/rodio/pull/768 (maybe will fix this)
-    /*pub fn set_rate(&self, rate: f64)  {
+    pub fn set_rate(&self, rate: f64)  {
         let rate = if rate > MAX_PLAYBACK_RATE {
             MAX_PLAYBACK_RATE
         } else if rate < MIN_PLAYBACK_RATE {
@@ -243,7 +240,7 @@ impl MprisPlayer {
                 Property::Rate(rate)
             ]);
         }
-    }*/
+    }
 
     pub fn set_shuffle(&self, shuffle: bool) {
         self.player_ref.set_shuffled(shuffle);

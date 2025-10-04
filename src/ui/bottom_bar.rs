@@ -1,5 +1,5 @@
 use std::rc::Rc;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 use mpris_server::{LocalPlayerInterface, LocalServer, PlaybackStatus};
 use relm4::actions::ActionablePlus;
 use relm4::adw::glib::{clone, Propagation};
@@ -26,8 +26,6 @@ pub struct BottomBar {
     // UI data
     song_info: Option<Rc<Song>>,
     playback_position: f64,
-    playback_rate: f64,
-    previous_progress_check: SystemTime,
 }
 
 #[derive(Debug)]
@@ -314,8 +312,6 @@ impl AsyncComponent for BottomBar {
             mpris_player: init.6,
             song_info: Default::default(),
             playback_position: 0.0,
-            playback_rate: 1.0,
-            previous_progress_check: SystemTime::now(),
             song_cache: init.1,
         };
         model.mpris_player.imp().bb_sender.replace(Some(sender.clone()));
@@ -343,27 +339,6 @@ impl AsyncComponent for BottomBar {
             }
         ));
         widgets.start_box.add_controller(gesture);
-
-        glib::timeout_add_local(Duration::from_millis(500), clone!(
-            #[strong]
-            sender,
-            move || {
-                match sender.input_sender().send(CurrentSongMsg::ProgressUpdate) {
-                    Ok(_) => glib::ControlFlow::Continue,
-                    Err(_) => glib::ControlFlow::Break
-                }
-            }
-        ));
-        glib::timeout_add_seconds_local(10, clone!(
-            #[strong]
-            sender,
-            move || {
-                match sender.input_sender().send(CurrentSongMsg::ProgressUpdateSync(None)) {
-                    Ok(_) => glib::ControlFlow::Continue,
-                    Err(_) => glib::ControlFlow::Break
-                }
-            }
-        ));
 
         widgets.like_btn
             .property_expression("active")
@@ -397,8 +372,11 @@ impl AsyncComponent for BottomBar {
         let player = self.mpris_player.imp();
         match message {
             CurrentSongMsg::SongUpdate(info) => {
-                self.playback_position = Duration::from_micros(player.position().await.unwrap().as_micros() as u64)
-                    .as_secs_f64();
+                if info.is_some() {
+                    self.playback_position = Duration::from_micros(player.position().await.unwrap().as_micros() as u64).as_secs_f64();
+                } else {
+                    self.playback_position = 0.0;
+                }
                 widgets.cover_image.set_cover_id(
                     info.as_ref().and_then(|t| t.1.cover_art.clone())
                 );
@@ -408,32 +386,11 @@ impl AsyncComponent for BottomBar {
                         Some(i.1)
                     },
                 };
-
-                self.previous_progress_check = SystemTime::now();
-            }
-            CurrentSongMsg::ProgressUpdate => {
-                if player.info().playback_status() == PlaybackStatus::Playing {
-                    self.playback_position += SystemTime::now()
-                        .duration_since(self.previous_progress_check)
-                        .expect("Error calculating progress tiem")
-                        .as_secs_f64()
-                        * self.playback_rate;
-                }
-                self.previous_progress_check = SystemTime::now();
             }
             CurrentSongMsg::ProgressUpdateSync(pos) => {
-                if let Some(pos) = pos {
-                    self.playback_position = pos;
-                } else {
-                    self.playback_position = Duration::from_micros(player.position().await.unwrap().as_micros() as u64)
-                        .as_secs_f64();
-                }
+                self.playback_position = pos;
             }
             CurrentSongMsg::Seek(pos) => player.send_res(player.set_position(Duration::from_secs_f64(pos))),
-            /*CurrentSongMsg::RateChange(rate) => {
-                self.playback_rate = rate;
-                sender.input(CurrentSongMsg::ProgressUpdateSync(None));
-            }*/
             CurrentSongMsg::ToggleStarred => {
                 if self.song_info.is_some() {
                     let song = self.song_info.as_ref().unwrap();

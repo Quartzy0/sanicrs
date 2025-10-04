@@ -52,7 +52,7 @@ impl OpenSubsonicClient {
                 client_name: String::from(client_name),
                 client: ClientBuilder::new().build().unwrap(),
                 version: String::from("1.15"),
-                cover_cache: cover_cache,
+                cover_cache,
                 extensions: Vec::new(),
             };
         client.init()?;
@@ -77,7 +77,7 @@ impl OpenSubsonicClient {
             .with_path_template("/rest/getOpenSubsonicExtensions");
         println!("Initializing OpenSusonicClient. Getting extensions. (params: {:?})", params);
         let resp = reqwest::blocking::get(url.with_query_params(params).format_url())?;
-        let mut response: serde_json::Value = serde_json::from_str(&resp.text()?)?;
+        let mut response: Value = serde_json::from_str(&resp.text()?)?;
         if response["subsonic-response"]["status"] != "ok" {
             return Err(SubsonicError::from_response(response));
         }
@@ -170,8 +170,6 @@ impl OpenSubsonicClient {
         &self,
         action: &str,
         extra_params: Vec<(&str, &str)>,
-        range_start: Option<u64>,
-        range_end: Option<u64>,
     ) -> Result<Response, reqwest::Error> {
         let salt = Alphanumeric.sample_string(&mut rand::rng(), 16);
         let token_str = String::from(&self.password) + salt.as_str();
@@ -190,28 +188,22 @@ impl OpenSubsonicClient {
             .with_substitutes(vec![("action", action)]);
         println!("Making request to '{}' with params: {:?}", action, params);
         if self.extensions.contains(&SupportedExtensions::FormPost) {
-            let mut builder = self.client.post(url.format_url()).form(&params);
-            if let Some(start) = range_start {
-                builder = builder.header(stream_download::http::RANGE_HEADER_KEY, stream_download::http::format_range_header_bytes(start, range_end));
-            }
+            let builder = self.client.post(url.format_url()).form(&params);
             builder.send().await
         } else {
-            let mut builder = self.client
+            let builder = self.client
                 .get(url.with_query_params(params).format_url());
-            if let Some(start) = range_start {
-                builder = builder.header(stream_download::http::RANGE_HEADER_KEY, stream_download::http::format_range_header_bytes(start, range_end));
-            }
             builder.send().await
         }
     }
 
     pub async fn get_license(&self) -> Result<License, Box<dyn Error>> {
         let body = self
-            .get_action_request("getLicense", vec![], None, None)
+            .get_action_request("getLicense", vec![])
             .await?
             .text()
             .await?;
-        let mut response: serde_json::Value = serde_json::from_str(&body)?;
+        let mut response: Value = serde_json::from_str(&body)?;
         if response["subsonic-response"]["status"] != "ok" {
             return Err(SubsonicError::from_response(response));
         }
@@ -223,11 +215,11 @@ impl OpenSubsonicClient {
 
     pub async fn get_extensions(&self) -> Result<Extensions, Box<dyn Error>> {
         let body = self
-            .get_action_request("getOpenSubsonicExtensions", vec![], None, None)
+            .get_action_request("getOpenSubsonicExtensions", vec![])
             .await?
             .text()
             .await?;
-        let mut response: serde_json::Value = serde_json::from_str(&body)?;
+        let mut response: Value = serde_json::from_str(&body)?;
         if response["subsonic-response"]["status"] != "ok" {
             return Err(SubsonicError::from_response(response));
         }
@@ -271,11 +263,11 @@ impl OpenSubsonicClient {
         }
 
         let body = self
-            .get_action_request("search3", params, None, None)
+            .get_action_request("search3", params)
             .await?
             .text()
             .await?;
-        let mut response: serde_json::Value = serde_json::from_str(&body)?;
+        let mut response: Value = serde_json::from_str(&body)?;
         if response["subsonic-response"]["status"] != "ok" {
             return Err(SubsonicError::from_response(response));
         }
@@ -285,7 +277,7 @@ impl OpenSubsonicClient {
         Ok(resp)
     }
 
-    pub async fn stream(
+    pub fn stream_get_url(
         &self,
         id: &str,
         max_bit_rate: Option<u32>,
@@ -294,9 +286,7 @@ impl OpenSubsonicClient {
         size: Option<String>,
         estimate_content_length: Option<bool>,
         converted: Option<bool>,
-        range_start: Option<u64>,
-        range_end: Option<u64>,
-    ) -> Result<Response, reqwest::Error> {
+    ) -> String{
         let max_bit_rate = max_bit_rate.and_then(|t| Some(t.to_string()));
         let time_offset = time_offset.and_then(|t| Some(t.to_string()));
         let estimate_content_length = estimate_content_length.unwrap_or(false).to_string();
@@ -329,21 +319,7 @@ impl OpenSubsonicClient {
         }
 
         self
-            .get_action_request("stream", params, range_start, range_end)
-            .await
-        /*let content_type = response.headers()["Content-Type"].to_str()?;
-        if content_type == "text/xml" {
-            return Err(InvalidResponseError::new_boxed(
-                response.text().await?.as_str(),
-            ));
-        } else if content_type == "application/json" {
-            let s1 = response.text().await?;
-            let response: serde_json::Value = serde_json::from_str(&*s1)?;
-            if response["subsonic-response"]["status"] != "ok" {
-                return Err(SubsonicError::from_response(response));
-            }
-            return Err(InvalidResponseError::new_boxed(&*s1));
-        }*/
+            .get_action_request_get_url("stream", params)
     }
 
     pub async fn get_cover_image(
@@ -362,7 +338,7 @@ impl OpenSubsonicClient {
         }
 
         let response = self
-            .get_action_request("getCoverArt", params, None, None)
+            .get_action_request("getCoverArt", params)
             .await?;
         if !response.status().is_success() {
             return Err(InvalidResponseError::new_boxed(format!("Response status code: {}", response.status()).as_str()));
@@ -376,7 +352,7 @@ impl OpenSubsonicClient {
             ));
         } else if response.headers()["Content-Type"] == "application/json" {
             let s1 = response.text().await?;
-            let response: serde_json::Value = serde_json::from_str(&*s1)?;
+            let response: Value = serde_json::from_str(&*s1)?;
             if response["subsonic-response"]["status"] != "ok" {
                 return Err(SubsonicError::from_response(response));
             }
@@ -421,11 +397,11 @@ impl OpenSubsonicClient {
 
     pub async fn get_song(&self, id: &str) -> Result<Rc<Song>, Box<dyn Error>> {
         let body = self
-            .get_action_request("getSong", vec![("id", id)], None, None)
+            .get_action_request("getSong", vec![("id", id)])
             .await?
             .text()
             .await?;
-        let mut response: serde_json::Value = serde_json::from_str(&body)?;
+        let mut response: Value = serde_json::from_str(&body)?;
         if response["subsonic-response"]["status"] != "ok" {
             return Err(SubsonicError::from_response(response));
         }
@@ -470,11 +446,11 @@ impl OpenSubsonicClient {
         }
 
         let body = self
-            .get_action_request("getAlbumList2", params, None, None)
+            .get_action_request("getAlbumList2", params)
             .await?
             .text()
             .await?;
-        let mut response: serde_json::Value = serde_json::from_str(&body)?;
+        let mut response: Value = serde_json::from_str(&body)?;
         if response["subsonic-response"]["status"] != "ok" {
             return Err(SubsonicError::from_response(response));
         }
@@ -490,11 +466,11 @@ impl OpenSubsonicClient {
         id: &str
     ) ->  Result<(Album, Vec<Song>), Box<dyn Error>> {
         let body = self
-            .get_action_request("getAlbum", vec![("id", id)], None, None)
+            .get_action_request("getAlbum", vec![("id", id)])
             .await?
             .text()
             .await?;
-        let mut response: serde_json::Value = serde_json::from_str(&body)?;
+        let mut response: Value = serde_json::from_str(&body)?;
         if response["subsonic-response"]["status"] != "ok" {
             return Err(SubsonicError::from_response(response));
         }
@@ -520,11 +496,11 @@ impl OpenSubsonicClient {
         }
 
         let body = self
-            .get_action_request("getSimilarSongs2", params, None, None)
+            .get_action_request("getSimilarSongs2", params)
             .await?
             .text()
             .await?;
-        let mut response: serde_json::Value = serde_json::from_str(&body)?;
+        let mut response: Value = serde_json::from_str(&body)?;
         if response["subsonic-response"]["status"] != "ok" {
             return Err(SubsonicError::from_response(response));
         }
@@ -564,11 +540,11 @@ impl OpenSubsonicClient {
         }
 
         let body = self
-            .get_action_request("getRandomSongs", params, None, None)
+            .get_action_request("getRandomSongs", params)
             .await?
             .text()
             .await?;
-        let mut response: serde_json::Value = serde_json::from_str(&body)?;
+        let mut response: Value = serde_json::from_str(&body)?;
         if response["subsonic-response"]["status"] != "ok" {
             return Err(SubsonicError::from_response(response));
         }
@@ -589,11 +565,11 @@ impl OpenSubsonicClient {
         let params = vec![("id", id)];
 
         let body = self
-            .get_action_request("getLyricsBySongId", params, None, None)
+            .get_action_request("getLyricsBySongId", params)
             .await?
             .text()
             .await?;
-        let mut response: serde_json::Value = serde_json::from_str(&body)?;
+        let mut response: Value = serde_json::from_str(&body)?;
         if response["subsonic-response"]["status"] != "ok" {
             return Err(SubsonicError::from_response(response));
         }
@@ -658,7 +634,7 @@ impl OpenSubsonicClient {
 
 
         let body = self
-            .get_action_request("scrobble", params, None, None)
+            .get_action_request("scrobble", params)
             .await?
             .text()
             .await?;
@@ -691,7 +667,7 @@ impl OpenSubsonicClient {
         }
 
         let body = self
-            .get_action_request("star", params, None, None)
+            .get_action_request("star", params)
             .await?
             .text()
             .await?;
@@ -724,7 +700,7 @@ impl OpenSubsonicClient {
         }
 
         let body = self
-            .get_action_request("unstar", params, None, None)
+            .get_action_request("unstar", params)
             .await?
             .text()
             .await?;
@@ -743,7 +719,7 @@ impl OpenSubsonicClient {
         let params = vec![("id", id)];
 
         let body = self
-            .get_action_request("getArtist", params, None, None)
+            .get_action_request("getArtist", params)
             .await?
             .text()
             .await?;
@@ -762,7 +738,7 @@ impl OpenSubsonicClient {
         &self,
     ) -> Result<Starred, Box<dyn Error>> {
         let body = self
-            .get_action_request("getStarred2", vec![], None, None)
+            .get_action_request("getStarred2", vec![])
             .await?
             .text()
             .await?;
@@ -772,32 +748,5 @@ impl OpenSubsonicClient {
         }
 
         Ok(serde_json::from_value(response["subsonic-response"]["starred2"].take())?)
-    }
-}
-
-impl stream_download::http::Client for &'static OpenSubsonicClient {
-    type Url = String;
-
-    type Headers = <Client as stream_download::http::Client>::Headers;
-
-    type Response = <Client as stream_download::http::Client>::Response;
-
-    type Error = reqwest::Error;
-
-    fn create() -> Self {
-        panic!("Can't create client");
-    }
-
-    async fn get(&self, url: &Self::Url) -> Result<Self::Response, Self::Error> {
-        self.stream(url, None, None, None, None, Some(true), None, None, None).await
-    }
-
-    async fn get_range(
-        &self,
-        url: &Self::Url,
-        start: u64,
-        end: Option<u64>,
-    ) -> Result<Self::Response, Self::Error> {
-        self.stream(url, None, None, None, None, Some(true), None, Some(start), end).await
     }
 }

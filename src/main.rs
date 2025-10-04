@@ -14,7 +14,6 @@ use relm4::component::{AsyncComponentBuilder, AsyncComponentController};
 use relm4::gtk::gio::prelude::{ApplicationExt, SettingsExt};
 use relm4::gtk::gio::{ApplicationFlags, Cancellable, Settings};
 use relm4::RelmApp;
-use rodio::OutputStreamBuilder;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::error::Error;
@@ -26,6 +25,7 @@ use std::io;
 use relm4::prelude::AsyncController;
 use tokio::runtime::Handle;
 use zbus::blocking;
+use crate::ui::current_song::CurrentSongMsg;
 
 mod dbus;
 mod opensonic;
@@ -44,6 +44,8 @@ pub enum PlayerCommand {
     Raise,
     TrackOver,
     Close,
+    Error(String, String),
+    PositionUpdate(f64),
 }
 
 fn do_setup(settings: &Settings, secret_schema: &Schema) -> OpenSubsonicClient {
@@ -154,11 +156,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         let _app: RelmApp<AppMsg> = RelmApp::from_app(adw_app);
         let controller_cell: Rc<RefCell<Option<AsyncController<Model>>>> = Rc::new(RefCell::new(None));
 
-        let stream = OutputStreamBuilder::from_default_device()
-            .expect("Error building output stream")
-            .open_stream()
-            .expect("Error opening output stream");
-
 
         let (command_send, command_recv) = async_channel::unbounded::<PlayerCommand>();
         let (restart_send, restart_recv) = async_channel::bounded::<bool>(1);
@@ -166,10 +163,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         let player_inner = PlayerInfo::new(
             &CLIENT,
-            &stream,
             TrackList::new(),
             command_send.clone()
-        );
+        )?;
         player_inner.load_settings(&settings).expect("Error loading player settings");
         let player = MprisPlayer {
             client: &CLIENT,
@@ -288,6 +284,8 @@ async fn handle_command(
                 }
             },
             PlayerCommand::TrackOver => server.imp().send_res_fdo(server.imp().next().await),
+            PlayerCommand::Error(error, description) => server.imp().send_app_msg(AppMsg::ShowError(error, description)),
+            PlayerCommand::PositionUpdate(pos) => server.imp().send_cs_msg(CurrentSongMsg::ProgressUpdateSync(pos)),
         }
     }
 }
