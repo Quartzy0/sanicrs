@@ -1,5 +1,5 @@
 use crate::dbus::player::MprisPlayer;
-use crate::opensonic::cache::{AlbumCache, ArtistCache, CoverCache};
+use crate::opensonic::cache::{AlbumCache, ArtistCache, CoverCache, SongCache};
 use crate::ui::album_object::AlbumObject;
 use crate::ui::cover_picture::{CoverPicture, CoverSize, CoverType};
 use crate::ui::song_object::{PositionState, SongObject};
@@ -23,7 +23,8 @@ type ViewAlbumInit = (
     CoverCache,
     AlbumCache,
     ArtistCache,
-    Option<u32>
+    Option<u32>,
+    SongCache
 );
 
 #[relm4::component(pub async)]
@@ -170,6 +171,7 @@ impl AsyncComponent for ViewAlbumWidget {
         let album_id = album.id().clone();
         let album_id_c = album.id().clone();
         let album_c = album.clone();
+        let song_cache = init.6;
 
         let item_list_widget = ItemListWidget::builder()
             .launch(ItemListInit {
@@ -185,9 +187,11 @@ impl AsyncComponent for ViewAlbumWidget {
                 })),
                 click_fn: None,
                 load_items: async move {
-                    album_c
-                        .get_songs()
-                        .unwrap()
+                    song_cache
+                        .add_songs(album_c
+                            .get_songs()
+                            .unwrap())
+                        .await
                         .into_iter()
                         .map(|x| SongObject::new((Uuid::from_u128(0), x.clone()).into(), PositionState::Passed))
                 },

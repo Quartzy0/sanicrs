@@ -9,6 +9,46 @@ use std::fmt::Debug;
 use std::time::Duration;
 use relm4::adw::glib;
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GenericResponse {
+    #[serde(rename = "subsonic-response")]
+    pub inner: OpenSubsonicResponse,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenSubsonicResponse {
+    pub status: String,
+    pub version: String,
+    pub r#type: String,
+    pub server_version: String,
+    pub open_subsonic: bool,
+    pub error: Option<SubsonicError>,
+    #[serde(flatten)]
+    pub inner: Option<InnerResponse>
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum InnerResponse {
+    OpenSubsonicExtensions(Extensions),
+    License(License),
+    SearchResult3(Search3Results),
+    Song(Song),
+    AlbumList2(Albums),
+    Album(Album),
+    SimilarSongs2(Songs),
+    RandomSongs(Songs),
+    Artist(Artist),
+    Starred2(Starred)
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Songs {
+    pub song: Vec<Song>
+}
+
 #[derive(Debug, Eq, PartialEq)]
 pub enum AlbumListType {
     Random,
@@ -144,7 +184,7 @@ pub struct Artist {
     pub albums: Option<Vec<Album>>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Contributor {
     pub role: String,
@@ -152,7 +192,7 @@ pub struct Contributor {
     pub artist: Artist,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ReplayGain {
     pub track_gain: Option<f32>,
@@ -177,7 +217,9 @@ pub struct RecordLabel {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct Albums(pub Vec<Album>);
+pub struct Albums{
+    pub album: Vec<Album>
+}
 
 #[serde_as]
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -212,10 +254,12 @@ pub struct Album {
     pub is_compilation: Option<bool>,
     pub explicit_status: Option<String>,
     pub disc_titles: Option<Vec<DiscTitle>>,
+    #[serde(rename = "song")]
+    pub songs: Option<Vec<Song>>
 }
 
 #[serde_as]
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 #[derive(Default)]
 pub struct Song {
@@ -377,6 +421,12 @@ impl InvalidResponseError {
             msg: String::from(message),
         }
         .into()
+    }
+
+    pub fn new_invalid_response(expected: &str, inner_response: InnerResponse) -> Box<InvalidResponseError> {
+        InvalidResponseError {
+            msg: format!("Invalid response from server, expected type {}, got {:?}", expected, inner_response),
+        }.into()
     }
 }
 

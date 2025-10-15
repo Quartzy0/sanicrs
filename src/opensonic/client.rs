@@ -1,4 +1,4 @@
-use crate::opensonic::types::{Album, AlbumListType, Albums, Artist, Extensions, InvalidResponseError, License, LyricsLine, LyricsLines, LyricsList, Search3Results, Song, Starred, SubsonicError, SupportedExtensions};
+use crate::opensonic::types::{Album, AlbumListType, Albums, Artist, Extensions, GenericResponse, InnerResponse, InvalidResponseError, License, LyricsLine, LyricsLines, LyricsList, OpenSubsonicResponse, Search3Results, Song, Starred, SubsonicError, SupportedExtensions};
 use format_url::FormatUrl;
 use rand::distr::{Alphanumeric, SampleString};
 use reqwest;
@@ -75,7 +75,7 @@ impl OpenSubsonicClient {
         ];
         let url = FormatUrl::new(&self.host)
             .with_path_template("/rest/getOpenSubsonicExtensions");
-        println!("Initializing OpenSusonicClient. Getting extensions. (params: {:?})", params);
+        println!("Initializing OpenSubsonicClient. Getting extensions. (params: {:?})", params);
         let resp = reqwest::blocking::get(url.with_query_params(params).format_url())?;
         let mut response: Value = serde_json::from_str(&resp.text()?)?;
         if response["subsonic-response"]["status"] != "ok" {
@@ -197,37 +197,55 @@ impl OpenSubsonicClient {
         }
     }
 
-    pub async fn get_license(&self) -> Result<License, Box<dyn Error>> {
-        let body = self
-            .get_action_request("getLicense", vec![])
-            .await?
-            .text()
+    async fn make_action_request(&self, action: &str, extra_params: Vec<(&str, &str)>) -> Result<Option<InnerResponse>, Box<dyn Error>> {
+        let response = self
+            .get_action_request(action, extra_params)
             .await?;
-        let mut response: Value = serde_json::from_str(&body)?;
-        if response["subsonic-response"]["status"] != "ok" {
-            return Err(SubsonicError::from_response(response));
+        let response: OpenSubsonicResponse = response.json::<GenericResponse>().await?.inner;
+        if response.status != "ok" || response.error.is_some() {
+            return if let Some(e) = response.error {
+                Err(e.into())
+            } else {
+                Err("Unknown error".into())
+            }
         }
+        if !response.open_subsonic {
+            return Err(InvalidResponseError::new_boxed("Response not of OpenSubsonic type (probably using an incompatible server)"));
+        }
+        Ok(response.inner)
+    }
 
-        let resp: License =
-            serde_json::from_value(response["subsonic-response"]["license"].take())?;
-        Ok(resp)
+    pub async fn make_action_request_some(&self, action: &str, extra_params: Vec<(&str, &str)>) -> Result<InnerResponse, Box<dyn Error>> {
+        self.make_action_request(action, extra_params).await?.ok_or(InvalidResponseError::new_boxed("Empty response received").into())
+    }
+
+    pub async fn make_action_request_empty(&self, action: &str, extra_params: Vec<(&str, &str)>) -> Result<(), Box<dyn Error>> {
+        match self.make_action_request(action, extra_params).await? {
+            Some(_) => Err(InvalidResponseError::new_boxed("Expected empty response")),
+            None => Ok(())
+        }
+    }
+
+    pub async fn get_license(&self) -> Result<License, Box<dyn Error>> {
+        let response = self
+            .make_action_request_some("getLicense", vec![])
+            .await?;
+        if let InnerResponse::License(license) = response {
+            Ok(license)
+        } else {
+            Err(InvalidResponseError::new_invalid_response("License", response))
+        }
     }
 
     pub async fn get_extensions(&self) -> Result<Extensions, Box<dyn Error>> {
-        let body = self
-            .get_action_request("getOpenSubsonicExtensions", vec![])
-            .await?
-            .text()
+        let response = self
+            .make_action_request_some("getOpenSubsonicExtensions", vec![])
             .await?;
-        let mut response: Value = serde_json::from_str(&body)?;
-        if response["subsonic-response"]["status"] != "ok" {
-            return Err(SubsonicError::from_response(response));
+        if let InnerResponse::OpenSubsonicExtensions(ext) = response {
+            Ok(ext)
+        } else {
+            Err(InvalidResponseError::new_invalid_response("OpenSubsonicExtensions", response))
         }
-
-        let resp: Extensions = serde_json::from_value(
-            response["subsonic-response"]["openSubsonicExtensions"].take(),
-        )?;
-        Ok(resp)
     }
 
     pub async fn search3(
@@ -262,19 +280,14 @@ impl OpenSubsonicClient {
             params.push(("musicFolderId", music_folder_id.unwrap()));
         }
 
-        let body = self
-            .get_action_request("search3", params)
-            .await?
-            .text()
+        let response = self
+            .make_action_request_some("search3", params)
             .await?;
-        let mut response: Value = serde_json::from_str(&body)?;
-        if response["subsonic-response"]["status"] != "ok" {
-            return Err(SubsonicError::from_response(response));
+        if let InnerResponse::SearchResult3(res) = response {
+            Ok(res)
+        } else {
+            Err(InvalidResponseError::new_invalid_response("SearchResult3", response))
         }
-
-        let resp: Search3Results =
-            serde_json::from_value(response["subsonic-response"]["searchResult3"].take())?;
-        Ok(resp)
     }
 
     pub fn stream_get_url(
@@ -297,25 +310,17 @@ impl OpenSubsonicClient {
             ("estimateContentLength", estimate_content_length.as_str()),
             ("converted", converted.as_str()),
         ];
-        let mbr: String;
-        if max_bit_rate.is_some() {
-            mbr = max_bit_rate.unwrap();
-            params.push(("maxBitRate", &*mbr))
+        if let Some(mbr) = max_bit_rate.as_ref() {
+            params.push(("maxBitRate", mbr))
         }
-        let f: String;
-        if format.is_some() {
-            f = format.unwrap();
-            params.push(("format", &*f))
+        if let Some(format) = format.as_ref() {
+            params.push(("format", format))
         }
-        let to: String;
-        if time_offset.is_some() {
-            to = time_offset.unwrap();
-            params.push(("timeOffset", &*to))
+        if let Some(time_offset) = time_offset.as_ref() {
+            params.push(("timeOffset", time_offset))
         }
-        let s: String;
-        if size.is_some() {
-            s = size.unwrap();
-            params.push(("size", &*s))
+        if let Some(size) = size.as_ref() {
+            params.push(("size", size))
         }
 
         self
@@ -352,11 +357,11 @@ impl OpenSubsonicClient {
             ));
         } else if response.headers()["Content-Type"] == "application/json" {
             let s1 = response.text().await?;
-            let response: Value = serde_json::from_str(&*s1)?;
+            let response: Value = serde_json::from_str(&s1)?;
             if response["subsonic-response"]["status"] != "ok" {
                 return Err(SubsonicError::from_response(response));
             }
-            return Err(InvalidResponseError::new_boxed(&*s1));
+            return Err(InvalidResponseError::new_boxed(&s1));
         }
 
         let bytes = response.bytes().await.unwrap().to_vec();
@@ -396,20 +401,14 @@ impl OpenSubsonicClient {
     }
 
     pub async fn get_song(&self, id: &str) -> Result<Rc<Song>, Box<dyn Error>> {
-        let body = self
-            .get_action_request("getSong", vec![("id", id)])
-            .await?
-            .text()
+        let response = self
+            .make_action_request_some("getSong", vec![("id", id)])
             .await?;
-        let mut response: Value = serde_json::from_str(&body)?;
-        if response["subsonic-response"]["status"] != "ok" {
-            return Err(SubsonicError::from_response(response));
+        if let InnerResponse::Song(res) = response {
+            Ok(Rc::new(res))
+        } else {
+            Err(InvalidResponseError::new_invalid_response("Song", response))
         }
-
-        let resp: Song = serde_json::from_value(
-            response["subsonic-response"]["song"].take(),
-        )?;
-        Ok(Rc::new(resp))
     }
 
     pub(super) async fn get_album_list(
@@ -444,43 +443,28 @@ impl OpenSubsonicClient {
         if music_folder_id.is_some() {
             params.push(("musicFolderId", music_folder_id.as_ref().unwrap()));
         }
-
-        let body = self
-            .get_action_request("getAlbumList2", params)
-            .await?
-            .text()
+        let response = self
+            .make_action_request_some("getAlbumList2", params)
             .await?;
-        let mut response: Value = serde_json::from_str(&body)?;
-        if response["subsonic-response"]["status"] != "ok" {
-            return Err(SubsonicError::from_response(response));
+        if let InnerResponse::AlbumList2(res) = response {
+            Ok(res)
+        } else {
+            Err(InvalidResponseError::new_invalid_response("AlbumList2", response))
         }
-        let resp: Albums = match response["subsonic-response"]["albumList2"].get_mut("album") {
-            Some(albums) => serde_json::from_value(albums.take())?,
-            None => Albums(Vec::new()),
-        };
-        Ok(resp)
     }
 
     pub async fn get_album(
         &self,
         id: &str
-    ) ->  Result<(Album, Vec<Song>), Box<dyn Error>> {
-        let body = self
-            .get_action_request("getAlbum", vec![("id", id)])
-            .await?
-            .text()
+    ) ->  Result<Album, Box<dyn Error>> {
+        let response = self
+            .make_action_request_some("getAlbum", vec![("id", id)])
             .await?;
-        let mut response: Value = serde_json::from_str(&body)?;
-        if response["subsonic-response"]["status"] != "ok" {
-            return Err(SubsonicError::from_response(response));
+        if let InnerResponse::Album(res) = response {
+            Ok(res)
+        } else {
+            Err(InvalidResponseError::new_invalid_response("Album", response))
         }
-
-        let resp: Album =
-            serde_json::from_value(response["subsonic-response"]["album"].clone())?;
-
-        let resp_songs: Vec<Song> =
-            serde_json::from_value(response["subsonic-response"]["album"]["song"].take())?;
-        Ok((resp, resp_songs))
     }
 
     pub async fn get_similar_songs(
@@ -494,20 +478,14 @@ impl OpenSubsonicClient {
         if count.is_some() {
             params.push(("count", count.as_ref().unwrap()));
         }
-
-        let body = self
-            .get_action_request("getSimilarSongs2", params)
-            .await?
-            .text()
+        let response = self
+            .make_action_request_some("getSimilarSongs2", params)
             .await?;
-        let mut response: Value = serde_json::from_str(&body)?;
-        if response["subsonic-response"]["status"] != "ok" {
-            return Err(SubsonicError::from_response(response));
+        if let InnerResponse::SimilarSongs2(res) = response {
+            Ok(res.song)
+        } else {
+            Err(InvalidResponseError::new_invalid_response("SimilarSongs2", response))
         }
-
-        let resp_songs: Vec<Song> =
-            serde_json::from_value(response["subsonic-response"]["similarSongs2"]["song"].take())?;
-        Ok(resp_songs)
     }
 
     pub async fn get_random_songs(
@@ -539,19 +517,14 @@ impl OpenSubsonicClient {
             params.push(("musicFolderId", music_folder_id));
         }
 
-        let body = self
-            .get_action_request("getRandomSongs", params)
-            .await?
-            .text()
+        let response = self
+            .make_action_request_some("getRandomSongs", params)
             .await?;
-        let mut response: Value = serde_json::from_str(&body)?;
-        if response["subsonic-response"]["status"] != "ok" {
-            return Err(SubsonicError::from_response(response));
+        if let InnerResponse::RandomSongs(res) = response {
+            Ok(res.song)
+        } else {
+            Err(InvalidResponseError::new_invalid_response("RandomSongs", response))
         }
-
-        let resp_songs: Vec<Song> =
-            serde_json::from_value(response["subsonic-response"]["randomSongs"]["song"].take())?;
-        Ok(resp_songs)
     }
 
     pub async fn get_lyrics(
@@ -632,18 +605,7 @@ impl OpenSubsonicClient {
             ("submission", submission.as_str())
         ];
 
-
-        let body = self
-            .get_action_request("scrobble", params)
-            .await?
-            .text()
-            .await?;
-        let response: Value = serde_json::from_str(&body)?;
-        if response["subsonic-response"]["status"] != "ok" {
-            return Err(SubsonicError::from_response(response));
-        }
-
-        Ok(())
+        self.make_action_request_empty("scrobble", params).await
     }
 
     pub async fn star(
@@ -666,17 +628,7 @@ impl OpenSubsonicClient {
             return Err("No song, album or artist specified to be starred".into());
         }
 
-        let body = self
-            .get_action_request("star", params)
-            .await?
-            .text()
-            .await?;
-        let response: Value = serde_json::from_str(&body)?;
-        if response["subsonic-response"]["status"] != "ok" {
-            return Err(SubsonicError::from_response(response));
-        }
-
-        Ok(())
+        self.make_action_request_empty("star", params).await
     }
 
     pub async fn unstar(
@@ -699,54 +651,33 @@ impl OpenSubsonicClient {
             return Err("No song, album or artist specified to be unstarred".into());
         }
 
-        let body = self
-            .get_action_request("unstar", params)
-            .await?
-            .text()
-            .await?;
-        let response: Value = serde_json::from_str(&body)?;
-        if response["subsonic-response"]["status"] != "ok" {
-            return Err(SubsonicError::from_response(response));
-        }
-
-        Ok(())
+        self.make_action_request_empty("unstar", params).await
     }
 
     pub async fn get_artist(
         &self,
         id: &str,
     ) -> Result<Artist, Box<dyn Error>> {
-        let params = vec![("id", id)];
-
-        let body = self
-            .get_action_request("getArtist", params)
-            .await?
-            .text()
+        let response = self
+            .make_action_request_some("getArtist", vec![("id", id)])
             .await?;
-        let mut response: Value = serde_json::from_str(&body)?;
-        if response["subsonic-response"]["status"] != "ok" {
-            return Err(SubsonicError::from_response(response));
+        if let InnerResponse::Artist(res) = response {
+            Ok(res)
+        } else {
+            Err(InvalidResponseError::new_invalid_response("Artist", response))
         }
-
-        let resp_artist: Artist =
-            serde_json::from_value(response["subsonic-response"]["artist"].take())?;
-
-        Ok(resp_artist)
     }
 
     pub async fn get_starred(
         &self,
     ) -> Result<Starred, Box<dyn Error>> {
-        let body = self
-            .get_action_request("getStarred2", vec![])
-            .await?
-            .text()
+        let response = self
+            .make_action_request_some("getStarred2", vec![])
             .await?;
-        let mut response: Value = serde_json::from_str(&body)?;
-        if response["subsonic-response"]["status"] != "ok" {
-            return Err(SubsonicError::from_response(response));
+        if let InnerResponse::Starred2(res) = response {
+            Ok(res)
+        } else {
+            Err(InvalidResponseError::new_invalid_response("Starred2", response))
         }
-
-        Ok(serde_json::from_value(response["subsonic-response"]["starred2"].take())?)
     }
 }

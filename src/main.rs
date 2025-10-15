@@ -148,7 +148,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         });
         let song_cache = SongCache::new(&CLIENT);
-        let album_cache = AlbumCache::new(&CLIENT, song_cache.clone());
+        let album_cache = AlbumCache::new(&CLIENT);
         let cover_cache = CoverCache::new(&CLIENT);
         let lyrics_cache = LyricsCache::new(&CLIENT);
         let artist_cache = ArtistCache::new(&CLIENT);

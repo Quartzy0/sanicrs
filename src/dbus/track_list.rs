@@ -98,7 +98,7 @@ impl MprisPlayer {
     pub async fn queue_album(&self, id: String, index: Option<usize>, clear_previous: bool) -> Result<(), Box<dyn Error>> {
         let album = self.album_cache.get_album(id.as_str()).await?;
         if let Some(songs) = album.get_songs() {
-            self.queue_songs(songs, index, clear_previous).await?;
+            self.queue_songs(self.song_cache.add_songs(songs).await, index, clear_previous).await?;
             if index.is_some() {
                 self.properties_changed([
                     Property::Metadata(self.current_song_metadata().await),

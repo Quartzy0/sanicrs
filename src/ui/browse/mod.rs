@@ -10,7 +10,7 @@ pub(super) mod search;
 mod view_artist_page;
 
 use crate::dbus::player::MprisPlayer;
-use crate::opensonic::cache::{AlbumCache, ArtistCache, CoverCache};
+use crate::opensonic::cache::{AlbumCache, ArtistCache, CoverCache, SongCache};
 use crate::ui::album_object::AlbumObject;
 use crate::ui::app::Init;
 use crate::ui::artist_object::ArtistObject;
@@ -28,6 +28,7 @@ pub struct BrowseWidget {
     mpris_player: Rc<LocalServer<MprisPlayer>>,
     album_cache: AlbumCache,
     artist_cache: ArtistCache,
+    song_cache: SongCache,
 
     browse_page: AsyncController<BrowsePageWidget>,
     search_controller: AsyncConnector<SearchWidget>,
@@ -85,6 +86,7 @@ impl AsyncComponent for BrowseWidget {
             browse_page,
             search_controller,
             artist_cache: init.7,
+            song_cache: init.1,
         };
 
         let widgets: Self::Widgets = view_output!();
@@ -102,7 +104,7 @@ impl AsyncComponent for BrowseWidget {
         match message {
             BrowseMsg::ViewAlbum(album, highlight) => {
                 let view_album_page = ViewAlbumWidget::builder()
-                    .launch((album, self.mpris_player.clone(), self.cover_cache.clone(), self.album_cache.clone(), self.artist_cache.clone(), highlight));
+                    .launch((album, self.mpris_player.clone(), self.cover_cache.clone(), self.album_cache.clone(), self.artist_cache.clone(), highlight, self.song_cache.clone()));
                 widgets.navigation_view.push(view_album_page.widget());
             },
             BrowseMsg::ViewArtist(artist) => {

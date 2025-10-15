@@ -141,15 +141,13 @@ impl SongCache {
 pub struct AlbumCache {
     cache: Rc<RwLock<EvictingCacheMap<String, AlbumObject, 100, fn(String, AlbumObject)>>>,
     client: &'static OpenSubsonicClient,
-    song_cache: SongCache,
 }
 
 impl AlbumCache {
-    pub fn new(client: &'static OpenSubsonicClient, song_cache: SongCache) -> Self {
+    pub fn new(client: &'static OpenSubsonicClient) -> Self {
         Self {
             client,
             cache: Rc::new(RwLock::new(EvictingCacheMap::new())),
-            song_cache,
         }
     }
 
@@ -176,10 +174,10 @@ impl AlbumCache {
             )
             .await?;
 
-        let mut ret: Vec<AlbumObject> = Vec::with_capacity(resp.0.len());
+        let mut ret: Vec<AlbumObject> = Vec::with_capacity(resp.album.len());
 
         let mut cache_w = self.cache.write().await;
-        for album in resp.0 {
+        for album in resp.album {
             if let Some(cached) = cache_w.get(&album.id) {
                 ret.push(cached.clone());
             } else {
@@ -197,15 +195,14 @@ impl AlbumCache {
             let cache_r = self.cache.read().await;
             if let Some(cached) = cache_r.get_no_promote(id) {
                 if !cached.has_songs() {
-                    let (_resp, songs) = self.client.get_album(id).await?;
-                    cached.set_songs(self.song_cache.add_songs(songs).await);
+                    let resp = self.client.get_album(id).await?;
+                    cached.set_album(resp);
                 }
                 Ok(cached.clone())
             } else {
                 drop(cache_r);
-                let (resp, songs) = self.client.get_album(id).await?;
+                let resp = self.client.get_album(id).await?;
                 let album = AlbumObject::new(resp);
-                album.set_songs(self.song_cache.add_songs(songs).await);
                 let mut cache_w = self.cache.write().await;
                 cache_w.insert(album.id(), album.clone());
                 Ok(album)
