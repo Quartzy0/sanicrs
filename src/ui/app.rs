@@ -20,11 +20,12 @@ use relm4::adw::prelude::*;
 use relm4::adw::{gdk};
 use relm4::component::AsyncConnector;
 use relm4::gtk::gio::{self, Settings};
-use relm4::gtk::Orientation;
+use relm4::gtk::{License, Orientation};
 use relm4::prelude::*;
 use relm4::{adw, component::{AsyncComponent, AsyncComponentParts, AsyncComponentSender}};
 use std::cell::LazyCell;
 use std::rc::Rc;
+use crate::{APP_ID, VERSION_STR};
 use crate::ui::bottom_bar::{BottomBar, BottomBarOut};
 use crate::ui::header_bar::HeaderBar;
 
@@ -107,6 +108,7 @@ fn into_init(value: &StartInit, server: Rc<LocalServer<MprisPlayer>>, breakpoint
 }
 
 relm4::new_action_group!(pub WindowActionGroup, "win");
+relm4::new_stateless_action!(AboutAction, WindowActionGroup, "about");
 relm4::new_stateless_action!(PreferencesAction, WindowActionGroup, "preferences");
 relm4::new_stateless_action!(QuitAction, WindowActionGroup, "quit");
 relm4::new_stateless_action!(pub ShowTracklistAction, WindowActionGroup, "tracklist");
@@ -128,7 +130,7 @@ impl AsyncComponent for Model {
     view! {
         #[name = "window"]
         adw::ApplicationWindow {
-            set_title: Some("Sanic-rs"),
+            set_title: Some("Sanic-RS"),
             set_default_width: 400,
             set_default_height: 400,
             connect_close_request[sender] => move |_| {
@@ -305,6 +307,19 @@ impl AsyncComponent for Model {
 
         let widgets: ModelWidgets = view_output!();
 
+        let about_action: RelmAction<AboutAction> = RelmAction::new_stateless(clone!(
+            move |_| {
+                adw::AboutDialog::builder()
+                    .application_name("Sanic-RS")
+                    .application_icon(APP_ID)
+                    .version(VERSION_STR)
+                    .issue_url("https://github.com/Quartzy0/sanicrs/issues")
+                    .license_type(License::Gpl30)
+                    .developer_name("Quartzy")
+                    .build()
+                    .present(relm4::main_adw_application().active_window().as_ref())
+            }
+        ));
         let action: RelmAction<PreferencesAction> = RelmAction::new_stateless(clone!(
             #[strong]
             sender,
@@ -378,6 +393,7 @@ impl AsyncComponent for Model {
         ));
 
         let mut group = RelmActionGroup::<WindowActionGroup>::new();
+        group.add_action(about_action);
         group.add_action(action);
         group.add_action(quit_action);
         group.add_action(show_tracklist_action);

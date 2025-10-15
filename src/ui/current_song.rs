@@ -134,6 +134,7 @@ impl AsyncComponent for CurrentSong {
                                     .unwrap_or("No song".to_string()),
                     add_css_class: "bold",
                     add_css_class: "t1",
+                    set_tooltip: "Song title",
                 },
                 append = &gtk::Label {
                     #[watch]
@@ -144,6 +145,7 @@ impl AsyncComponent for CurrentSong {
                         this.activate_action("win.artist", Some(&url.to_variant())).expect("Error executing action");
                         glib::Propagation::Stop
                     },
+                    set_tooltip: "Artists",
                 },
                 append = &gtk::Label {
                     #[watch]
@@ -159,6 +161,7 @@ impl AsyncComponent for CurrentSong {
                         }
                         glib::Propagation::Stop
                     },
+                    set_tooltip: "Album",
                 },
 
                 append = &gtk::Box {
@@ -169,6 +172,7 @@ impl AsyncComponent for CurrentSong {
                     gtk::Button {
                         set_icon_name: icon_names::PREVIOUS_REGULAR,
                         add_css_class: "track-action-btn",
+                        set_tooltip: "Play previous",
                         ActionablePlus::set_stateless_action::<PreviousAction>: &(),
                     },
                     if !model.mpris_player.imp().is_buffering() {
@@ -181,16 +185,18 @@ impl AsyncComponent for CurrentSong {
                             },
                             add_css_class: "track-action-btn",
                             add_css_class: "track-playpause-btn",
+                            set_tooltip: "Toggle playback",
                             ActionablePlus::set_stateless_action::<PlayPauseAction>: &(),
                         }
                     } else {
                         adw::Spinner {
-
+                            set_tooltip: "Loading...",
                         }
                     },
                     gtk::Button {
                         set_icon_name: icon_names::NEXT_REGULAR,
                         add_css_class: "track-action-btn",
+                        set_tooltip: "Play next",
                         ActionablePlus::set_stateless_action::<NextAction>: &(),
                     }
                 },
@@ -248,12 +254,12 @@ impl AsyncComponent for CurrentSong {
 
                         gtk::Button {
                             set_icon_name: icon_names::LIST,
-                            set_tooltip_text: Some("Show queue"),
+                            set_tooltip: "Show queue",
                             ActionablePlus::set_stateless_action::<ShowTracklistAction>: &(),
                         },
                         gtk::Button {
                             set_icon_name: icon_names::ADD_REGULAR,
-                            set_tooltip_text: Some("Add random songs"),
+                            set_tooltip: "Add random songs",
                             ActionablePlus::set_stateless_action::<ShowRandomSongsAction>: &(),
                         }
                     },
@@ -271,7 +277,7 @@ impl AsyncComponent for CurrentSong {
                                 LoopStatus::Track => icon_names::PLAYLIST_REPEAT_SONG,
                                 LoopStatus::Playlist => icon_names::PLAYLIST_REPEAT,
                             },
-                            set_tooltip_text: Some("Cycle loop status"),
+                            set_tooltip: "Cycle loop status",
                             connect_clicked[mplayer] => move |_this| {
                                 let loop_status = mplayer.imp().info().loop_status();
                                 let new_status = match loop_status {
@@ -285,6 +291,7 @@ impl AsyncComponent for CurrentSong {
                         #[name = "shuffle_toggle"]
                         gtk::ToggleButton {
                             set_icon_name: icon_names::PLAYLIST_SHUFFLE,
+                            set_tooltip: "Shuffle",
                             connect_clicked[mplayer] => move |_this| {
                                 mplayer.imp().set_shuffle(!mplayer.imp().info().shuffled());
                             },
@@ -308,6 +315,7 @@ impl AsyncComponent for CurrentSong {
                             connect_value_changed[mplayer] => move |_btn, val| {
                                 mplayer.imp().set_volume(val);
                             },
+                            set_tooltip: "Adjust volume",
                         },
 
                         #[name = "rate_dropdown"]
@@ -315,6 +323,7 @@ impl AsyncComponent for CurrentSong {
                             set_enable_search: false,
                             set_model: Some(&gtk::StringList::new(&["0.25x", "0.5x", "0.75x", "1.0x", "1.25x", "1.5x", "1.75x", "2x"])),
                             set_selected: 3,
+                            set_tooltip: "Playback speed",
                             connect_selected_notify[mplayer] => move |dd| {
                                 mplayer.imp().set_rate(match dd.selected() { // Rates from string list above
                                     0 => 0.25,
@@ -334,7 +343,8 @@ impl AsyncComponent for CurrentSong {
                             #[watch]
                             set_active: model.song_info.as_ref().and_then(|s| Some(s.is_starred())).unwrap_or(false),
                             add_css_class: "flat",
-                            connect_clicked => CurrentSongMsg::ToggleStarred
+                            connect_clicked => CurrentSongMsg::ToggleStarred,
+                            set_tooltip: "Star song",
                         }
                     }
                 }

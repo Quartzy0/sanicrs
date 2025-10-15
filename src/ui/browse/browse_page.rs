@@ -71,10 +71,6 @@ impl AsyncComponent for BrowsePageWidget {
                     set_orientation: Orientation::Vertical,
                     add_css_class: "padded",
 
-                    /*#[name = "carousel"]
-                    gtk::Stack {
-
-                    },*/
                     #[name = "carousel"]
                     adw::Carousel {
                         set_allow_scroll_wheel: false,
@@ -406,8 +402,10 @@ impl AsyncComponent for BrowsePageWidget {
                 let play_btn = gtk::Button::new();
                 play_btn.set_icon_name(icon_names::PLAY);
                 play_btn.add_css_class("flat");
+                play_btn.set_tooltip("Play");
                 let like_btn = gtk::ToggleButton::new();
                 like_btn.add_css_class("flat");
+                like_btn.set_tooltip("Star");
                 like_btn
                     .property_expression("active")
                     .chain_closure::<String>(closure!(
@@ -570,6 +568,7 @@ impl AsyncComponent for BrowsePageWidget {
                     song_count.set_halign(Align::End);
                     let play_btn = gtk::Button::builder()
                         .icon_name(icon_names::PLAY)
+                        .tooltip_text("Play")
                         .build();
                     play_btn.set_valign(Align::Center);
                     play_btn.set_halign(Align::End);
@@ -599,7 +598,9 @@ impl AsyncComponent for BrowsePageWidget {
                     let next_btn = gtk::Button::from_icon_name(icon_names::RIGHT);
                     let prev_btn = gtk::Button::from_icon_name(icon_names::LEFT);
                     next_btn.add_css_class("pill");
+                    next_btn.set_tooltip("Next item");
                     prev_btn.add_css_class("pill");
+                    prev_btn.set_tooltip("Previous item");
                     next_btn.connect_clicked(clone!(
                         #[strong]
                         sender,

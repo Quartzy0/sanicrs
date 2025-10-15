@@ -102,6 +102,7 @@ impl AsyncComponent for ViewArtistWidget {
                                     set_icon_name: icon_names::PLAY,
                                     set_width_request: 48,
                                     set_height_request: 48,
+                                    set_tooltip: "Play artist's albums",
                                     connect_clicked[artist, mpris_player] => move |_| {
                                         relm4::spawn_local(clone!(
                                             #[strong]
@@ -129,6 +130,7 @@ impl AsyncComponent for ViewArtistWidget {
                                     add_css_class: "midicon",
                                     set_width_request: 48,
                                     set_height_request: 48,
+                                    set_tooltip: "Star artist",
                                     connect_clicked[artist_cache, artist, mpris_player] => move |_| {
                                         relm4::spawn_local(clone!(
                                             #[strong]

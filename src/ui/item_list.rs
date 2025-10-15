@@ -127,6 +127,7 @@ impl<T: IsA<Object> + ObjectType, I: IntoIterator<Item = T> + 'static, F: 'stati
                         .icon_name(icon_names::PLAY)
                         .valign(Align::Center)
                         .halign(Align::Center)
+                        .tooltip_text("Play")
                         .build();
                     start_hbox.append(&play_btn);
                     play_btn.connect_clicked(clone!(

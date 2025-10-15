@@ -65,6 +65,7 @@ impl AsyncComponent for RandomSongsDialog {
                                 set_icon_name: icon_names::PLAY,
                             },
                             set_hexpand: true,
+                            set_tooltip: "Play random songs",
                             connect_clicked[sender, songs_n, mplayer, root] => move |_| {
                                 let size = songs_n.text().parse::<u32>();
                                 if size.is_ok() {
@@ -82,6 +83,7 @@ impl AsyncComponent for RandomSongsDialog {
                                 set_icon_name: icon_names::ADD_REGULAR,
                             },
                             set_hexpand: true,
+                            set_tooltip: "Add random songs",
                             connect_clicked[sender, songs_n, mplayer, root] => move |_| {
                                 let size = songs_n.text().parse::<u32>();
                                 if size.is_ok() {

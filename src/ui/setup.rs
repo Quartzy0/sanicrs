@@ -38,7 +38,7 @@ impl AsyncComponent for SetupWidget {
 
     view! {
         adw::ApplicationWindow {
-            set_title: Some("SanicRs - Setup"),
+            set_title: Some("Sanic-RS - Setup"),
             set_default_width: 400,
             set_default_height: 400,
 

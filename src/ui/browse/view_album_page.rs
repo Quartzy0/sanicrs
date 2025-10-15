@@ -125,7 +125,8 @@ impl AsyncComponent for ViewAlbumWidget {
                                             player.send_res(player.queue_album(id, None, true).await);
                                         });
                                     },
-                                    add_css_class: "album-play-btn"
+                                    add_css_class: "album-play-btn",
+                                    set_tooltip: "Play",
                                 },
                                 gtk::Button {
                                     set_valign: Align::Center,
@@ -139,7 +140,8 @@ impl AsyncComponent for ViewAlbumWidget {
                                            player.send_res(player.queue_album(id, None, false).await);
                                        });
                                     },
-                                    add_css_class: "album-play-btn"
+                                    add_css_class: "album-play-btn",
+                                    set_tooltip: "Add to queue",
                                 }
                             }
                         },

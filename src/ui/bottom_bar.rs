@@ -107,6 +107,7 @@ impl AsyncComponent for BottomBar {
                             set_justify: Justification::Left,
                             set_halign: Align::Start,
                             set_ellipsize: EllipsizeMode::End,
+                            set_tooltip: "Song title",
                         },
                         gtk::Label {
                             #[watch]
@@ -117,6 +118,7 @@ impl AsyncComponent for BottomBar {
                             set_justify: Justification::Left,
                             set_halign: Align::Start,
                             set_ellipsize: EllipsizeMode::End,
+                            set_tooltip: "Artists",
                             connect_activate_link => move |this, url| {
                                 this.activate_action("win.artist", Some(&url.to_variant())).expect("Error executing action");
                                 glib::Propagation::Stop
@@ -134,6 +136,7 @@ impl AsyncComponent for BottomBar {
                             set_halign: Align::Start,
                             set_max_width_chars: 30,
                             set_ellipsize: EllipsizeMode::End,
+                            set_tooltip: "Album",
                             connect_activate_link => move |this, url| {
                                 if url.len() != 0 {
                                     this.activate_action("win.song", Some(&url.to_variant())).expect("Error executing action");
@@ -157,6 +160,7 @@ impl AsyncComponent for BottomBar {
                         gtk::Button {
                             set_icon_name: icon_names::PREVIOUS_REGULAR,
                             add_css_class: "track-action-btn",
+                            set_tooltip: "Play previous",
                             ActionablePlus::set_stateless_action::<PreviousAction>: &(),
                         },
                         append = if !model.mpris_player.imp().is_buffering() {
@@ -167,18 +171,20 @@ impl AsyncComponent for BottomBar {
                                     PlayState::Playing => icon_names::PAUSE,
                                     _ => icon_names::STOP,
                                 },
+                                set_tooltip: "Toggle playback",
                                 add_css_class: "track-action-btn",
                                 add_css_class: "track-playpause-btn",
                                 ActionablePlus::set_stateless_action::<PlayPauseAction>: &(),
                             }
                         } else {
                             adw::Spinner {
-
+                                set_tooltip: "Loading...",
                             }
                         },
                         gtk::Button {
                             set_icon_name: icon_names::NEXT_REGULAR,
                             add_css_class: "track-action-btn",
+                            set_tooltip: "Play next",
                             ActionablePlus::set_stateless_action::<NextAction>: &(),
                         }
                     },
@@ -242,6 +248,7 @@ impl AsyncComponent for BottomBar {
                         #[watch]
                         set_active: model.song_info.as_ref().and_then(|s| Some(s.is_starred())).unwrap_or(false),
                         add_css_class: "flat",
+                        set_tooltip: "Star song",
                         connect_clicked => CurrentSongMsg::ToggleStarred,
                         set_valign: Align::Center,
                     },
@@ -254,13 +261,14 @@ impl AsyncComponent for BottomBar {
 
                             gtk::Button {
                                 set_icon_name: icon_names::LIST,
-                                set_tooltip_text: Some("Show queue"),
+                                set_tooltip: "Show queue",
                                 set_valign: Align::Center,
                                 set_halign: Align::Center,
                                 ActionablePlus::set_stateless_action::<ShowTracklistAction>: &(),
                             },
                             gtk::Button {
                                 set_icon_name: icon_names::ADD_REGULAR,
+                                set_tooltip: "Add random songs",
                                 set_valign: Align::Center,
                                 set_halign: Align::Center,
                                 ActionablePlus::set_stateless_action::<ShowRandomSongsAction>: &(),
@@ -273,6 +281,7 @@ impl AsyncComponent for BottomBar {
                                 set_adjustment: &gtk::Adjustment::new(1.0, 0.0, 1.0, 0.05, 0.0, 0.0),
                                 set_valign: Align::Center,
                                 set_halign: Align::Center,
+                                set_tooltip: "Adjust volume",
                                 connect_value_changed[mplayer] => move |_btn, val| {
                                             mplayer.imp().set_volume(val);
                                 },
@@ -291,6 +300,7 @@ impl AsyncComponent for BottomBar {
                                         PlayState::Playing => icon_names::PAUSE,
                                         _ => icon_names::STOP,
                                     },
+                                    set_tooltip: "Toggle playback",
                                     add_css_class: "track-action-btn",
                                     add_css_class: "track-playpause-btn",
                                     set_valign: Align::Center,
@@ -299,11 +309,12 @@ impl AsyncComponent for BottomBar {
                                 }
                             } else {
                                 adw::Spinner {
-
+                                    set_tooltip: "Loading...",
                                 }
                             },
                             gtk::Button {
                                 set_icon_name: icon_names::NEXT_REGULAR,
+                                set_tooltip: "Play next",
                                 add_css_class: "track-action-btn",
                                 set_valign: Align::Center,
                                 set_halign: Align::Center,

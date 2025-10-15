@@ -34,6 +34,7 @@ mod player;
 mod ui;
 
 const APP_ID: &'static str = "me.quartzy.sanicrs";
+const VERSION_STR: &'static str = "0.0.0";
 const DBUS_NAME_PREFIX: &'static str = "org.mpris.MediaPlayer2.";
 
 mod icon_names {
