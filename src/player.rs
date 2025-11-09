@@ -217,9 +217,9 @@ impl PlayerInfo {
 
     pub async fn remove_song(&self, index: usize) -> Result<SongEntry, Box<dyn Error>> {
         let mut guard = self.track_list.borrow_mut();
-        let c = guard.current().and_then(|s| Some(s.0.clone()));
+        let c = guard.current().and_then(|s| Some(s.uuid.clone()));
         let e = guard.remove_song(index);
-        if let Some(c) = c && c == e.0 { // Check if previously playing entry is the same as the removed one
+        if let Some(c) = c && c == e.uuid { // Check if previously playing entry is the same as the removed one
             drop(guard);
             self.start_current().await?;
         }
@@ -263,8 +263,8 @@ impl PlayerInfo {
             Some(s) => s
         };
 
-        println!("Playing: {}", song.1.title);
-        self.gst_player.set_uri(Some(&self.client.stream_get_url(&song.1.id, None, None, None, None, Some(true), None)));
+        println!("Playing: {}", song.song.title);
+        self.gst_player.set_uri(Some(&self.client.stream_get_url(&song.song.id, None, None, None, None, Some(true), None)));
         self.gst_player.play();
 
         Ok(Some(song.clone()))
@@ -309,7 +309,7 @@ impl PlayerInfo {
                 Some(t) => t,
                 None => return Ok(())
             };
-            if let Some(duration) = song.1.duration && position > duration {
+            if let Some(duration) = song.song.duration && position > duration {
                 return Ok(());
             }
         }
@@ -371,14 +371,14 @@ impl PlayerInfo {
 }
 
 #[derive(Clone, Debug)]
-pub struct SongEntry(
-    pub Uuid,
-    pub Rc<Song>
-);
+pub struct SongEntry {
+    pub uuid: Uuid,
+    pub song: Rc<Song>
+}
 
 impl SongEntry {
     pub fn dbus_path(&self) -> String {
-        format!("/me/quartzy/sanicrs/song/{}", self.0.as_simple().to_string())
+        format!("/me/quartzy/sanicrs/song/{}", self.uuid.as_simple().to_string())
     }
 
     pub fn dbus_obj<'a>(&self) -> TrackId {
@@ -389,8 +389,8 @@ impl SongEntry {
 impl From<(Uuid, Rc<Song>)> for SongEntry {
     fn from(value: (Uuid, Rc<Song>)) -> Self {
         Self {
-            0: value.0,
-            1: value.1
+            uuid: value.0,
+            song: value.1
         }
     }
 }

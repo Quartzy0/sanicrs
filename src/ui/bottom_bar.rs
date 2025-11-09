@@ -347,10 +347,10 @@ impl AsyncComponent for BottomBar {
             let track_list = model.mpris_player.imp().track_list().borrow();
             match track_list.current() {
                 None => Default::default(),
-                Some(song) => sender.input(CurrentSongMsg::SongUpdate(Some(SongEntry(
-                    Uuid::new_v4(),
-                    song.1.clone(),
-                )))),
+                Some(song) => sender.input(CurrentSongMsg::SongUpdate(Some(SongEntry {
+                    uuid: Uuid::new_v4(),
+                    song: song.song.clone(),
+                }))),
             };
         }
 
@@ -402,12 +402,12 @@ impl AsyncComponent for BottomBar {
                     self.playback_position = 0.0;
                 }
                 widgets.cover_image.set_cover_id(
-                    info.as_ref().and_then(|t| t.1.cover_art.clone())
+                    info.as_ref().and_then(|t| t.song.cover_art.clone())
                 );
                 self.song_info = match info {
                     None => None,
                     Some(i) => {
-                        Some(i.1)
+                        Some(i.song)
                     },
                 };
             }

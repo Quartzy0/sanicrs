@@ -43,7 +43,7 @@ pub async fn get_song_metadata<'a>(song: Option<&SongEntry>, client: &'static Op
     }
     let song = song.unwrap();
     map.set_trackid(Some(song.dbus_obj()));
-    let song = &song.1;
+    let song = &song.song;
     map.set_title(Some(song.title.clone()));
     if let Some(cover_art) = &song.cover_art{
         let url = client.get_cover_image_url(cover_art.as_str()).await;
@@ -353,7 +353,7 @@ impl LocalPlayerInterface for MprisPlayer {
         {
             let track_list = self.track_list().borrow();
             let song = match track_list.current() {
-                Some(t) => &t.1,
+                Some(t) => &t.song,
                 None => return Ok(())
             };
             let song_duration = song.duration;
@@ -383,7 +383,7 @@ impl LocalPlayerInterface for MprisPlayer {
             if song.dbus_path() != track_id.as_str() {
                 return Ok(());
             }
-            if let Some(duration) = song.1.duration && position > duration {
+            if let Some(duration) = song.song.duration && position > duration {
                 return Ok(());
             }
         }

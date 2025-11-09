@@ -353,7 +353,7 @@ impl AsyncComponent for TrackListWidget {
                             PositionState::Current
                         })
                     }));
-                    let mut secs: u64 = songs.iter().map(|x| x.1.duration.unwrap_or(Duration::ZERO).as_secs()).sum();
+                    let mut secs: u64 = songs.iter().map(|x| x.song.duration.unwrap_or(Duration::ZERO).as_secs()).sum();
                     let mut mins = secs / 60;
                     let hrs = mins / 60;
                     mins = mins % 60;

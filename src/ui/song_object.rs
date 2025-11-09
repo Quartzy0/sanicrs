@@ -61,7 +61,7 @@ impl SongObject {
     }
 
     pub fn get_entry(&self) -> Option<Rc<Song>> {
-        self.imp().song.borrow().as_ref().and_then(|s| Some(s.1.clone()))
+        self.imp().song.borrow().as_ref().and_then(|s| Some(s.song.clone()))
     }
 }
 
@@ -127,16 +127,17 @@ mod imp {
         fn property(&self, _id: usize, pspec: &ParamSpec) -> Value {
             let song = &self.song.borrow();
             if let Some(song) = song.deref() {
+                let song = &song.song;
                 match pspec.name() {
-                    "id" => song.1.id.to_value(),
-                    "title" => song.1.title.to_value(),
-                    "name" => song.1.title.to_value(),
-                    "artist" => song.1.artists().to_value(),
-                    "album" => song.1.album.to_value(),
-                    "cover-art-id" => song.1.cover_art.to_value(),
+                    "id" => song.id.to_value(),
+                    "title" => song.title.to_value(),
+                    "name" => song.title.to_value(),
+                    "artist" => song.artists().to_value(),
+                    "album" => song.album.to_value(),
+                    "cover-art-id" => song.cover_art.to_value(),
                     "position-state" => self.position_state.get().to_value(),
                     "duration" => {
-                        if let Some(duration) = song.1.duration {
+                        if let Some(duration) = song.duration {
                             let mut secs = duration.as_secs();
                             let mut mins = secs / 60;
                             let hrs = mins / 60;
@@ -161,7 +162,7 @@ mod imp {
                         }
                     },
                     "filetype" => self.song.borrow().as_ref().and_then(|s| {
-                        if let Some(suf) = &s.1.suffix && let Some(bitrate) = s.1.bit_rate {
+                        if let Some(suf) = &s.song.suffix && let Some(bitrate) = s.song.bit_rate {
                             Some(format!("{}/{}", suf, bitrate).to_uppercase())
                         } else {
                             None

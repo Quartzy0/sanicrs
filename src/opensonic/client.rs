@@ -200,7 +200,8 @@ impl OpenSubsonicClient {
     async fn make_action_request(&self, action: &str, extra_params: Vec<(&str, &str)>) -> Result<Option<InnerResponse>, Box<dyn Error>> {
         let response = self
             .get_action_request(action, extra_params)
-            .await?;
+            .await?
+            .error_for_status()?;
         let response: OpenSubsonicResponse = response.json::<GenericResponse>().await?.inner;
         if response.status != "ok" || response.error.is_some() {
             return if let Some(e) = response.error {

@@ -376,10 +376,10 @@ impl AsyncComponent for CurrentSong {
             let track_list = model.mpris_player.imp().track_list().borrow();
             match track_list.current() {
                 None => Default::default(),
-                Some(song) => sender.input(CurrentSongMsg::SongUpdate(Some(SongEntry(
-                    Uuid::new_v4(),
-                    song.1.clone(),
-                )))),
+                Some(song) => sender.input(CurrentSongMsg::SongUpdate(Some(SongEntry {
+                    uuid: Uuid::new_v4(),
+                    song: song.song.clone(),
+                }))),
             };
         }
 
@@ -457,13 +457,13 @@ impl AsyncComponent for CurrentSong {
                     self.playback_position = 0.0;
                 }
                 widgets.cover_image.set_cover_id(
-                    info.as_ref().and_then(|t| t.1.cover_art.clone())
+                    info.as_ref().and_then(|t| t.song.cover_art.clone())
                 );
                 self.has_lyrics = false;
                 self.song_info = match info {
                     None => None,
                     Some(i) => {
-                        let lyrics = self.lyrics_cache.get_lyrics(&i.1.id).await;
+                        let lyrics = self.lyrics_cache.get_lyrics(&i.song.id).await;
                         match lyrics {
                             Ok(l) => {
                                 if let Some(list) = l.get(0){
@@ -481,7 +481,7 @@ impl AsyncComponent for CurrentSong {
                                 player.send_error(e);
                             },
                         }
-                        Some(i.1)
+                        Some(i.song)
                     },
                 };
             }
