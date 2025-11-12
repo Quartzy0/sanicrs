@@ -140,13 +140,13 @@ impl MprisPlayer {
 
     pub fn send_res(&self, result: Result<(), Box<dyn Error>>) {
         if let Err(error) = result {
-            self.send_app_msg(AppMsg::ShowError(format!("{}", error), format!("{:?}", error)));
+            self.send_error(error);
         }
     }
 
     pub fn send_res_fdo(&self, result: fdo::Result<()>) {
         if let Err(error) = result {
-            self.send_app_msg(AppMsg::ShowError(format!("{}", error), format!("{:?}", error)));
+            self.send_error(error.into());
         }
     }
 

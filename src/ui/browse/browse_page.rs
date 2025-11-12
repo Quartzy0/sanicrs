@@ -27,7 +27,7 @@ pub struct BrowsePageWidget {
     album_cache: AlbumCache,
     mpris_player: Rc<LocalServer<MprisPlayer>>,
     cover_cache: CoverCache,
-    randoms_ids: Vec<String>,
+    randoms_ids: Vec<Option<String>>,
     super_cache: SuperCache,
     carousel_pos: u32,
 
@@ -502,7 +502,7 @@ impl AsyncComponent for BrowsePageWidget {
             .await;
         match random {
             Ok(random) => {
-                model.randoms_ids = random.iter().map(|a| a.id().clone()).collect();
+                model.randoms_ids = random.iter().map(|a| a.cover_art_id().clone()).collect();
                 sender.input(BrowsePageMsg::ScrolledCarousel(0));
                 let breakpoint = init.9;
                 for album in random {
@@ -720,7 +720,7 @@ impl AsyncComponent for BrowsePageWidget {
             },
             BrowsePageMsg::ScrolledCarousel(i) => {
                 self.carousel_pos = i;
-                if let Some(id) = self.randoms_ids.get(i as usize) {
+                if let Some(id) = self.randoms_ids.get(i as usize) && let Some(id) = id {
                     let colors = self.cover_cache.get_palette(id).await;
                     if let Err(err) = colors {
                         self.mpris_player.imp().send_error(err);

@@ -1,4 +1,5 @@
-use crate::opensonic::types::{Album, AlbumListType, Albums, Artist, Extensions, GenericResponse, InnerResponse, InvalidResponseError, License, LyricsLine, LyricsLines, LyricsList, OpenSubsonicResponse, Search3Results, Song, Starred, SubsonicError, SupportedExtensions};
+use std::collections::HashSet;
+use crate::opensonic::types::{Album, AlbumListType, Albums, Artist, Extensions, GenericResponse, InnerResponse, InvalidResponseError, License, LyricsLine, LyricsLines, LyricsList, OpenSubsonicResponse, OpenSubsonicResponseEmpty, Search3Results, Song, Starred, SubsonicError, SupportedExtensions};
 use format_url::FormatUrl;
 use rand::distr::{Alphanumeric, SampleString};
 use reqwest;
@@ -9,18 +10,29 @@ use std::error::Error;
 use std::fmt::{Debug};
 use std::path::Path;
 use std::rc::Rc;
+use tokio::sync::RwLock;
 
-#[derive(Default, Debug)]
+#[derive(Debug, Clone)]
+pub enum Credentials {
+    UsernamePassword {
+        username: String,
+        password: String
+    },
+    ApiKey {
+        key: String
+    }
+}
+
+#[derive(Debug)]
 pub struct OpenSubsonicClient {
     host: String,
-    username: String,
-    password: String,
+    credentials: Credentials,
     client_name: String,
     client: Client,
     version: String,
     cover_cache: Option<String>,
 
-    extensions: Vec<SupportedExtensions>
+    extensions: RwLock<HashSet<SupportedExtensions>>,
 }
 
 pub fn get_default_cache_dir() -> Option<String> {
@@ -39,63 +51,12 @@ impl OpenSubsonicClient {
 
     pub fn new(
         host: &str,
-        username: &str,
-        password: &str,
+        credentials: Credentials,
         client_name: &str,
         cover_cache: Option<String>,
-    ) -> Result<Self, Box<dyn Error>> {
-        let mut client: Self =
-            OpenSubsonicClient {
-                host: String::from(host),
-                username: String::from(username),
-                password: String::from(password),
-                client_name: String::from(client_name),
-                client: ClientBuilder::new().build().unwrap(),
-                version: String::from("1.15"),
-                cover_cache,
-                extensions: Vec::new(),
-            };
-        client.init()?;
-        Ok(client)
-    }
-
-    pub fn init(&mut self) -> Result<(), Box<dyn Error>> {
-        // Perform request building and parsing manually because it needs to be done blocking here
-        // since initialization happens before event loop start up. Everything else uses async.
-        let salt = Alphanumeric.sample_string(&mut rand::rng(), 16);
-        let token_str = String::from(&self.password) + salt.as_str();
-        let hash: String = format!("{:x}", md5::compute(token_str));
-        let params = vec![
-            ("c", self.client_name.as_str()),
-            ("v", self.version.as_str()),
-            ("f", "json"),
-            ("u", self.username.as_str()),
-            ("s", salt.as_str()),
-            ("t", hash.as_str()),
-        ];
-        let url = FormatUrl::new(&self.host)
-            .with_path_template("/rest/getOpenSubsonicExtensions");
-        println!("Initializing OpenSubsonicClient. Getting extensions. (params: {:?})", params);
-        let resp = reqwest::blocking::get(url.with_query_params(params).format_url())?;
-        let mut response: Value = serde_json::from_str(&resp.text()?)?;
-        if response["subsonic-response"]["status"] != "ok" {
-            return Err(SubsonicError::from_response(response));
-        }
-
-        let extensions: Extensions = serde_json::from_value(
-            response["subsonic-response"]["openSubsonicExtensions"].take(),
-        )?;
-
-        for ext in extensions.0 {
-            match SupportedExtensions::try_from(&ext.name) {
-                Ok(e) => self.extensions.push(e),
-                Err(_) => println!("Unused extension '{}' supported by server", ext.name)
-            };
-        }
-        println!("Supported extensions present: {:?}", self.extensions);
-
+    ) -> Self {
         // Validate cache dir
-        if let Some(cover_cache) = &self.cover_cache {
+        let cover_cache_real = if let Some(cover_cache) = &cover_cache {
             let path = Path::new(cover_cache);
             let result = std::fs::create_dir_all(path);
             if result.is_ok() {
@@ -106,20 +67,81 @@ impl OpenSubsonicClient {
                         cover_cache,
                         result.err().unwrap()
                     );
-                    self.cover_cache = None;
+                    None
                 } else if !result.ok().unwrap() {
                     println!("Cache dir not found: {}", cover_cache);
-                    self.cover_cache = None;
+                    None
+                } else {
+                    Some(cover_cache)
                 }
             } else {
                 eprintln!("Error creating cache directory '{}': {:?}", cover_cache, result.err().unwrap());
-                self.cover_cache = None;
+                None
             }
         } else {
             println!("No cache dir set.");
+            None
+        };
+
+        OpenSubsonicClient {
+            host: String::from(host),
+            credentials,
+            client_name: String::from(client_name),
+            client: ClientBuilder::new().build().unwrap(),
+            version: String::from("1.15"),
+            cover_cache: cover_cache_real.cloned(),
+            extensions: RwLock::new(HashSet::new()),
         }
+    }
+
+    pub async fn init(&self) -> Result<(), Box<dyn Error>> {
+        let response = self.make_action_request("getOpenSubsonicExtensions", vec![]).await?;
+        if let InnerResponse::OpenSubsonicExtensions(extensions) = response {
+            let mut guard = self.extensions.write().await;
+            for ext in extensions.0 {
+                match SupportedExtensions::try_from(&ext.name) {
+                    Ok(e) => {
+                        guard.insert(e);
+                    },
+                    Err(_) => println!("Unused extension '{}' supported by server", ext.name)
+                };
+            }
+        } else {
+            return Err(InvalidResponseError::new_invalid_response("OpenSubsonicExtensions", response));
+        }
+        let guard = self.extensions.read().await;
+        println!("Supported extensions present: {:?}", guard);
+        if let Credentials::ApiKey {..} = &self.credentials && !guard.contains(&SupportedExtensions::ApiKeyAuthentication) {
+            return Err("API Key authentication not supported by server".into());
+        }
+        // Getting extensions doesn't check for valid authentication (at least on LMS).
+        // This kind of makes sense since it isn't known if API key auth is supported before
+        // making this request.
+        // self.make_action_request_empty("ping", vec![]).await?;
 
         Ok(())
+    }
+
+    fn get_auth_params(&self) -> Vec<(&str, String)> {
+        let mut params = vec![
+            ("c", self.client_name.clone()),
+            ("v", self.version.clone()),
+            ("f", "json".to_string()),
+        ];
+        match &self.credentials {
+            Credentials::UsernamePassword { username, password } => {
+                let salt = Alphanumeric.sample_string(&mut rand::rng(), 16);
+                let token_str = String::from(password) + salt.as_str();
+                let hash: String = format!("{:x}", md5::compute(token_str));
+                params.push(("u", username.clone()));
+                params.push(("s", salt));
+                params.push(("t", hash));
+            }
+            Credentials::ApiKey { key } => {
+                params.push(("apiKey", key.clone()));
+            }
+        }
+        params
     }
 
     async fn get_cache_resource(&self, id: &str) -> Option<Vec<u8>> {
@@ -148,17 +170,8 @@ impl OpenSubsonicClient {
         action: &str,
         extra_params: Vec<(&str, &str)>,
     ) -> String {
-        let salt = Alphanumeric.sample_string(&mut rand::rng(), 16);
-        let token_str = String::from(&self.password) + salt.as_str();
-        let hash: String = format!("{:x}", md5::compute(token_str));
-        let mut params = vec![
-            ("c", self.client_name.as_str()),
-            ("v", self.version.as_str()),
-            ("f", "json"),
-            ("u", self.username.as_str()),
-            ("s", salt.as_str()),
-            ("t", hash.as_str()),
-        ];
+        let params = self.get_auth_params();
+        let mut params: Vec<(&str, &str)> = params.iter().map(|(k, v)| (*k, v.as_str())).collect();
         params.extend(extra_params);
         let url = FormatUrl::new(&self.host)
             .with_path_template("/rest/:action")
@@ -170,39 +183,31 @@ impl OpenSubsonicClient {
         &self,
         action: &str,
         extra_params: Vec<(&str, &str)>,
-    ) -> Result<Response, reqwest::Error> {
-        let salt = Alphanumeric.sample_string(&mut rand::rng(), 16);
-        let token_str = String::from(&self.password) + salt.as_str();
-        let hash: String = format!("{:x}", md5::compute(token_str));
-        let mut params = vec![
-            ("c", self.client_name.as_str()),
-            ("v", self.version.as_str()),
-            ("f", "json"),
-            ("u", self.username.as_str()),
-            ("s", salt.as_str()),
-            ("t", hash.as_str()),
-        ];
+    ) -> Result<Response, Box<dyn Error>> {
+        let params = self.get_auth_params();
+        let mut params: Vec<(&str, &str)> = params.iter().map(|(k, v)| (*k, v.as_str())).collect();
         params.extend(extra_params);
         let url = FormatUrl::new(&self.host)
             .with_path_template("/rest/:action")
             .with_substitutes(vec![("action", action)]);
         println!("Making request to '{}' with params: {:?}", action, params);
-        if self.extensions.contains(&SupportedExtensions::FormPost) {
+        if self.extensions.read().await.contains(&SupportedExtensions::FormPost) {
             let builder = self.client.post(url.format_url()).form(&params);
-            builder.send().await
+            builder.send().await.map_err(|e| e.into())
         } else {
             let builder = self.client
                 .get(url.with_query_params(params).format_url());
-            builder.send().await
+            builder.send().await.map_err(|e| e.into())
         }
     }
 
-    async fn make_action_request(&self, action: &str, extra_params: Vec<(&str, &str)>) -> Result<Option<InnerResponse>, Box<dyn Error>> {
+    async fn make_action_request(&self, action: &str, extra_params: Vec<(&str, &str)>) -> Result<InnerResponse, Box<dyn Error>> {
         let response = self
             .get_action_request(action, extra_params)
             .await?
             .error_for_status()?;
-        let response: OpenSubsonicResponse = response.json::<GenericResponse>().await?.inner;
+        let x = response.text().await?;
+        let response: OpenSubsonicResponse = serde_json::from_str::<GenericResponse<OpenSubsonicResponse>>(x.as_str())?.inner;
         if response.status != "ok" || response.error.is_some() {
             return if let Some(e) = response.error {
                 Err(e.into())
@@ -216,20 +221,29 @@ impl OpenSubsonicClient {
         Ok(response.inner)
     }
 
-    pub async fn make_action_request_some(&self, action: &str, extra_params: Vec<(&str, &str)>) -> Result<InnerResponse, Box<dyn Error>> {
-        self.make_action_request(action, extra_params).await?.ok_or(InvalidResponseError::new_boxed("Empty response received").into())
-    }
-
     pub async fn make_action_request_empty(&self, action: &str, extra_params: Vec<(&str, &str)>) -> Result<(), Box<dyn Error>> {
-        match self.make_action_request(action, extra_params).await? {
-            Some(_) => Err(InvalidResponseError::new_boxed("Expected empty response")),
-            None => Ok(())
+        let response = self
+            .get_action_request(action, extra_params)
+            .await?
+            .error_for_status()?;
+        let x = response.text().await?;
+        let response: OpenSubsonicResponseEmpty = serde_json::from_str::<GenericResponse<OpenSubsonicResponseEmpty>>(x.as_str())?.inner;
+        if response.status != "ok" || response.error.is_some() {
+            return if let Some(e) = response.error {
+                Err(e.into())
+            } else {
+                Err("Unknown error".into())
+            }
         }
+        if !response.open_subsonic {
+            return Err(InvalidResponseError::new_boxed("Response not of OpenSubsonic type (probably using an incompatible server)"));
+        }
+        Ok(())
     }
 
     pub async fn get_license(&self) -> Result<License, Box<dyn Error>> {
         let response = self
-            .make_action_request_some("getLicense", vec![])
+            .make_action_request("getLicense", vec![])
             .await?;
         if let InnerResponse::License(license) = response {
             Ok(license)
@@ -240,7 +254,7 @@ impl OpenSubsonicClient {
 
     pub async fn get_extensions(&self) -> Result<Extensions, Box<dyn Error>> {
         let response = self
-            .make_action_request_some("getOpenSubsonicExtensions", vec![])
+            .make_action_request("getOpenSubsonicExtensions", vec![])
             .await?;
         if let InnerResponse::OpenSubsonicExtensions(ext) = response {
             Ok(ext)
@@ -282,7 +296,7 @@ impl OpenSubsonicClient {
         }
 
         let response = self
-            .make_action_request_some("search3", params)
+            .make_action_request("search3", params)
             .await?;
         if let InnerResponse::SearchResult3(res) = response {
             Ok(res)
@@ -403,7 +417,7 @@ impl OpenSubsonicClient {
 
     pub async fn get_song(&self, id: &str) -> Result<Rc<Song>, Box<dyn Error>> {
         let response = self
-            .make_action_request_some("getSong", vec![("id", id)])
+            .make_action_request("getSong", vec![("id", id)])
             .await?;
         if let InnerResponse::Song(res) = response {
             Ok(Rc::new(res))
@@ -445,7 +459,7 @@ impl OpenSubsonicClient {
             params.push(("musicFolderId", music_folder_id.as_ref().unwrap()));
         }
         let response = self
-            .make_action_request_some("getAlbumList2", params)
+            .make_action_request("getAlbumList2", params)
             .await?;
         if let InnerResponse::AlbumList2(res) = response {
             Ok(res)
@@ -459,7 +473,7 @@ impl OpenSubsonicClient {
         id: &str
     ) ->  Result<Album, Box<dyn Error>> {
         let response = self
-            .make_action_request_some("getAlbum", vec![("id", id)])
+            .make_action_request("getAlbum", vec![("id", id)])
             .await?;
         if let InnerResponse::Album(res) = response {
             Ok(res)
@@ -480,7 +494,7 @@ impl OpenSubsonicClient {
             params.push(("count", count.as_ref().unwrap()));
         }
         let response = self
-            .make_action_request_some("getSimilarSongs2", params)
+            .make_action_request("getSimilarSongs2", params)
             .await?;
         if let InnerResponse::SimilarSongs2(res) = response {
             Ok(res.song)
@@ -519,7 +533,7 @@ impl OpenSubsonicClient {
         }
 
         let response = self
-            .make_action_request_some("getRandomSongs", params)
+            .make_action_request("getRandomSongs", params)
             .await?;
         if let InnerResponse::RandomSongs(res) = response {
             Ok(res.song)
@@ -532,7 +546,7 @@ impl OpenSubsonicClient {
         &self,
         id: &str
     ) -> Result<Vec<LyricsList>, Box<dyn Error>> {
-        if !self.extensions.contains(&SupportedExtensions::SongLyrics) {
+        if !self.extensions.read().await.contains(&SupportedExtensions::SongLyrics) {
             return Ok(Vec::new());
         }
 
@@ -660,7 +674,7 @@ impl OpenSubsonicClient {
         id: &str,
     ) -> Result<Artist, Box<dyn Error>> {
         let response = self
-            .make_action_request_some("getArtist", vec![("id", id)])
+            .make_action_request("getArtist", vec![("id", id)])
             .await?;
         if let InnerResponse::Artist(res) = response {
             Ok(res)
@@ -673,7 +687,7 @@ impl OpenSubsonicClient {
         &self,
     ) -> Result<Starred, Box<dyn Error>> {
         let response = self
-            .make_action_request_some("getStarred2", vec![])
+            .make_action_request("getStarred2", vec![])
             .await?;
         if let InnerResponse::Starred2(res) = response {
             Ok(res)

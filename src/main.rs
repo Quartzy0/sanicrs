@@ -1,6 +1,6 @@
 use crate::dbus::player::MprisPlayer;
 use crate::opensonic::cache::{AlbumCache, ArtistCache, CoverCache, LyricsCache, SongCache, SuperCache};
-use crate::opensonic::client::{self, OpenSubsonicClient};
+use crate::opensonic::client::{self, Credentials, OpenSubsonicClient};
 use crate::player::{PlayerInfo, TrackList};
 use crate::ui::app::{AppMsg, Model, StartInit};
 use crate::ui::setup::{SetupMsg, SetupOut, SetupWidget};
@@ -51,31 +51,42 @@ pub enum PlayerCommand {
     PlayStateUpdate(PlayState)
 }
 
-fn do_setup(settings: &Settings, secret_schema: &Schema) -> OpenSubsonicClient {
+fn do_setup(settings: &Settings, secret_schema: &Schema, error: Option<String>) -> OpenSubsonicClient {
     let setup_app: RelmApp<SetupMsg> = RelmApp::new(APP_ID);
     let (setup_send, setup_recv) = async_channel::bounded::<SetupOut>(1);
     relm4_icons::initialize_icons(icon_names::GRESOURCE_BYTES, icon_names::RESOURCE_PREFIX);
 
     let gtk_app = relm4::main_adw_application();
-    setup_app.run_async::<SetupWidget>((settings.clone(), setup_send, secret_schema.clone()));
+    setup_app.run_async::<SetupWidget>((settings.clone(), setup_send, secret_schema.clone(), error));
     let client = setup_recv.try_recv().expect("Error receiving message from setup");
     gtk_app.quit();
     client
 }
 
-fn make_client_from_saved(settings: &Settings, secret_schema: &Schema) -> Result<OpenSubsonicClient, String> {
+fn make_client_from_saved(settings: &Settings, secret_schema: &Schema) -> Result<OpenSubsonicClient, Box<dyn Error>> {
     let host: String = settings.value("server-url").as_maybe().ok_or("Server-url not set".to_string())?.get().ok_or("Should be string".to_string())?;
-    let username: String = settings.value("username").as_maybe().ok_or("Username not set".to_string())?.get().ok_or("Should be string".to_string())?;
-    Ok(OpenSubsonicClient::new(
-            host.as_str(),
-            username.as_str(),
-            password_lookup_sync(Some(&secret_schema), HashMap::new(), Cancellable::NONE)
-                .map_err(|e| format!("{:?}", e))?
-                .ok_or("No password found in secret store")?.as_str(),
-            "Sanic-rs",
-            if settings.boolean("should-cache-covers") {client::get_default_cache_dir()} else {None},
-        ).map_err(|e| format!("{:?}", e))?
-    )
+    let password_str = password_lookup_sync(Some(&secret_schema), HashMap::new(), Cancellable::NONE)
+        .map_err(|e| format!("{:?}", e))?
+        .ok_or("No password found in secret store")?.to_string();
+    let credentials = if settings.boolean("use-api-key") {
+        Credentials::ApiKey {
+            key: password_str
+        }
+    } else {
+        Credentials::UsernamePassword {
+            username: settings.value("username").as_maybe().ok_or("Username not set".to_string())?.get().ok_or("Should be string".to_string())?,
+            password: password_str
+        }
+    };
+    let client = OpenSubsonicClient::new(
+        host.as_str(),
+        credentials,
+        "Sanic-rs",
+        if settings.boolean("should-cache-covers") { client::get_default_cache_dir() } else { None },
+    );
+    let rt = tokio::runtime::Runtime::new().expect("Error creating temporary Tokio runtime");
+    rt.block_on(client.init())?;
+    Ok(client)
 }
 
 fn make_window(app: &Application, payload: &StartInit) -> AsyncController<Model> {
@@ -136,13 +147,13 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             let secret_schema = Schema::new(APP_ID, SchemaFlags::NONE, HashMap::new());
             if settings.value("server-url").as_maybe().is_none() {
-                do_setup(&settings, &secret_schema)
+                do_setup(&settings, &secret_schema, None)
             } else {
                 match make_client_from_saved(&settings, &secret_schema) {
                     Ok(c) => c,
                     Err(e) => {
                         eprintln!("Error when trying to make client: {}", e);
-                        do_setup(&settings, &secret_schema)
+                        do_setup(&settings, &secret_schema, Some(format!("{}", e)))
                     }
                 }
             }
@@ -210,7 +221,6 @@ fn main() -> Result<(), Box<dyn Error>> {
             handle = runtime_recv.recv_blocking().expect("Error receiving runtime");
         }
         let _guard = handle.enter();
-
 
 
         relm4::spawn_local(clone!(

@@ -8,11 +8,14 @@ use relm4::gtk::glib::Variant;
 use relm4::gtk::{Align, IconSize, Orientation};
 use relm4::prelude::*;
 use relm4::adw;
+use relm4::gtk;
+use relm4::adw::glib::clone;
 use relm4::adw::gtk::prelude::*;
 use relm4::adw::LengthUnit;
+use relm4::adw::glib as glib;
 use crate::APP_ID;
 use crate::opensonic::client;
-use crate::opensonic::client::OpenSubsonicClient;
+use crate::opensonic::client::{Credentials, OpenSubsonicClient};
 
 
 pub struct SetupWidget {
@@ -34,7 +37,7 @@ impl AsyncComponent for SetupWidget {
     type CommandOutput = ();
     type Input = SetupMsg;
     type Output = ();
-    type Init = (Settings, Sender<OpenSubsonicClient>, Schema);
+    type Init = (Settings, Sender<OpenSubsonicClient>, Schema, Option<String>);
 
     view! {
         adw::ApplicationWindow {
@@ -66,21 +69,56 @@ impl AsyncComponent for SetupWidget {
                     gtk::Entry {
                         set_placeholder_text: Some("https://music.example.com")
                     },
-                    gtk::Label {
-                        set_label: "Username",
-                        add_css_class: "bold"
+                    #[name = "up_toggle"]
+                    gtk::ToggleButton {
+                        set_label: "Username & Password",
                     },
-                    #[name = "username"]
-                    gtk::Entry {
-                        set_placeholder_text: Some("Username")
+                    #[name = "api_key_toggle"]
+                    gtk::ToggleButton {
+                        set_label: "API Key",
                     },
-                    gtk::Label {
-                        set_label: "Password",
-                        add_css_class: "bold"
-                    },
-                    #[name = "password"]
-                    gtk::PasswordEntry {
-                        set_placeholder_text: Some("Password")
+                    #[name = "stack"]
+                    gtk::Stack {
+                        #[name = "name_pass_box"]
+                        gtk::Box {
+                            set_orientation: Orientation::Vertical,
+                            set_spacing: 10,
+                            set_halign: Align::Fill,
+                            set_valign: Align::Center,
+
+                            gtk::Label {
+                                set_label: "Username",
+                                add_css_class: "bold"
+                            },
+                            #[name = "username"]
+                            gtk::Entry {
+                                set_placeholder_text: Some("Username")
+                            },
+                            gtk::Label {
+                                set_label: "Password",
+                                add_css_class: "bold"
+                            },
+                            #[name = "password"]
+                            gtk::PasswordEntry {
+                                set_placeholder_text: Some("Password")
+                            },
+                        },
+                        #[name = "key_box"]
+                        gtk::Box {
+                            set_orientation: Orientation::Vertical,
+                            set_spacing: 10,
+                            set_halign: Align::Fill,
+                            set_valign: Align::Center,
+
+                            gtk::Label {
+                                set_label: "API Key",
+                                add_css_class: "bold"
+                            },
+                            #[name = "api_key"]
+                            gtk::Entry {
+                                set_placeholder_text: Some("API Key")
+                            },
+                        },
                     },
                     gtk::Box {
                         set_orientation: Orientation::Horizontal,
@@ -120,6 +158,43 @@ impl AsyncComponent for SetupWidget {
 
         let widgets: SetupWidgetWidgets = view_output!();
 
+        if let Some(host) = model.settings.value("server-url")
+            .as_maybe().and_then(|s| s.get::<String>()) {
+            widgets.server_url.set_text(&host);
+        }
+
+        if let Some(err) = init.3 {
+            widgets.status.set_label(format!("Error while creating client: {:?}", err).as_str());
+            widgets.status.set_css_classes(&["error"]);
+        }
+        
+        widgets.up_toggle.set_active(true);
+        widgets.up_toggle.set_group(Some(&widgets.api_key_toggle));
+
+        widgets.up_toggle.connect_toggled(clone!(
+            #[weak(rename_to = stack)]
+            widgets.stack,
+            #[weak(rename_to = up_box)]
+            widgets.name_pass_box,
+            move |this| {
+                if this.is_active() {
+                    stack.set_visible_child(&up_box);
+                }
+            }
+        ));
+        widgets.api_key_toggle.connect_toggled(clone!(
+            #[weak(rename_to = stack)]
+            widgets.stack,
+            #[weak(rename_to = key_box)]
+            widgets.key_box,
+            move |this| {
+                if this.is_active() {
+                    stack.set_visible_child(&key_box);
+                }
+            }
+        ));
+        model.settings.bind("use-api-key", &widgets.api_key_toggle, "active").build();
+
         AsyncComponentParts { model, widgets }
     }
 
@@ -130,11 +205,21 @@ impl AsyncComponent for SetupWidget {
         sender: AsyncComponentSender<Self>,
         root: &adw::ApplicationWindow,
     ) {
+        let credentials = if widgets.up_toggle.is_active() {
+            Credentials::UsernamePassword {
+                username: widgets.username.text().to_string(),
+                password: widgets.password.text().to_string(),
+            }
+        } else {
+            Credentials::ApiKey {
+                key: widgets.api_key.text().to_string(),
+            }
+        };
         match message {
             SetupMsg::Test => {
                 let client = OpenSubsonicClient::new(widgets.server_url.text().as_str(),
-                    widgets.username.text().as_str(), widgets.password.text().as_str(), "Sanic-rs", None);
-                if let Err(e) = client {
+                    credentials, "Sanic-rs", None);
+                if let Err(e) = client.init().await {
                     widgets.status.set_label(format!("Error while creating client: {:?}", e).as_str());
                     widgets.status.set_css_classes(&["error"]);
                 } else {
@@ -144,34 +229,40 @@ impl AsyncComponent for SetupWidget {
             },
             SetupMsg::Save => {
                 let host = widgets.server_url.text();
-                let username = widgets.username.text();
-                let password = widgets.password.text();
                 let client = OpenSubsonicClient::new(
                     host.as_str(),
-                    username.as_str(),
-                    password.as_str(),
+                    credentials.clone(),
                     "Sanic-rs",
                     if self.settings.boolean("should-cache-covers") {client::get_default_cache_dir()} else {None}
                 );
-                if client.is_err() {
-                    widgets.status.set_label(format!("Error while creating client: {:?}", client.err().unwrap()).as_str());
+                if let Err(e) = client.init().await {
+                    widgets.status.set_label(format!("Error while creating client: {:?}", e).as_str());
                     widgets.status.set_css_classes(&["error"]);
                 } else {
                     widgets.status.set_label("Success");
                     widgets.status.set_css_classes(&["success"]);
 
                     self.settings.set_value("server-url", &Variant::from_some(&Variant::from(host.as_str()))).expect("Error setting server url setting");
-                    self.settings.set_value("username", &Variant::from_some(&Variant::from(username.as_str()))).expect("Error setting username setting");
+                    
+                    let password = match credentials {
+                        Credentials::UsernamePassword { username, password } => {
+                            self.settings.set_value("username", &Variant::from_some(&Variant::from(username.as_str()))).expect("Error setting username setting");
+                            password
+                        }
+                        Credentials::ApiKey { key } => {
+                            key
+                        }
+                    };
                     password_store_future(
                         Some(&self.schema),
-                       HashMap::new(),
-                       Some(&libsecret::COLLECTION_DEFAULT),
-                       "OpenSubsoncic password",
-                       password.as_str())
-                    .await
-                    .expect("Error storing password in secret store");
+                        HashMap::new(),
+                        Some(&libsecret::COLLECTION_DEFAULT),
+                        "OpenSubsoncic password",
+                        password.as_str())
+                        .await
+                        .expect("Error storing password in secret store");
 
-                    self.sender.send(client.unwrap()).await.expect("Error sending created client");
+                    self.sender.send(client).await.expect("Error sending created client");
 
                     root.close();
                 }

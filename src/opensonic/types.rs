@@ -10,9 +10,20 @@ use std::time::Duration;
 use relm4::adw::glib;
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct GenericResponse {
+#[serde(rename_all = "camelCase")]
+pub struct OpenSubsonicResponseEmpty {
+    pub status: String,
+    pub version: String,
+    pub r#type: String,
+    pub server_version: String,
+    pub open_subsonic: bool,
+    pub error: Option<SubsonicError>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GenericResponse<T> {
     #[serde(rename = "subsonic-response")]
-    pub inner: OpenSubsonicResponse,
+    pub inner: T,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -25,7 +36,7 @@ pub struct OpenSubsonicResponse {
     pub open_subsonic: bool,
     pub error: Option<SubsonicError>,
     #[serde(flatten)]
-    pub inner: Option<InnerResponse>
+    pub inner: InnerResponse
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -80,10 +91,11 @@ impl Into<&str> for AlbumListType {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub enum SupportedExtensions { // Only extensions used by this client are included here
     FormPost,
     SongLyrics,
+    ApiKeyAuthentication
 }
 
 impl TryFrom<&String> for SupportedExtensions {
@@ -93,6 +105,7 @@ impl TryFrom<&String> for SupportedExtensions {
         match value.as_str() {
             "formPost" => Ok(SupportedExtensions::FormPost),
             "songLyrics" => Ok(SupportedExtensions::SongLyrics),
+            "apiKeyAuthentication" => Ok(SupportedExtensions::ApiKeyAuthentication),
             _ => Err(InvalidResponseError::new("Unsupported extension type (non fatal)"))
         }
     }
@@ -265,7 +278,7 @@ pub struct Album {
 pub struct Song {
     pub id: String,
     pub parent: Option<String>,
-    pub is_dir: bool,
+    pub is_dir: Option<bool>, // Not optional in OpenSubsonic spec, but not provided by LMS
     pub title: String,
     pub album: Option<String>,
     pub artist: Option<String>,

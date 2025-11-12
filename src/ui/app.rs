@@ -564,13 +564,15 @@ impl AsyncComponent for Model {
                             #[strong(rename_to = mpris_player)]
                             self.mpris_player,
                             #[strong(rename_to = id)]
-                            album.id(),
+                            album.cover_art_id(),
                             #[strong(rename_to = cover_cache)]
                             self.cover_cache,
                             async move {
-                                match cover_cache.get_palette(id.as_str()).await {
-                                    Ok(c) => sender.input(AppMsg::PushViewColors(c)),
-                                    Err(err) => mpris_player.imp().send_error(err),
+                                if let Some(id) = id {
+                                    match cover_cache.get_palette(id.as_str()).await {
+                                        Ok(c) => sender.input(AppMsg::PushViewColors(c)),
+                                        Err(err) => mpris_player.imp().send_error(err),
+                                    }
                                 }
                             }
                         ));
@@ -604,13 +606,15 @@ impl AsyncComponent for Model {
                             #[strong(rename_to = mpris_player)]
                             self.mpris_player,
                             #[strong(rename_to = id)]
-                            artist.id(),
+                            artist.cover_art_id(),
                             #[strong(rename_to = cover_cache)]
                             self.cover_cache,
                             async move {
-                                match cover_cache.get_palette(id.as_str()).await {
-                                    Ok(c) => sender.input(AppMsg::PushViewColors(c)),
-                                    Err(err) => mpris_player.imp().send_error(err),
+                                if let Some(id) = id {
+                                    match cover_cache.get_palette(id.as_str()).await {
+                                        Ok(c) => sender.input(AppMsg::PushViewColors(c)),
+                                        Err(err) => mpris_player.imp().send_error(err),
+                                    }
                                 }
                             }
                         ));
