@@ -174,10 +174,10 @@ impl AlbumCache {
             )
             .await?;
 
-        let mut ret: Vec<AlbumObject> = Vec::with_capacity(resp.album.len());
+        let mut ret: Vec<AlbumObject> = Vec::with_capacity(resp.len());
 
         let mut cache_w = self.cache.write().await;
-        for album in resp.album {
+        for album in resp {
             if let Some(cached) = cache_w.get(&album.id) {
                 ret.push(cached.clone());
             } else {

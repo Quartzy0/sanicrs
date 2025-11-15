@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use crate::opensonic::types::{Album, AlbumListType, Albums, Artist, Extensions, GenericResponse, InnerResponse, InvalidResponseError, License, LyricsLine, LyricsLines, LyricsList, OpenSubsonicResponse, OpenSubsonicResponseEmpty, Search3Results, Song, Starred, SubsonicError, SupportedExtensions};
+use crate::opensonic::types::{Album, AlbumListType, Artist, Extension, GenericResponse, InvalidResponseError, License, LyricsLine, LyricsLines, LyricsList, OpenSubsonicResponse, OpenSubsonicResponseEmpty, Search3Results, Song, Songs, Starred, SubsonicError, SupportedExtensions};
 use format_url::FormatUrl;
 use rand::distr::{Alphanumeric, SampleString};
 use reqwest;
@@ -10,6 +10,8 @@ use std::error::Error;
 use std::fmt::{Debug};
 use std::path::Path;
 use std::rc::Rc;
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
 #[derive(Debug, Clone)]
@@ -95,20 +97,17 @@ impl OpenSubsonicClient {
     }
 
     pub async fn init(&self) -> Result<(), Box<dyn Error>> {
-        let response = self.make_action_request("getOpenSubsonicExtensions", vec![]).await?;
-        if let InnerResponse::OpenSubsonicExtensions(extensions) = response {
-            let mut guard = self.extensions.write().await;
-            for ext in extensions.0 {
-                match SupportedExtensions::try_from(&ext.name) {
-                    Ok(e) => {
-                        guard.insert(e);
-                    },
-                    Err(_) => println!("Unused extension '{}' supported by server", ext.name)
-                };
-            }
-        } else {
-            return Err(InvalidResponseError::new_invalid_response("OpenSubsonicExtensions", response));
+        let extensions = self.get_extensions().await?;
+        let mut guard = self.extensions.write().await;
+        for ext in extensions {
+            match SupportedExtensions::try_from(&ext.name) {
+                Ok(e) => {
+                    guard.insert(e);
+                },
+                Err(_) => println!("Unused extension '{}' supported by server", ext.name)
+            };
         }
+        drop(guard);
         let guard = self.extensions.read().await;
         println!("Supported extensions present: {:?}", guard);
         if let Credentials::ApiKey {..} = &self.credentials && !guard.contains(&SupportedExtensions::ApiKeyAuthentication) {
@@ -117,7 +116,7 @@ impl OpenSubsonicClient {
         // Getting extensions doesn't check for valid authentication (at least on LMS).
         // This kind of makes sense since it isn't known if API key auth is supported before
         // making this request.
-        // self.make_action_request_empty("ping", vec![]).await?;
+        self.make_action_request_empty("ping", vec![]).await?;
 
         Ok(())
     }
@@ -201,13 +200,12 @@ impl OpenSubsonicClient {
         }
     }
 
-    async fn make_action_request(&self, action: &str, extra_params: Vec<(&str, &str)>) -> Result<InnerResponse, Box<dyn Error>> {
+    async fn make_action_request<T: DeserializeOwned>(&self, action: &str, extra_params: Vec<(&str, &str)>) -> Result<T, Box<dyn Error>> {
         let response = self
             .get_action_request(action, extra_params)
             .await?
             .error_for_status()?;
-        let x = response.text().await?;
-        let response: OpenSubsonicResponse = serde_json::from_str::<GenericResponse<OpenSubsonicResponse>>(x.as_str())?.inner;
+        let response: OpenSubsonicResponse<T> = response.json::<GenericResponse<OpenSubsonicResponse<T>>>().await?.inner;
         if response.status != "ok" || response.error.is_some() {
             return if let Some(e) = response.error {
                 Err(e.into())
@@ -242,25 +240,27 @@ impl OpenSubsonicClient {
     }
 
     pub async fn get_license(&self) -> Result<License, Box<dyn Error>> {
-        let response = self
-            .make_action_request("getLicense", vec![])
-            .await?;
-        if let InnerResponse::License(license) = response {
-            Ok(license)
-        } else {
-            Err(InvalidResponseError::new_invalid_response("License", response))
+        #[derive(Serialize, Deserialize, Debug)]
+        #[serde(rename_all = "camelCase")]
+        struct Wrapper {
+            pub license: License,
         }
+
+        Ok(self
+            .make_action_request::<Wrapper>("getLicense", vec![])
+            .await?.license)
     }
 
-    pub async fn get_extensions(&self) -> Result<Extensions, Box<dyn Error>> {
-        let response = self
-            .make_action_request("getOpenSubsonicExtensions", vec![])
-            .await?;
-        if let InnerResponse::OpenSubsonicExtensions(ext) = response {
-            Ok(ext)
-        } else {
-            Err(InvalidResponseError::new_invalid_response("OpenSubsonicExtensions", response))
+    pub async fn get_extensions(&self) -> Result<Vec<Extension>, Box<dyn Error>> {
+        #[derive(Serialize, Deserialize, Debug)]
+        struct Wrapper{
+            #[serde(rename = "openSubsonicExtensions")]
+            pub extensions: Vec<Extension>
         }
+
+        Ok(self
+            .make_action_request::<Wrapper>("getOpenSubsonicExtensions", vec![])
+            .await?.extensions)
     }
 
     pub async fn search3(
@@ -295,14 +295,15 @@ impl OpenSubsonicClient {
             params.push(("musicFolderId", music_folder_id.unwrap()));
         }
 
-        let response = self
-            .make_action_request("search3", params)
-            .await?;
-        if let InnerResponse::SearchResult3(res) = response {
-            Ok(res)
-        } else {
-            Err(InvalidResponseError::new_invalid_response("SearchResult3", response))
+        #[derive(Serialize, Deserialize, Debug)]
+        #[serde(rename_all = "camelCase")]
+        struct Wrapper {
+            pub search_result3: Search3Results,
         }
+
+        Ok(self
+            .make_action_request::<Wrapper>("search3", params)
+            .await?.search_result3)
     }
 
     pub fn stream_get_url(
@@ -416,17 +417,18 @@ impl OpenSubsonicClient {
     }
 
     pub async fn get_song(&self, id: &str) -> Result<Rc<Song>, Box<dyn Error>> {
-        let response = self
-            .make_action_request("getSong", vec![("id", id)])
-            .await?;
-        if let InnerResponse::Song(res) = response {
-            Ok(Rc::new(res))
-        } else {
-            Err(InvalidResponseError::new_invalid_response("Song", response))
+        #[derive(Serialize, Deserialize, Debug)]
+        #[serde(rename_all = "camelCase")]
+        struct Wrapper {
+            pub song: Song,
         }
+
+        Ok(Rc::new(self
+            .make_action_request::<Wrapper>("getSong", vec![("id", id)])
+            .await?.song))
     }
 
-    pub(super) async fn get_album_list(
+    pub async fn get_album_list(
         &self,
         list_type: AlbumListType,
         size: Option<u32>,
@@ -435,7 +437,7 @@ impl OpenSubsonicClient {
         to_year: Option<u32>,
         genre: Option<String>,
         music_folder_id: Option<String>
-    ) -> Result<Albums, Box<dyn Error>> {
+    ) -> Result<Vec<Album>, Box<dyn Error>> {
         let size = size.unwrap_or(10).to_string();
         let offset = offset.unwrap_or(10).to_string();
         let from_year = from_year.and_then(|x| Some(x.to_string()));
@@ -458,28 +460,38 @@ impl OpenSubsonicClient {
         if music_folder_id.is_some() {
             params.push(("musicFolderId", music_folder_id.as_ref().unwrap()));
         }
-        let response = self
-            .make_action_request("getAlbumList2", params)
-            .await?;
-        if let InnerResponse::AlbumList2(res) = response {
-            Ok(res)
-        } else {
-            Err(InvalidResponseError::new_invalid_response("AlbumList2", response))
+
+        #[derive(Serialize, Deserialize, Debug)]
+        struct Albums{
+            // Shouldn't be optional, but LMS leaves this empty when no entries are present
+            // instead of giving an empty array
+            pub album: Option<Vec<Album>>
         }
+
+        #[derive(Serialize, Deserialize, Debug)]
+        #[serde(rename_all = "camelCase")]
+        struct Wrapper {
+            pub album_list2: Albums,
+        }
+
+        Ok(self
+            .make_action_request::<Wrapper>("getAlbumList2", params)
+            .await?.album_list2.album.unwrap_or_else(|| vec![]))
     }
 
     pub async fn get_album(
         &self,
         id: &str
     ) ->  Result<Album, Box<dyn Error>> {
-        let response = self
-            .make_action_request("getAlbum", vec![("id", id)])
-            .await?;
-        if let InnerResponse::Album(res) = response {
-            Ok(res)
-        } else {
-            Err(InvalidResponseError::new_invalid_response("Album", response))
+        #[derive(Serialize, Deserialize, Debug)]
+        #[serde(rename_all = "camelCase")]
+        struct Wrapper {
+            pub album: Album,
         }
+
+        Ok(self
+            .make_action_request::<Wrapper>("getAlbum", vec![("id", id)])
+            .await?.album)
     }
 
     pub async fn get_similar_songs(
@@ -493,14 +505,15 @@ impl OpenSubsonicClient {
         if count.is_some() {
             params.push(("count", count.as_ref().unwrap()));
         }
-        let response = self
-            .make_action_request("getSimilarSongs2", params)
-            .await?;
-        if let InnerResponse::SimilarSongs2(res) = response {
-            Ok(res.song)
-        } else {
-            Err(InvalidResponseError::new_invalid_response("SimilarSongs2", response))
+        #[derive(Serialize, Deserialize, Debug)]
+        #[serde(rename_all = "camelCase")]
+        struct Wrapper {
+            pub similar_songs2: Songs,
         }
+
+        Ok(self
+            .make_action_request::<Wrapper>("getSimilarSongs2", params)
+            .await?.similar_songs2.song)
     }
 
     pub async fn get_random_songs(
@@ -532,14 +545,15 @@ impl OpenSubsonicClient {
             params.push(("musicFolderId", music_folder_id));
         }
 
-        let response = self
-            .make_action_request("getRandomSongs", params)
-            .await?;
-        if let InnerResponse::RandomSongs(res) = response {
-            Ok(res.song)
-        } else {
-            Err(InvalidResponseError::new_invalid_response("RandomSongs", response))
+        #[derive(Serialize, Deserialize, Debug)]
+        #[serde(rename_all = "camelCase")]
+        struct Wrapper {
+            pub random_songs: Songs,
         }
+
+        Ok(self
+            .make_action_request::<Wrapper>("getRandomSongs", params)
+            .await?.random_songs.song)
     }
 
     pub async fn get_lyrics(
@@ -673,26 +687,28 @@ impl OpenSubsonicClient {
         &self,
         id: &str,
     ) -> Result<Artist, Box<dyn Error>> {
-        let response = self
-            .make_action_request("getArtist", vec![("id", id)])
-            .await?;
-        if let InnerResponse::Artist(res) = response {
-            Ok(res)
-        } else {
-            Err(InvalidResponseError::new_invalid_response("Artist", response))
+        #[derive(Serialize, Deserialize, Debug)]
+        #[serde(rename_all = "camelCase")]
+        struct Wrapper {
+            pub artist: Artist,
         }
+
+        Ok(self
+            .make_action_request::<Wrapper>("getArtist", vec![("id", id)])
+            .await?.artist)
     }
 
     pub async fn get_starred(
         &self,
     ) -> Result<Starred, Box<dyn Error>> {
-        let response = self
-            .make_action_request("getStarred2", vec![])
-            .await?;
-        if let InnerResponse::Starred2(res) = response {
-            Ok(res)
-        } else {
-            Err(InvalidResponseError::new_invalid_response("Starred2", response))
+        #[derive(Serialize, Deserialize, Debug)]
+        #[serde(rename_all = "camelCase")]
+        struct Wrapper {
+            pub starred2: Starred,
         }
+
+        Ok(self
+            .make_action_request::<Wrapper>("getStarred2", vec![])
+            .await?.starred2)
     }
 }

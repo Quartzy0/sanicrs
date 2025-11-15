@@ -20,7 +20,7 @@ pub struct OpenSubsonicResponseEmpty {
     pub error: Option<SubsonicError>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct GenericResponse<T> {
     #[serde(rename = "subsonic-response")]
     pub inner: T,
@@ -28,7 +28,7 @@ pub struct GenericResponse<T> {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct OpenSubsonicResponse {
+pub struct OpenSubsonicResponse<T> {
     pub status: String,
     pub version: String,
     pub r#type: String,
@@ -36,22 +36,7 @@ pub struct OpenSubsonicResponse {
     pub open_subsonic: bool,
     pub error: Option<SubsonicError>,
     #[serde(flatten)]
-    pub inner: InnerResponse
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum InnerResponse {
-    OpenSubsonicExtensions(Extensions),
-    License(License),
-    SearchResult3(Search3Results),
-    Song(Song),
-    AlbumList2(Albums),
-    Album(Album),
-    SimilarSongs2(Songs),
-    RandomSongs(Songs),
-    Artist(Artist),
-    Starred2(Starred)
+    pub inner: T
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -159,9 +144,6 @@ pub struct License {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct Extensions(pub Vec<Extension>);
-
-#[derive(Serialize, Deserialize, Debug)]
 pub struct Extension {
     pub name: String,
     pub versions: Vec<i32>,
@@ -227,11 +209,6 @@ pub struct DiscTitle {
 #[serde(rename_all = "camelCase")]
 pub struct RecordLabel {
     pub name: String,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct Albums{
-    pub album: Vec<Album>
 }
 
 #[serde_as]
@@ -434,12 +411,6 @@ impl InvalidResponseError {
             msg: String::from(message),
         }
         .into()
-    }
-
-    pub fn new_invalid_response(expected: &str, inner_response: InnerResponse) -> Box<InvalidResponseError> {
-        InvalidResponseError {
-            msg: format!("Invalid response from server, expected type {}, got {:?}", expected, inner_response),
-        }.into()
     }
 }
 
