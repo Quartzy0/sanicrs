@@ -6,14 +6,17 @@ use relm4::adw::gio::ListStore;
 use relm4::adw::glib::{clone, closure, Object};
 use relm4::adw::prelude::*;
 use relm4::gtk::{Align, ListItem, Orientation, SignalListItemFactory, Widget};
-use relm4::adw::glib as glib;
+use relm4::adw::{gdk, glib as glib};
 use relm4::{gtk, AsyncComponentSender};
 use relm4::component::{AsyncComponent, AsyncComponentParts};
 use relm4::gtk::pango::EllipsizeMode;
 use crate::dbus::player::MprisPlayer;
 use crate::icon_names;
 use crate::opensonic::cache::CoverCache;
+use crate::ui::album_object::AlbumObject;
 use crate::ui::cover_picture::{CoverPicture, CoverSize, CoverType};
+use crate::ui::info_dialog;
+use crate::ui::song_object::SongObject;
 
 #[derive(Debug)]
 pub struct ItemListWidget<I, F, T>
@@ -40,6 +43,13 @@ where
     pub mpris_player: Rc<LocalServer<MprisPlayer>>,
     pub cover_type: CoverType,
     pub highlight: Option<u32>,
+}
+
+#[derive(Copy, Clone)]
+pub enum ItemType {
+    Song,
+    Album,
+    Artist
 }
 
 #[relm4::component(pub async)]
@@ -82,6 +92,17 @@ impl<T: IsA<Object> + ObjectType, I: IntoIterator<Item = T> + 'static, F: 'stati
 
         let mut iter = load_items.await.into_iter().peekable();
         let first = iter.peek();
+        let item_type = if let Some(first) = first {
+            if first.is::<SongObject>() {
+                ItemType::Song
+            } else if first.is::<AlbumObject>() {
+                ItemType::Album
+            } else {
+                ItemType::Artist
+            }
+        } else {
+            ItemType::Artist
+        };
         let has_duration = first.and_then(|f| Some(f.has_property("duration", Some(String::static_type())))).unwrap_or(false);
         let has_filetype = first.and_then(|f| Some(f.has_property("filetype", Some(String::static_type())))).unwrap_or(false);
 
@@ -121,6 +142,25 @@ impl<T: IsA<Object> + ObjectType, I: IntoIterator<Item = T> + 'static, F: 'stati
                     .downcast_ref::<ListItem>()
                     .expect("Needs to be ListItem");
                 list_item.set_child(Some(&hbox));
+
+                let ctrl = gtk::GestureClick::builder()
+                    .button(3)
+                    .build();
+                ctrl.connect_pressed(clone!(
+                    #[weak]
+                    list_item,
+                    #[weak]
+                    hbox,
+                    move |_controller, _btn, x, y| {
+                        let item = list_item.item().expect("Expected ListItem to have item");
+                        let id: String = item.property("id");
+                        let menu = info_dialog::make_popup_menu(item_type, id);
+                        menu.set_parent(&hbox);
+                        menu.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+                        menu.popup();
+                    }
+                ));
+                hbox.add_controller(ctrl);
 
                 if let Some(play_fn) = &play_fn {
                     let play_btn = gtk::Button::builder()

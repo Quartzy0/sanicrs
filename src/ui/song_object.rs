@@ -75,6 +75,7 @@ mod imp {
     use relm4::once_cell::sync::Lazy;
     use std::cell::{Cell, RefCell};
     use std::ops::Deref;
+    use crate::opensonic::types::duration_display_str;
 
     // Object holding the state
     pub struct SongObject {
@@ -138,25 +139,7 @@ mod imp {
                     "position-state" => self.position_state.get().to_value(),
                     "duration" => {
                         if let Some(duration) = song.duration {
-                            let mut secs = duration.as_secs();
-                            let mut mins = secs / 60;
-                            let hrs = mins / 60;
-                            mins = mins % 60;
-                            secs = secs % 60;
-                            let mut str = String::new();
-                            if hrs != 0 {
-                                str.push_str(&hrs.to_string());
-                                str.push_str("h ");
-                                str.push_str(&mins.to_string());
-                                str.push_str("m ");
-                            } else if mins != 0 {
-                                str.push_str(&mins.to_string());
-                                str.push_str("m ");
-                            }
-                            str.push_str(&secs.to_string());
-                            str.push_str("s");
-
-                            str.to_value()
+                            duration_display_str(&duration).to_value()
                         } else {
                             None::<String>.to_value()
                         }

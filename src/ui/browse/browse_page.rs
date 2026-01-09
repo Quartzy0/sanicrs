@@ -17,10 +17,12 @@ use relm4::prelude::*;
 use relm4::AsyncComponentSender;
 use std::rc::Rc;
 use color_thief::Color;
+use relm4::adw::gdk;
 use uuid::Uuid;
 use crate::icon_names;
 use crate::ui::artist_object::ArtistObject;
-use crate::ui::item_list::{ItemListInit, ItemListWidget};
+use crate::ui::info_dialog;
+use crate::ui::item_list::{ItemListInit, ItemListWidget, ItemType};
 use crate::ui::song_object::{PositionState, SongObject};
 
 pub struct BrowsePageWidget {
@@ -442,6 +444,25 @@ impl AsyncComponent for BrowsePageWidget {
                     .downcast_ref::<ListItem>()
                     .expect("Needs to be ListItem");
                 list_item.set_child(Some(&vbox));
+                
+                let ctrl = gtk::GestureClick::builder()
+                    .button(3)
+                    .build();
+                ctrl.connect_pressed(clone!(
+                    #[weak]
+                    list_item,
+                    #[weak]
+                    vbox,
+                    move |_controller, _btn, x, y| {
+                        let item = list_item.item().expect("Expected ListItem to have item");
+                        let id: String = item.property("id");
+                        let menu = info_dialog::make_popup_menu(ItemType::Album, id);
+                        menu.set_parent(&vbox);
+                        menu.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+                        menu.popup();
+                    }
+                ));
+                vbox.add_controller(ctrl);
 
                 play_btn.connect_clicked(clone!(
                     #[weak]
@@ -512,6 +533,22 @@ impl AsyncComponent for BrowsePageWidget {
                     cbox.set_halign(Align::Fill);
                     cbox.set_hexpand(true);
                     cbox.set_hexpand_set(true);
+                    let ctrl = gtk::GestureClick::builder()
+                        .button(3)
+                        .build();
+                    ctrl.connect_pressed(clone!(
+                        #[weak]
+                        cbox,
+                        #[strong(rename_to=id)]
+                        album.id(),
+                        move |_controller, _btn, x, y| {
+                            let menu = info_dialog::make_popup_menu(ItemType::Album, id.clone());
+                            menu.set_parent(&cbox);
+                            menu.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+                            menu.popup();
+                        }
+                    ));
+                    cbox.add_controller(ctrl);
                     let cover_picture = CoverPicture::new(model.cover_cache.clone(), CoverSize::Large);
                     cover_picture.set_cover_id(album.cover_art_id());
                     cover_picture.add_css_class("shadowed");

@@ -341,6 +341,19 @@ impl Song {
         }
     }
 
+    pub fn artists_no_markup(&self) -> String {
+        match self.artists.as_ref() {
+            Some(artists) => {
+                artists
+                    .iter()
+                    .map(|a| a.name.clone())
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            }
+            None => self.display_artists.clone().unwrap_or(self.artist.clone().unwrap_or("Unknown artist".to_string()))
+        }
+    }
+
     pub fn is_starred(&self) -> bool {
         self.starred.borrow().is_some()
     }
@@ -361,6 +374,19 @@ impl Album {
         }
     }
 
+    pub fn artists_no_markup(&self) -> String {
+        match self.artists.as_ref() {
+            Some(artists) => {
+                artists
+                    .iter()
+                    .map(|a| a.name.clone())
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            }
+            None => self.display_artists.clone().unwrap_or(self.artist.clone().unwrap_or("Unknown artist".to_string()))
+        }
+    }
+
     pub fn is_starred(&self) -> bool {
         self.starred.borrow().is_some()
     }
@@ -370,6 +396,28 @@ impl Artist {
     pub fn is_starred(&self) -> bool {
         self.starred.borrow().is_some()
     }
+}
+
+pub fn duration_display_str(duration: &Duration) -> String {
+    let mut secs = duration.as_secs();
+    let mut mins = secs / 60;
+    let hrs = mins / 60;
+    mins = mins % 60;
+    secs = secs % 60;
+    let mut str = String::new();
+    if hrs != 0 {
+        str.push_str(&hrs.to_string());
+        str.push_str("h ");
+        str.push_str(&mins.to_string());
+        str.push_str("m ");
+    } else if mins != 0 {
+        str.push_str(&mins.to_string());
+        str.push_str("m ");
+    }
+    str.push_str(&secs.to_string());
+    str.push_str("s");
+
+    str
 }
 
 impl SubsonicError {

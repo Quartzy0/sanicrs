@@ -54,6 +54,10 @@ impl ArtistObject {
     pub fn set_starred(&self, val: bool) {
         self.set_property("starred", val.to_value());
     }
+    
+    pub fn get_inner(&self) -> Option<Artist> {
+        self.imp().artist.borrow().clone()
+    }
 }
 
 mod imp {

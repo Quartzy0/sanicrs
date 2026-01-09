@@ -266,6 +266,7 @@ impl PlayerInfo {
         println!("Playing: {}", song.song.title);
         self.gst_player.set_uri(Some(&self.client.stream_get_url(&song.song.id, None, None, None, None, Some(true), None)));
         self.gst_player.play();
+        self.set_set_volume();
 
         Ok(Some(song.clone()))
     }

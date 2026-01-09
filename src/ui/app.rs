@@ -12,7 +12,7 @@ use gtk::prelude::GtkWindowExt;
 use libsecret::Schema;
 use mpris_server::{LocalPlayerInterface, LocalServer};
 use relm4::abstractions::Toaster;
-use relm4::actions::{AccelsPlus, RelmAction, RelmActionGroup};
+use relm4::actions::{AccelsPlus, ActionName, EmptyType, RelmAction, RelmActionGroup};
 use relm4::adw::{glib as glib, Breakpoint, BreakpointConditionLengthType, LengthUnit};
 use relm4::adw::glib::{clone};
 use relm4::adw::gtk::CssProvider;
@@ -28,6 +28,7 @@ use std::rc::Rc;
 use crate::{APP_ID, VERSION_STR};
 use crate::ui::bottom_bar::{BottomBar, BottomBarOut};
 use crate::ui::header_bar::HeaderBar;
+use crate::ui::info_dialog::{InfoDialogUpdate, InfoDialogWidget};
 
 const BG_COLORS: usize = 4;
 
@@ -40,6 +41,7 @@ pub struct Model {
     settings: Settings,
     preferences_view: LazyCell<AsyncController<PreferencesWidget>, Box<dyn FnOnce() -> AsyncController<PreferencesWidget>>>,
     toaster: Toaster,
+    info_dialog_connector: AsyncConnector<InfoDialogWidget>,
     mpris_player: Rc<LocalServer<MprisPlayer>>,
     random_songs_dialog: AsyncConnector<RandomSongsDialog>,
     artist_cache: ArtistCache,
@@ -51,7 +53,7 @@ pub struct Model {
     current_view_colors: Vec<Option<[Color; BG_COLORS]>>
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum AppMsg {
     CurrentColorschemeChange(Option<Vec<Color>>),
     PushViewColors(Option<Vec<Color>>),
@@ -75,6 +77,13 @@ pub enum AppMsg {
     ViewSong(String),
     ShowRandomSongsDialog,
     ViewArtist(String),
+    ViewSongInfo(String),
+    ViewAlbumInfo(String),
+    ViewArtistInfo(String),
+    PlaySong(String),
+    PlayAlbum(String),
+    QueueSong(String),
+    QueueAlbum(String),
 }
 
 pub type Init = (
@@ -119,6 +128,13 @@ relm4::new_stateless_action!(pub PreviousAction, WindowActionGroup, "previous");
 relm4::new_stateful_action!(pub ViewArtistAction, WindowActionGroup, "artist", String, u8);
 relm4::new_stateful_action!(pub ViewAlbumAction, WindowActionGroup, "album", String, u8);
 relm4::new_stateful_action!(pub ViewSongAction, WindowActionGroup, "song", String, u8);
+relm4::new_stateful_action!(pub ViewSongInfo, WindowActionGroup, "info.song", String, u8);
+relm4::new_stateful_action!(pub ViewAlbumInfo, WindowActionGroup, "info.album", String, u8);
+relm4::new_stateful_action!(pub ViewArtistInfo, WindowActionGroup, "info.artist", String, u8);
+relm4::new_stateful_action!(pub PlaySong, WindowActionGroup, "play.song", String, u8);
+relm4::new_stateful_action!(pub PlayAlbum, WindowActionGroup, "play.album", String, u8);
+relm4::new_stateful_action!(pub QueueSong, WindowActionGroup, "queue.song", String, u8);
+relm4::new_stateful_action!(pub QueueAlbum, WindowActionGroup, "queue.album", String, u8);
 
 #[relm4::component(pub async)]
 impl AsyncComponent for Model {
@@ -250,6 +266,8 @@ impl AsyncComponent for Model {
             .forward(sender.input_sender(), |msg| match msg {
                 BottomBarOut::ShowSong => AppMsg::ShowSong,
             });
+        let info_dialog_connector= InfoDialogWidget::builder()
+            .launch(server.clone());
         let random_songs_dialog = RandomSongsDialog::builder().launch((server.clone(), init.3.clone()));
         let preferences_view: LazyCell<AsyncController<PreferencesWidget>, Box<dyn FnOnce() -> AsyncController<PreferencesWidget>>>
             = LazyCell::new(Box::new(clone!(
@@ -281,6 +299,7 @@ impl AsyncComponent for Model {
             settings: init.3,
             preferences_view,
             toaster: Toaster::default(),
+            info_dialog_connector,
             mpris_player: server,
             artist_cache: init.7,
             album_cache: init.2,
@@ -320,77 +339,24 @@ impl AsyncComponent for Model {
                     .present(relm4::main_adw_application().active_window().as_ref())
             }
         ));
-        let action: RelmAction<PreferencesAction> = RelmAction::new_stateless(clone!(
-            #[strong]
-            sender,
-            move |_| {
-                sender.input(AppMsg::ShowPreferences);
-            }
-        ));
-        let quit_action: RelmAction<QuitAction> = RelmAction::new_stateless(clone!(
-            #[strong]
-            sender,
-            move |_| {
-                sender.input(AppMsg::Quit);
-            }
-        ));
-        let show_tracklist_action: RelmAction<ShowTracklistAction> = RelmAction::new_stateless(clone!(
-            #[strong]
-            sender,
-            move |_| {
-                sender.input(AppMsg::ToggleSidebar);
-            }
-        ));
-        let show_randoms_action: RelmAction<ShowRandomSongsAction> = RelmAction::new_stateless(clone!(
-            #[strong]
-            sender,
-            move |_| {
-                sender.input(AppMsg::ShowRandomSongsDialog);
-            }
-        ));
-        let playpause_action: RelmAction<PlayPauseAction> = RelmAction::new_stateless(clone!(
-            #[strong]
-            sender,
-            move |_| {
-                sender.input(AppMsg::PlayPause);
-            }
-        ));
+        let action: RelmAction<PreferencesAction> = Self::message_action_stateless(&sender, AppMsg::ShowPreferences);
+        let quit_action: RelmAction<QuitAction> = Self::message_action_stateless(&sender, AppMsg::Quit);
+        let show_tracklist_action: RelmAction<ShowTracklistAction> = Self::message_action_stateless(&sender, AppMsg::ToggleSidebar);
+        let show_randoms_action: RelmAction<ShowRandomSongsAction> = Self::message_action_stateless(&sender, AppMsg::ShowRandomSongsDialog);
+        let playpause_action: RelmAction<PlayPauseAction> = Self::message_action_stateless(&sender, AppMsg::PlayPause);
         relm4::main_application().set_accelerators_for_action::<PlayPauseAction>(&["space"]);
-        let view_artist_action: RelmAction<ViewArtistAction> = RelmAction::new_stateful_with_target_value(&0, clone!(
-            #[strong]
-            sender,
-            move |_, _state, value| {
-                sender.input(AppMsg::ViewArtist(value));
-            }
-        ));
-        let view_album_action: RelmAction<ViewAlbumAction> = RelmAction::new_stateful_with_target_value(&0, clone!(
-            #[strong]
-            sender,
-            move |_, _state, value| {
-                sender.input(AppMsg::ViewAlbum(value, None));
-            }
-        ));
-        let view_song_action: RelmAction<ViewSongAction> = RelmAction::new_stateful_with_target_value(&0, clone!(
-            #[strong]
-            sender,
-            move |_, _state, value| {
-                sender.input(AppMsg::ViewSong(value));
-            }
-        ));
-        let next_action: RelmAction<NextAction> = RelmAction::new_stateless(clone!(
-            #[strong]
-            sender,
-            move |_| {
-                sender.input(AppMsg::Next);
-            }
-        ));
-        let previous_action: RelmAction<PreviousAction> = RelmAction::new_stateless(clone!(
-            #[strong]
-            sender,
-            move |_| {
-                sender.input(AppMsg::Previous);
-            }
-        ));
+        let view_artist_action: RelmAction<ViewArtistAction> = Self::message_action_state_with_value(&sender, |value| AppMsg::ViewArtist(value));
+        let view_album_action: RelmAction<ViewAlbumAction> = Self::message_action_state_with_value(&sender, |value| AppMsg::ViewAlbum(value, None));
+        let view_song_action: RelmAction<ViewSongAction> = Self::message_action_state_with_value(&sender, |value| AppMsg::ViewSong(value));
+        let next_action: RelmAction<NextAction> = Self::message_action_stateless(&sender, AppMsg::Next);
+        let previous_action: RelmAction<PreviousAction> = Self::message_action_stateless(&sender, AppMsg::Previous);
+        let view_song_info_action: RelmAction<ViewSongInfo> = Self::message_action_state_with_value(&sender, |value| AppMsg::ViewSongInfo(value));
+        let view_album_info_action: RelmAction<ViewAlbumInfo> = Self::message_action_state_with_value(&sender, |value| AppMsg::ViewAlbumInfo(value));
+        let view_artist_info_action: RelmAction<ViewArtistInfo> = Self::message_action_state_with_value(&sender, |value| AppMsg::ViewArtistInfo(value));
+        let play_song_action: RelmAction<PlaySong> = Self::message_action_state_with_value(&sender, |value| AppMsg::PlaySong(value));
+        let play_album_action: RelmAction<PlayAlbum> = Self::message_action_state_with_value(&sender, |value| AppMsg::PlayAlbum(value));
+        let queue_song_action: RelmAction<QueueSong> = Self::message_action_state_with_value(&sender, |value| AppMsg::QueueSong(value));
+        let queue_album_action: RelmAction<QueueAlbum> = Self::message_action_state_with_value(&sender, |value| AppMsg::QueueAlbum(value));
 
         let mut group = RelmActionGroup::<WindowActionGroup>::new();
         group.add_action(about_action);
@@ -404,6 +370,13 @@ impl AsyncComponent for Model {
         group.add_action(view_song_action);
         group.add_action(next_action);
         group.add_action(previous_action);
+        group.add_action(view_song_info_action);
+        group.add_action(view_album_info_action);
+        group.add_action(view_artist_info_action);
+        group.add_action(play_song_action);
+        group.add_action(play_album_action);
+        group.add_action(queue_song_action);
+        group.add_action(queue_album_action);
         group.register_for_widget(&root);
 
         widgets.search_bar.connect_entry(&widgets.search_entry);
@@ -623,12 +596,90 @@ impl AsyncComponent for Model {
                     Err(err) => self.mpris_player.imp().send_error(err),
                 };
             },
+            AppMsg::ViewSongInfo(id) => {
+                let result = self.song_cache.get_song(&id).await;
+                match result {
+                    Ok(song) => player.send_res(self.info_dialog_connector.sender().send(InfoDialogUpdate::Song {
+                        song
+                    }).map_err(|_| "Error sending info to dialog".into())),
+                    Err(err) => player.send_error(err),
+                }
+                self.info_dialog_connector.widget().present(relm4::main_adw_application().active_window().as_ref());
+            },
+            AppMsg::ViewAlbumInfo(id) => {
+                let result = self.album_cache.get_album(&id).await;
+                match result {
+                    Ok(album) => player.send_res(self.info_dialog_connector.sender().send(InfoDialogUpdate::Album {
+                        album
+                    }).map_err(|_| "Error sending info to dialog".into())),
+                    Err(err) => player.send_error(err),
+                }
+                self.info_dialog_connector.widget().present(relm4::main_adw_application().active_window().as_ref());
+            },
+            AppMsg::ViewArtistInfo(id) => {
+                let result = self.artist_cache.get_artist(&id).await;
+                match result {
+                    Ok(artist) => player.send_res(self.info_dialog_connector.sender().send(InfoDialogUpdate::Artist {
+                        artist
+                    }).map_err(|_| "Error sending info to dialog".into())),
+                    Err(err) => player.send_error(err),
+                }
+                self.info_dialog_connector.widget().present(relm4::main_adw_application().active_window().as_ref());
+            },
+            AppMsg::PlaySong(id) => {
+                let result = self.song_cache.get_song(&id).await;
+                match result {
+                    Ok(song) => player.send_res(player.set_song(song).await.map_err(|_| "Error setting song".into())),
+                    Err(err) => player.send_error(err),
+                }
+            },
+            AppMsg::PlayAlbum(id) => {
+                player.send_res(player.queue_album(id, None, true).await.map_err(|_| "Error setting album".into()))
+            },
+            AppMsg::QueueSong(id) => {
+                let result = self.song_cache.get_song(&id).await;
+                match result {
+                    Ok(song) => player.send_res(player.queue_songs(vec![song], None, false).await.map_err(|_| "Error queueing song".into())),
+                    Err(err) => player.send_error(err),
+                }
+            },
+            AppMsg::QueueAlbum(id) => {
+                player.send_res(player.queue_album(id, None, false).await.map_err(|_| "Error queueing album".into()))
+            },
         };
         self.update_view(widgets, sender);
     }
 }
 
 impl Model {
+    fn message_action_stateless<T>(sender: & AsyncComponentSender<Self>, msg: AppMsg) -> RelmAction<T>
+    where T: ActionName,
+          <T as ActionName>::State: EmptyType,
+          <T as ActionName>::Target: EmptyType
+    {
+        RelmAction::new_stateless(clone!(
+            #[strong]
+            sender,
+            #[strong]
+            msg,
+            move |_| {
+                sender.input(msg.clone());
+            }
+        ))
+    }
+
+    fn message_action_state_with_value<T, E>(sender: & AsyncComponentSender<Self>, func: impl Fn(T::Target) -> AppMsg + 'static) -> RelmAction<T>
+    where T: ActionName<State = u8, Target = E>, E: FromVariant + ToVariant
+    {
+        RelmAction::new_stateful_with_target_value(&0, clone!(
+            #[strong]
+            sender,
+            move |_, _state, value| {
+                sender.input(func(value));
+            }
+        ))
+    }
+
     fn vec_to_arr(colors: Option<Vec<Color>>) -> Option<[Color; BG_COLORS]> {
         if let Some(color) = colors {
             let mut it = color.into_iter().cycle();

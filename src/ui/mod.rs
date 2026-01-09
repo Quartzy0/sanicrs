@@ -13,3 +13,4 @@ pub mod bottom_bar;
 mod header_bar;
 pub mod artist_object;
 mod item_list;
+mod info_dialog;

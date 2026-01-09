@@ -60,6 +60,10 @@ impl AlbumObject {
     pub fn set_starred(&self, val: bool) {
         self.set_property("starred", val.to_value());
     }
+
+    pub fn get_inner(&self) -> Option<Album> {
+        self.imp().album.borrow().clone()
+    }
 }
 
 mod imp {
@@ -70,7 +74,7 @@ mod imp {
     use relm4::once_cell::sync::Lazy;
     use std::cell::{RefCell};
     use std::ops::Deref;
-    use crate::opensonic::types::Album;
+    use crate::opensonic::types::{duration_display_str, Album};
 
     // Object holding the state
     #[derive(Default)]
@@ -128,25 +132,7 @@ mod imp {
                     "cover-art-id" => album.cover_art.to_value(),
                     "song-count" => album.song_count.to_value(),
                     "duration" => {
-                        let mut secs = album.duration.as_secs();
-                        let mut mins = secs / 60;
-                        let hrs = mins / 60;
-                        mins = mins % 60;
-                        secs = secs % 60;
-                        let mut str = String::new();
-                        if hrs != 0 {
-                            str.push_str(&hrs.to_string());
-                            str.push_str("h ");
-                            str.push_str(&mins.to_string());
-                            str.push_str("m ");
-                        } else if mins != 0 {
-                            str.push_str(&mins.to_string());
-                            str.push_str("m ");
-                        }
-                        str.push_str(&secs.to_string());
-                        str.push_str("s");
-
-                        str.to_value()
+                        duration_display_str(&album.duration).to_value()
                     },
                     "starred" => album.is_starred().to_value(),
                     _ => unimplemented!(),
