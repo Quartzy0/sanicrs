@@ -158,7 +158,7 @@ impl AsyncComponent for BottomBar {
                         set_spacing: 10,
 
                         gtk::Button {
-                            set_icon_name: icon_names::PREVIOUS_REGULAR,
+                            set_icon_name: icon_names::shipped::PREVIOUS_REGULAR,
                             add_css_class: "track-action-btn",
                             set_tooltip: "Play previous",
                             ActionablePlus::set_stateless_action::<PreviousAction>: &(),
@@ -167,9 +167,9 @@ impl AsyncComponent for BottomBar {
                             &gtk::Button {
                                 #[watch]
                                 set_icon_name: match model.mpris_player.imp().info().playback_status() {
-                                    PlayState::Paused => icon_names::PLAY,
-                                    PlayState::Playing => icon_names::PAUSE,
-                                    _ => icon_names::STOP,
+                                    PlayState::Paused => icon_names::shipped::PLAY,
+                                    PlayState::Playing => icon_names::shipped::PAUSE,
+                                    _ => icon_names::shipped::STOP,
                                 },
                                 set_tooltip: "Toggle playback",
                                 add_css_class: "track-action-btn",
@@ -182,7 +182,7 @@ impl AsyncComponent for BottomBar {
                             }
                         },
                         gtk::Button {
-                            set_icon_name: icon_names::NEXT_REGULAR,
+                            set_icon_name: icon_names::shipped::NEXT_REGULAR,
                             add_css_class: "track-action-btn",
                             set_tooltip: "Play next",
                             ActionablePlus::set_stateless_action::<NextAction>: &(),
@@ -260,14 +260,14 @@ impl AsyncComponent for BottomBar {
                             set_spacing: 5,
 
                             gtk::Button {
-                                set_icon_name: icon_names::LIST,
+                                set_icon_name: icon_names::shipped::LIST,
                                 set_tooltip: "Show queue",
                                 set_valign: Align::Center,
                                 set_halign: Align::Center,
                                 ActionablePlus::set_stateless_action::<ShowTracklistAction>: &(),
                             },
                             gtk::Button {
-                                set_icon_name: icon_names::ADD_REGULAR,
+                                set_icon_name: icon_names::shipped::ADD_REGULAR,
                                 set_tooltip: "Add random songs",
                                 set_valign: Align::Center,
                                 set_halign: Align::Center,
@@ -277,7 +277,7 @@ impl AsyncComponent for BottomBar {
                             gtk::ScaleButton {
                                 #[watch]
                                 set_value: model.mpris_player.imp().info().volume(),
-                                set_icons: &[icon_names::SPEAKER_0, icon_names::SPEAKER_3, icon_names::SPEAKER_1, icon_names::SPEAKER_2],
+                                set_icons: &[icon_names::shipped::SPEAKER_0, icon_names::shipped::SPEAKER_3, icon_names::shipped::SPEAKER_1, icon_names::shipped::SPEAKER_2],
                                 set_adjustment: &gtk::Adjustment::new(1.0, 0.0, 1.0, 0.05, 0.0, 0.0),
                                 set_valign: Align::Center,
                                 set_halign: Align::Center,
@@ -296,9 +296,9 @@ impl AsyncComponent for BottomBar {
                                 &gtk::Button {
                                     #[watch]
                                     set_icon_name: match model.mpris_player.imp().info().playback_status() {
-                                        PlayState::Paused => icon_names::PLAY,
-                                        PlayState::Playing => icon_names::PAUSE,
-                                        _ => icon_names::STOP,
+                                        PlayState::Paused => icon_names::shipped::PLAY,
+                                        PlayState::Playing => icon_names::shipped::PAUSE,
+                                        _ => icon_names::shipped::STOP,
                                     },
                                     set_tooltip: "Toggle playback",
                                     add_css_class: "track-action-btn",
@@ -313,7 +313,7 @@ impl AsyncComponent for BottomBar {
                                 }
                             },
                             gtk::Button {
-                                set_icon_name: icon_names::NEXT_REGULAR,
+                                set_icon_name: icon_names::shipped::NEXT_REGULAR,
                                 set_tooltip: "Play next",
                                 add_css_class: "track-action-btn",
                                 set_valign: Align::Center,
@@ -369,9 +369,9 @@ impl AsyncComponent for BottomBar {
             .chain_closure::<String>(closure!(
                 move |_: Option<Object>, active: bool| {
                     if active {
-                        icon_names::HEART_FILLED
+                        icon_names::shipped::HEART_FILLED
                     } else {
-                        icon_names::HEART_OUTLINE_THIN
+                        icon_names::shipped::HEART_OUTLINE_THIN
                     }
                 }
             ))

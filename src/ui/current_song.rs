@@ -79,7 +79,7 @@ impl AsyncComponent for CurrentSong {
                 append = if model.song_info.is_some() {
                     &gtk::Overlay {
                         add_overlay = &gtk::Button {
-                            set_icon_name: icon_names::SUBTITLES2,
+                            set_icon_name: icon_names::shipped::SUBTITLES2,
                             connect_clicked => CurrentSongMsg::ToggleLyrics,
                             set_halign: Align::End,
                             set_valign: Align::Start,
@@ -170,7 +170,7 @@ impl AsyncComponent for CurrentSong {
                     set_spacing: 10,
 
                     gtk::Button {
-                        set_icon_name: icon_names::PREVIOUS_REGULAR,
+                        set_icon_name: icon_names::shipped::PREVIOUS_REGULAR,
                         add_css_class: "track-action-btn",
                         set_tooltip: "Play previous",
                         ActionablePlus::set_stateless_action::<PreviousAction>: &(),
@@ -179,9 +179,9 @@ impl AsyncComponent for CurrentSong {
                         &gtk::Button {
                             #[watch]
                             set_icon_name: match model.mpris_player.imp().info().playback_status() {
-                                PlayState::Paused => icon_names::PLAY,
-                                PlayState::Playing => icon_names::PAUSE,
-                                _ => icon_names::STOP,
+                                PlayState::Paused => icon_names::shipped::PLAY,
+                                PlayState::Playing => icon_names::shipped::PAUSE,
+                                _ => icon_names::shipped::STOP,
                             },
                             add_css_class: "track-action-btn",
                             add_css_class: "track-playpause-btn",
@@ -194,7 +194,7 @@ impl AsyncComponent for CurrentSong {
                         }
                     },
                     gtk::Button {
-                        set_icon_name: icon_names::NEXT_REGULAR,
+                        set_icon_name: icon_names::shipped::NEXT_REGULAR,
                         add_css_class: "track-action-btn",
                         set_tooltip: "Play next",
                         ActionablePlus::set_stateless_action::<NextAction>: &(),
@@ -253,12 +253,12 @@ impl AsyncComponent for CurrentSong {
                         set_spacing: 3,
 
                         gtk::Button {
-                            set_icon_name: icon_names::LIST,
+                            set_icon_name: icon_names::shipped::LIST,
                             set_tooltip: "Show queue",
                             ActionablePlus::set_stateless_action::<ShowTracklistAction>: &(),
                         },
                         gtk::Button {
-                            set_icon_name: icon_names::ADD_REGULAR,
+                            set_icon_name: icon_names::shipped::ADD_REGULAR,
                             set_tooltip: "Add random songs",
                             ActionablePlus::set_stateless_action::<ShowRandomSongsAction>: &(),
                         }
@@ -273,9 +273,9 @@ impl AsyncComponent for CurrentSong {
                         gtk::Button {
                             #[watch]
                             set_icon_name: match model.mpris_player.imp().info().loop_status() {
-                                LoopStatus::None => icon_names::PLAYLIST_CONSECUTIVE,
-                                LoopStatus::Track => icon_names::PLAYLIST_REPEAT_SONG,
-                                LoopStatus::Playlist => icon_names::PLAYLIST_REPEAT,
+                                LoopStatus::None => icon_names::shipped::PLAYLIST_CONSECUTIVE,
+                                LoopStatus::Track => icon_names::shipped::PLAYLIST_REPEAT_SONG,
+                                LoopStatus::Playlist => icon_names::shipped::PLAYLIST_REPEAT,
                             },
                             set_tooltip: "Cycle loop status",
                             connect_clicked[mplayer] => move |_this| {
@@ -290,7 +290,7 @@ impl AsyncComponent for CurrentSong {
                         },
                         #[name = "shuffle_toggle"]
                         gtk::ToggleButton {
-                            set_icon_name: icon_names::PLAYLIST_SHUFFLE,
+                            set_icon_name: icon_names::shipped::PLAYLIST_SHUFFLE,
                             set_tooltip: "Shuffle",
                             connect_clicked[mplayer] => move |_this| {
                                 mplayer.imp().set_shuffle(!mplayer.imp().info().shuffled());
@@ -310,7 +310,7 @@ impl AsyncComponent for CurrentSong {
                         gtk::ScaleButton {
                             #[watch]
                             set_value: model.mpris_player.imp().info().volume(),
-                            set_icons: &[icon_names::SPEAKER_0, icon_names::SPEAKER_3, icon_names::SPEAKER_1, icon_names::SPEAKER_2],
+                            set_icons: &[icon_names::shipped::SPEAKER_0, icon_names::shipped::SPEAKER_3, icon_names::shipped::SPEAKER_1, icon_names::shipped::SPEAKER_2],
                             set_adjustment: &gtk::Adjustment::new(1.0, 0.0, 1.0, 0.05, 0.0, 0.0),
                             connect_value_changed[mplayer] => move |_btn, val| {
                                 mplayer.imp().set_volume(val);
@@ -430,9 +430,9 @@ impl AsyncComponent for CurrentSong {
             .chain_closure::<String>(closure!(
                 move |_: Option<Object>, active: bool| {
                     if active {
-                        icon_names::HEART_FILLED
+                        icon_names::shipped::HEART_FILLED
                     } else {
-                        icon_names::HEART_OUTLINE_THIN
+                        icon_names::shipped::HEART_OUTLINE_THIN
                     }
                 }
             ))

@@ -117,7 +117,7 @@ impl AsyncComponent for ViewAlbumWidget {
                                 gtk::Button{
                                     set_valign: Align::Center,
                                     set_halign: Align::Center,
-                                    set_icon_name: icon_names::PLAY,
+                                    set_icon_name: icon_names::shipped::PLAY,
                                     connect_clicked[mpris_player, album_id] => move |_| {
                                         let value = mpris_player.clone();
                                         let id = album_id.clone();
@@ -132,7 +132,7 @@ impl AsyncComponent for ViewAlbumWidget {
                                 gtk::Button {
                                     set_valign: Align::Center,
                                     set_halign: Align::Center,
-                                    set_icon_name: icon_names::ADD_REGULAR,
+                                    set_icon_name: icon_names::shipped::ADD_REGULAR,
                                     connect_clicked[mpris_player, album_id] => move |_| {
                                        let value = mpris_player.clone();
                                        let id = album_id.clone();

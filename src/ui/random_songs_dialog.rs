@@ -62,7 +62,7 @@ impl AsyncComponent for RandomSongsDialog {
                             #[wrap(Some)]
                             set_child = &adw::ButtonContent {
                                 set_label: "Play",
-                                set_icon_name: icon_names::PLAY,
+                                set_icon_name: icon_names::shipped::PLAY,
                             },
                             set_hexpand: true,
                             set_tooltip: "Play random songs",
@@ -80,7 +80,7 @@ impl AsyncComponent for RandomSongsDialog {
                             #[wrap(Some)]
                             set_child = &adw::ButtonContent {
                                 set_label: "Add",
-                                set_icon_name: icon_names::ADD_REGULAR,
+                                set_icon_name: icon_names::shipped::ADD_REGULAR,
                             },
                             set_hexpand: true,
                             set_tooltip: "Add random songs",

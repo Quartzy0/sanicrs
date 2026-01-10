@@ -172,6 +172,11 @@ impl PlayerInfo {
 
     pub fn set_playstate(&self, new_state: PlayState) {
         self.play_state.set(new_state);
+        if new_state == PlayState::Playing {
+            // For some reason gstreamer seems to randomly forget these settings when playing new songs
+            self.set_set_volume();
+            self.load_rg_from_settings();
+        }
     }
 
     pub fn load_rg_from_settings(&self) {
@@ -266,7 +271,6 @@ impl PlayerInfo {
         println!("Playing: {}", song.song.title);
         self.gst_player.set_uri(Some(&self.client.stream_get_url(&song.song.id, None, None, None, None, Some(true), None)));
         self.gst_player.play();
-        self.set_set_volume();
 
         Ok(Some(song.clone()))
     }

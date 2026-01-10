@@ -4,36 +4,36 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-tokio = { version = "1.47.1", default-features = false, features = [
+tokio = { version = "1.49.0", default-features = false, features = [
     "fs",
     "macros"
 ] }
-reqwest = { version = "0.12.23", features = ["blocking", "json"] }
+reqwest = { version = "0.13.1", features = ["blocking", "json", "form"] }
 format-url = "0.6.2"
-serde_json = "1.0.143"
-serde_with = { version = "3.14.0" }
-serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.149"
+serde_with = { version = "3.16.1" }
+serde = { version = "1.0.228", features = ["derive"] }
 md5 = "0.8.0"
 rand = "0.9.2"
 async-channel = { version = "2.5.0" }
-zbus = { version = "5.9.0", default-features = false, features = [
+zbus = { version = "5.13.0", default-features = false, features = [
     "blocking-api",
     "tokio"
 ] }
-relm4 = { version = "0.9.1", default-features = false, features = [
+relm4 = { version = "0.10.1", default-features = false, features = [
     "libadwaita",
     "gnome_47",
     "adw",
     "macros",
 ] }
-relm4-icons = "0.10.0-beta.2"
-uuid = { version = "1.18.1", default-features = false, features = ["v4"] }
+relm4-icons = "0.10.1"
+uuid = { version = "1.19.0", default-features = false, features = ["v4"] }
 color-thief = "0.2.2"
-libsecret = "0.7.0"
-mpris-server = { version = "0.9.0" }
+libsecret = "0.8.0"
+mpris-server = { version = "0.9.0", git = "https://gitea.quartzy.me/quartzy/mpris-server.git", branch = "update-zbus" }
 evicting_cache_map = {version = "0.5.0"}
-gstreamer = "0.24.2"
-gstreamer-play = "0.24.2"
+gstreamer = "0.24.4"
+gstreamer-play = "0.24.4"
 
 [build-dependencies]
-relm4-icons-build = "0.10.0-beta.2"
+relm4-icons-build = "0.10.1"

@@ -103,8 +103,8 @@ impl<T: IsA<Object> + ObjectType, I: IntoIterator<Item = T> + 'static, F: 'stati
         } else {
             ItemType::Artist
         };
-        let has_duration = first.and_then(|f| Some(f.has_property("duration", Some(String::static_type())))).unwrap_or(false);
-        let has_filetype = first.and_then(|f| Some(f.has_property("filetype", Some(String::static_type())))).unwrap_or(false);
+        let has_duration = first.and_then(|f| Some(f.has_property_with_type("duration", String::static_type()))).unwrap_or(false);
+        let has_filetype = first.and_then(|f| Some(f.has_property_with_type("filetype", String::static_type()))).unwrap_or(false);
 
         factory.connect_setup(clone!(
             #[strong(rename_to = cover_cache)]
@@ -164,7 +164,7 @@ impl<T: IsA<Object> + ObjectType, I: IntoIterator<Item = T> + 'static, F: 'stati
 
                 if let Some(play_fn) = &play_fn {
                     let play_btn = gtk::Button::builder()
-                        .icon_name(icon_names::PLAY)
+                        .icon_name(icon_names::shipped::PLAY)
                         .valign(Align::Center)
                         .halign(Align::Center)
                         .tooltip_text("Play")

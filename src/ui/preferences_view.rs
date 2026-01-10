@@ -45,7 +45,7 @@ impl AsyncComponent for PreferencesWidget {
 
             add = &adw::PreferencesPage {
                 set_title: "Player",
-                set_icon_name: Some(icon_names::MUSIC_NOTE_SINGLE),
+                set_icon_name: Some(icon_names::shipped::MUSIC_NOTE_SINGLE),
 
                 adw::PreferencesGroup {
 
@@ -68,7 +68,7 @@ impl AsyncComponent for PreferencesWidget {
             },
             add = &adw::PreferencesPage {
                 set_title: "Server",
-                set_icon_name: Some(icon_names::NETWORK_SERVER),
+                set_icon_name: Some(icon_names::shipped::NETWORK_SERVER),
 
                 adw::PreferencesGroup {
                     set_title: "Authenticaion",

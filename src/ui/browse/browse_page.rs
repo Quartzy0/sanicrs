@@ -402,7 +402,7 @@ impl AsyncComponent for BrowsePageWidget {
                 overlay_box.set_halign(Align::End);
                 overlay_box.set_valign(Align::End);
                 let play_btn = gtk::Button::new();
-                play_btn.set_icon_name(icon_names::PLAY);
+                play_btn.set_icon_name(icon_names::shipped::PLAY);
                 play_btn.add_css_class("flat");
                 play_btn.set_tooltip("Play");
                 let like_btn = gtk::ToggleButton::new();
@@ -413,9 +413,9 @@ impl AsyncComponent for BrowsePageWidget {
                     .chain_closure::<String>(closure!(
                         move |_: Option<Object>, active: bool| {
                             if active {
-                                icon_names::HEART_FILLED
+                                icon_names::shipped::HEART_FILLED
                             } else {
-                                icon_names::HEART_OUTLINE_THIN
+                                icon_names::shipped::HEART_OUTLINE_THIN
                             }
                         }
                     ))
@@ -604,7 +604,7 @@ impl AsyncComponent for BrowsePageWidget {
                     song_count.set_valign(Align::End);
                     song_count.set_halign(Align::End);
                     let play_btn = gtk::Button::builder()
-                        .icon_name(icon_names::PLAY)
+                        .icon_name(icon_names::shipped::PLAY)
                         .tooltip_text("Play")
                         .build();
                     play_btn.set_valign(Align::Center);
@@ -632,8 +632,8 @@ impl AsyncComponent for BrowsePageWidget {
                     ));
 
                     let btns_hbox = gtk::Box::new(Orientation::Horizontal, 10);
-                    let next_btn = gtk::Button::from_icon_name(icon_names::RIGHT);
-                    let prev_btn = gtk::Button::from_icon_name(icon_names::LEFT);
+                    let next_btn = gtk::Button::from_icon_name(icon_names::shipped::RIGHT);
+                    let prev_btn = gtk::Button::from_icon_name(icon_names::shipped::LEFT);
                     next_btn.add_css_class("pill");
                     next_btn.set_tooltip("Next item");
                     prev_btn.add_css_class("pill");

@@ -30,13 +30,13 @@ impl WidgetTemplate for AlbumList {
                     set_spacing: 5,
                     #[name = "back_btn"]
                     gtk::Button {
-                        set_icon_name: icon_names::LEFT,
+                        set_icon_name: icon_names::shipped::LEFT,
                         add_css_class: "no-bg",
                         add_css_class: "pill",
                     },
                     #[name = "forward_btn"]
                     gtk::Button {
-                        set_icon_name: icon_names::RIGHT,
+                        set_icon_name: icon_names::shipped::RIGHT,
                         add_css_class: "no-bg",
                         add_css_class: "pill",
                     }

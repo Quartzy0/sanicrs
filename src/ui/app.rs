@@ -463,7 +463,7 @@ impl AsyncComponent for Model {
                 dialog.set_default_response(Some("now"));
                 dialog.set_response_appearance("now", adw::ResponseAppearance::Destructive);
                 dialog.set_close_response("later");
-                dialog.choose(root, None::<&gio::Cancellable>, clone!(
+                dialog.choose(Some(root.widget_ref()), None::<&gio::Cancellable>, clone!(
                     #[strong(rename_to = sndr)]
                     sender,
                     move |response| {
@@ -499,7 +499,7 @@ impl AsyncComponent for Model {
                         dialog.add_responses(&[("ok", "Ok")]);
                         dialog.set_default_response(Some("ok"));
                         dialog.set_close_response("ok");
-                        dialog.choose(&root, None::<&gio::Cancellable>, move |_| {});
+                        dialog.choose(Some(&root), None::<&gio::Cancellable>, move |_| {});
                     }
                 ));
                 self.toaster.add_toast(toast);

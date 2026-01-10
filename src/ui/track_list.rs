@@ -174,15 +174,15 @@ impl AsyncComponent for TrackListWidget {
                 .valign(Align::Start)
                 .halign(Align::End)
                 .build();
-            let up_btn = gtk::Button::from_icon_name(icon_names::UP_SMALL);
+            let up_btn = gtk::Button::from_icon_name(icon_names::shipped::UP_SMALL);
             up_btn.add_css_class("no-bg");
             up_btn.set_tooltip("Move up");
-            let down_btn = gtk::Button::from_icon_name(icon_names::DOWN_SMALL);
+            let down_btn = gtk::Button::from_icon_name(icon_names::shipped::DOWN_SMALL);
             down_btn.add_css_class("no-bg");
             down_btn.set_tooltip("Move down");
             btn_vbox.append(&up_btn);
             btn_vbox.append(&down_btn);
-            let del_btn = gtk::Button::from_icon_name(icon_names::CROSS_SMALL_CIRCLE_OUTLINE);
+            let del_btn = gtk::Button::from_icon_name(icon_names::shipped::CROSS_SMALL_CIRCLE_OUTLINE);
             del_btn.add_css_class("destructive-action");
             del_btn.add_css_class("osd");
             del_btn.add_css_class("circular");

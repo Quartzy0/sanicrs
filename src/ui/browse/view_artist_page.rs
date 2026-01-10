@@ -99,7 +99,7 @@ impl AsyncComponent for ViewArtistWidget {
                                     set_valign: Align::Center,
                                     add_css_class: "circular",
                                     add_css_class: "midicon",
-                                    set_icon_name: icon_names::PLAY,
+                                    set_icon_name: icon_names::shipped::PLAY,
                                     set_width_request: 48,
                                     set_height_request: 48,
                                     set_tooltip: "Play artist's albums",
@@ -204,9 +204,9 @@ impl AsyncComponent for ViewArtistWidget {
             .chain_closure::<String>(closure!(
                         move |_: Option<Object>, active: bool| {
                             if active {
-                                icon_names::HEART_FILLED
+                                icon_names::shipped::HEART_FILLED
                             } else {
-                                icon_names::HEART_OUTLINE_THIN
+                                icon_names::shipped::HEART_OUTLINE_THIN
                             }
                         }
                     ))
