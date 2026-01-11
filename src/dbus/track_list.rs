@@ -151,6 +151,32 @@ impl MprisPlayer {
         }
         Ok(())
     }
+
+    pub async fn queue_similar_songs(&self) -> Result<bool, Box<dyn Error>> {
+        let similar_songs = {
+            let track_list = self.player_ref.track_list().borrow();
+            let last_song = track_list.get_songs().last();
+            if let Some(last_song) = last_song {
+                self.song_cache.get_similar_songs(last_song.song.id.as_str(), Some(10)).await?
+            } else {
+                vec![] // No last song means empty queue
+            }
+        };
+        if similar_songs.is_empty() { 
+            return Ok(false); // No new songs added
+        }
+        self.queue_songs(similar_songs, Some(0), false).await?;
+        Ok(true)
+    }
+    
+    pub async fn queue_similar_songs_for_id(&self, id: &str, clear_previous: bool, count: Option<u32>) -> Result<(), Box<dyn Error>> {
+        let similar_songs = self.song_cache.get_similar_songs(id, count).await?;
+        if similar_songs.is_empty() {
+            return Ok(()); // No new songs added
+        }
+        self.queue_songs(similar_songs, None, clear_previous).await?;
+        Ok(())
+    }
 }
 
 impl LocalTrackListInterface for MprisPlayer{

@@ -7,12 +7,14 @@ use relm4::adw::gtk::{Align, Orientation};
 use relm4::adw::prelude::*;
 use relm4::prelude::*;
 use std::rc::Rc;
+use relm4::actions::ActionablePlus;
 use relm4::adw::glib::{clone, closure, Object};
 use relm4::adw::glib as glib;
 use relm4::gtk::pango::WrapMode;
 use relm4::gtk::Widget;
 use crate::icon_names;
 use crate::ui::album_object::AlbumObject;
+use crate::ui::app::PlayArtistRadio;
 use crate::ui::item_list::{ItemListInit, ItemListWidget};
 
 #[derive(Debug)]
@@ -94,6 +96,17 @@ impl AsyncComponent for ViewArtistWidget {
                                 set_halign: Align::End,
                                 set_spacing: 10,
 
+                                gtk::Button {
+                                    set_halign: Align::Center,
+                                    set_valign: Align::Center,
+                                    add_css_class: "circular",
+                                    add_css_class: "midicon",
+                                    set_icon_name: icon_names::shipped::MUSIC_ARTIST,
+                                    set_width_request: 48,
+                                    set_height_request: 48,
+                                    set_tooltip: "Play artist mix",
+                                    ActionablePlus::set_action::<PlayArtistRadio>: artist.id(),
+                                },
                                 gtk::Button {
                                     set_halign: Align::Center,
                                     set_valign: Align::Center,

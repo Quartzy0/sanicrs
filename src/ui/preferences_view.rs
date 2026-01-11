@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::u32;
 
 use libsecret::{password_store_future, Schema};
 use relm4::adw::prelude::PreferencesPageExt;
@@ -59,10 +58,15 @@ impl AsyncComponent for PreferencesWidget {
                     adw::SwitchRow {
                         set_title: "Remain open in background"
                     },
-                     #[name = "scrobble"]
+                    #[name = "scrobble"]
                     adw::SwitchRow {
                         set_title: "Should scrobble",
                         set_subtitle: "Should the client report playback of the current song to the server"
+                    },
+                    #[name = "continuous_play"]
+                    adw::SwitchRow {
+                        set_title: "Continuous play",
+                        set_subtitle: "Automatically add similar songs to play queue when the end is reached"
                     },
                 }
             },
@@ -71,7 +75,7 @@ impl AsyncComponent for PreferencesWidget {
                 set_icon_name: Some(icon_names::shipped::NETWORK_SERVER),
 
                 adw::PreferencesGroup {
-                    set_title: "Authenticaion",
+                    set_title: "Authentication",
                     set_description: Some("(requires restart)"),
 
                     #[name = "server_url"]
@@ -123,6 +127,7 @@ impl AsyncComponent for PreferencesWidget {
         widgets.replay_gain.set_selected(model.settings.value("replay-gain-mode").get::<u8>().unwrap() as u32);
         model.settings.bind("stay-in-background", &widgets.open_in_bg, "active").build();
         model.settings.bind("should-scrobble", &widgets.scrobble, "active").build();
+        model.settings.bind("continuous-play", &widgets.continuous_play, "active").build();
 
         AsyncComponentParts { model, widgets }
     }

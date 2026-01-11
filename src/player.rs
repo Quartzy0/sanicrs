@@ -33,14 +33,15 @@ pub enum ReplayGainMode {
 
 #[derive(Debug)]
 pub struct PlayerSettings {
-    replay_gain_mode: ReplayGainMode,
-    volume: f64,
-    should_scrobble: bool,
+    pub replay_gain_mode: ReplayGainMode,
+    pub volume: f64,
+    pub should_scrobble: bool,
+    pub continuous_play: bool,
 }
 
 impl Default for PlayerSettings {
     fn default() -> Self {
-        Self { replay_gain_mode: Default::default(), volume: 1.0, should_scrobble: true }
+        Self { replay_gain_mode: Default::default(), volume: 1.0, should_scrobble: true, continuous_play: false }
     }
 }
 
@@ -58,6 +59,7 @@ impl PlayerSettings {
         };
         self.volume = settings.value("volume").try_get()?;
         self.should_scrobble = settings.boolean("should-scrobble");
+        self.continuous_play = settings.boolean("continuous-play");
 
         Ok(())
     }
@@ -73,7 +75,7 @@ pub struct PlayerInfo {
     rg_volume: gstreamer::Element,
     play_state: Cell<PlayState>,
 
-    settings: RefCell<PlayerSettings>,
+    pub settings: RefCell<PlayerSettings>,
 }
 
 impl PlayerInfo {
@@ -271,6 +273,10 @@ impl PlayerInfo {
         println!("Playing: {}", song.song.title);
         self.gst_player.set_uri(Some(&self.client.stream_get_url(&song.song.id, None, None, None, None, Some(true), None)));
         self.gst_player.play();
+
+        if self.settings.borrow().should_scrobble {
+            self.client.scrobble(song.song.id.as_str(), Some(false)).await?;
+        }
 
         Ok(Some(song.clone()))
     }

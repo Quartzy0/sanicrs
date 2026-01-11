@@ -84,6 +84,7 @@ pub enum AppMsg {
     PlayAlbum(String),
     QueueSong(String),
     QueueAlbum(String),
+    PlayArtistRadio(String)
 }
 
 pub type Init = (
@@ -135,6 +136,7 @@ relm4::new_stateful_action!(pub PlaySong, WindowActionGroup, "play.song", String
 relm4::new_stateful_action!(pub PlayAlbum, WindowActionGroup, "play.album", String, u8);
 relm4::new_stateful_action!(pub QueueSong, WindowActionGroup, "queue.song", String, u8);
 relm4::new_stateful_action!(pub QueueAlbum, WindowActionGroup, "queue.album", String, u8);
+relm4::new_stateful_action!(pub PlayArtistRadio, WindowActionGroup, "artist.radio", String, u8);
 
 #[relm4::component(pub async)]
 impl AsyncComponent for Model {
@@ -357,6 +359,7 @@ impl AsyncComponent for Model {
         let play_album_action: RelmAction<PlayAlbum> = Self::message_action_state_with_value(&sender, |value| AppMsg::PlayAlbum(value));
         let queue_song_action: RelmAction<QueueSong> = Self::message_action_state_with_value(&sender, |value| AppMsg::QueueSong(value));
         let queue_album_action: RelmAction<QueueAlbum> = Self::message_action_state_with_value(&sender, |value| AppMsg::QueueAlbum(value));
+        let play_artist_radio: RelmAction<PlayArtistRadio> = Self::message_action_state_with_value(&sender, |value| AppMsg::PlayArtistRadio(value));
 
         let mut group = RelmActionGroup::<WindowActionGroup>::new();
         group.add_action(about_action);
@@ -377,6 +380,7 @@ impl AsyncComponent for Model {
         group.add_action(play_album_action);
         group.add_action(queue_song_action);
         group.add_action(queue_album_action);
+        group.add_action(play_artist_radio);
         group.register_for_widget(&root);
 
         widgets.search_bar.connect_entry(&widgets.search_entry);
@@ -404,7 +408,7 @@ impl AsyncComponent for Model {
     ) {
         let player = self.mpris_player.imp();
         match message {
-            AppMsg::Next => player.next().await.unwrap(),
+            AppMsg::Next => player.send_res_fdo(player.next().await),
             AppMsg::Previous => player.previous().await.unwrap(),
             AppMsg::PlayPause => player.play_pause().await.unwrap(),
             AppMsg::PushViewColors(colors) => {
@@ -645,6 +649,9 @@ impl AsyncComponent for Model {
             },
             AppMsg::QueueAlbum(id) => {
                 player.send_res(player.queue_album(id, None, false).await.map_err(|_| "Error queueing album".into()))
+            },
+            AppMsg::PlayArtistRadio(id) => {
+                player.send_res(player.queue_similar_songs_for_id(id.as_str(), true, None).await);
             },
         };
         self.update_view(widgets, sender);

@@ -41,7 +41,8 @@ fn main() {
             "heart-filled",
             "heart-outline-thin",
             "right",
-            "left"
+            "left",
+            "music-artist"
         ],
     );
 }

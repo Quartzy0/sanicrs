@@ -300,7 +300,16 @@ impl LocalPlayerInterface for MprisPlayer {
     async fn next(&self) -> fdo::Result<()> {
         let s = self.player_ref.next().await;
         if s.is_none() { // Track list over
-            self.pause();
+            if self.player_ref.settings.borrow().continuous_play {
+                let new_added = self.queue_similar_songs()
+                    .await
+                    .map_err(|e| fdo::Error::Failed(format!("Error adding similar songs to queue: {e}")))?;
+                if new_added {
+                    return Ok(()); // Metadata and all messages already get sent by queue_similar_songs function
+                }
+            } else {
+                self.pause();
+            }
         }
         self.send_cs_msg(CurrentSongMsg::SongUpdate(s));
         self.send_tl_msg(TrackListMsg::TrackChanged(None));

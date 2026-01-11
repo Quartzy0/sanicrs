@@ -37,5 +37,9 @@
         <default>0</default>
         <summary>The amount of random songs to add that is prefilled in the entry field in the random songs dialog.</summary>
     </key>
+  <key name="continuous-play" type="b">
+      <default>false</default>
+      <summary>Automatically add similar songs when the end of the play queue is reached.</summary>
+  </key>
   </schema>
 </schemalist>
